@@ -786,12 +786,7 @@ bool TankClient::try_recv(connection *const c)
 
                                 // TODO:
                                 // if msg == MSG_CONSUME, and len > threshold, then we could
-                                // instead of digesting the whole thing into our buffer, we instead
-                                // consider this a stream and process fully retrieved bundles as they come.
-                                // This way, we can e.g reuse the input buffer if we have read to end of it, or if the offset is > e.g 20MB, we can
-                                // delete th content we have parsed etc.
-                                // Also, say we want to stream 500GB worth of e.g mySQL log events, we won't need to first get them all into one buffer, and then process them.
-                                // This shouldn't be very hard to implement -- we 'd need a state meachine, and a new consumer/sink
+				// https://github.com/phaistos-networks/TANK/issues/1
                                 if (p + len > e)
                                 {
 					// no need to e.g b->reserve(len) here

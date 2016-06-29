@@ -319,7 +319,6 @@ struct topic_partition
         topic *owner{nullptr};
         uint16_t localBrokerId; // for convenience
 
-        // see Replica.scala
         struct replica
             : public RefCounted<replica>
         {
