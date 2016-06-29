@@ -782,7 +782,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         }
                         else if (r.second.Eq(_S("swap")))
                         {
-                                // Ref: log/Log.scala
+				// TODO:
                         }
                         else if (r.second.Eq(_S("log")))
                         {
