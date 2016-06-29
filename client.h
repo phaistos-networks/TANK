@@ -1,9 +1,3 @@
-// 	TANK client
-// 
-// http://kafka.apache.org/0100/javadoc/index.html?org/apache/kafka/clients/producer/KafkaProducer.html
-// http://kafka.apache.org/0100/javadoc/index.html?org/apache/kafka/clients/consumer/KafkaConsumer.html
-// KAFKA:/clients/src/main/java/org/apache/kafka/clients e.g clients/consumer/KafkaConsumer.java (see internals/Fetcher.java)
-// TODO: come up with a higher level client design based on Kafka's design (an abstraction on top of this design)
 #pragma once
 #include <compress.h>
 #include <network.h>
@@ -361,7 +355,6 @@ class TankClient
                 return produceAcks;
         }
 
-        // See kafka/pollOnce() impl.
         void poll(uint32_t timeoutMS);
 
         uint32_t produce(const std::vector<std::pair<topic_partition, std::vector<std::pair<strwlen32_t, uint64_t>>>> &req);

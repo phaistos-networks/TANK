@@ -1,6 +1,3 @@
-// https://cloud.google.com/dataflow/
-// http://kafka.apache.org/documentation.html#messages
-// https://cwiki.apache.org/confluence/display/KAFKA/A+Guide+To+The+Kafka+Protocol
 #pragma once
 #include <fs.h>
 #include <network.h>
@@ -265,7 +262,6 @@ struct topic_partition_log
 
         lookup_res read_cur(const uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum);
 
-        // Kafka/log/Log.scala#read() => Kafka/log/LogSegment.scala#read()
         lookup_res range_for(uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum);
 
         append_res append_bundle(const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt);
@@ -743,7 +739,6 @@ class Service
                 return nullptr;
         }
 
-        // KafkaApis.scala#handleFetchRequest()
         bool process_consume(connection *const c, const uint8_t *p, const size_t len);
 
         bool process_replica_reg(connection *const c, const uint8_t *p, const size_t len);
@@ -763,7 +758,6 @@ class Service
 
         bool register_consumer_wait(connection *const c, const uint32_t requestId, const uint64_t maxWait, const uint32_t minBytes, topic_partition **const partitions, const uint32_t totalPartitions);
 
-        // Kafka/server/ReplicaManager.scala#appendToLocal
         bool process_publish(connection *const c, const uint8_t *p, const size_t len);
 
         bool process_msg(connection *const c, const uint8_t msg, const uint8_t *const data, const size_t len);

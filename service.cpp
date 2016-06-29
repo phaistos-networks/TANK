@@ -311,7 +311,6 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         }
         else if (absSeqNum < firstAvailableSeqNum)
         {
-                // Kafka throws an exception
                 lock.unlock_shared();
 
                 if (trace)
@@ -637,7 +636,6 @@ void topic_partition::consider_append_res(append_res &res, Switch::vector<wait_c
 append_res topic_partition::append_bundleToLeader(const uint8_t *const bundle, const size_t bundleLen, const uint8_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL)
 {
         // TODO: route to leader
-        // Kafka/Partition.scala#appendMessagesToLeader()
         try
         {
                 auto res = log_->append_bundle(bundle, bundleLen, bundleMsgsCnt);
@@ -659,10 +657,6 @@ append_res topic_partition::append_bundleToLeader(const uint8_t *const bundle, c
 
 lookup_res topic_partition::read_from_local(const bool fetchOnlyFromLeader, const bool fetchOnlyComittted, const uint64_t absSeqNum, const uint32_t fetchSize)
 {
-        // TODO: route to leader
-        // Kafka/ReplicaManager#readFRomLocalLog()
-        //const uint64_t maxAbsSeqNum = fetchOnlyComittted ? leader.highWatermMark : 0;
-        //const uint64_t maxAbsSeqNum = fetchOnlyComittted ? log_->lastAssignedSeqNum : 0;
         const uint64_t maxAbsSeqNum = UINT64_MAX;
 
         if (trace)
@@ -1120,8 +1114,6 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                         // - fetch request does not want to wait
                         // - fetch request does not require any data, or we already have some data to provide to the client
                         // - one or more errors were generated
-                        //
-                        // TODO: maybe delay response even if we have some data, but data length < minBytes (See kafka/ReplicationManager.scala#fetchMessages() impl)
                         *(uint32_t *)respHeader->At(sizeOffset) = respHeader->length() - sizeOffset - sizeof(uint32_t) + sum;
                         *(uint32_t *)respHeader->At(headerSizeOffset) = respHeader->length() - headerSizeOffset - sizeof(uint32_t);
 
