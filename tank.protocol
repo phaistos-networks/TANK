@@ -1,0 +1,129 @@
+All requests and responses begin with
+{
+	msg id:u8
+	payload size:u32
+}
+the payload is described below, for each different request or response supported
+
+
+FetchResp:
+	header length:u32
+	header
+	{
+		request id:u32
+		topics count:u8
+
+		topic
+		{
+			name:str8
+			total partitions:u8
+
+			if a u16 follows == UINT16_MAX, then this topic wasn't found and
+			no partitions are encoded in this response for this topic
+
+			partition
+			{
+				partitionid:u16
+				error: u8
+
+				if (error == 0xff) then this partition is unknown, and following fields are not encoded in this response/topic/partition
+
+
+				base absolute sequence number of the first message in the first bundle returned:u64
+				high water mark: absolute sequence number of the latest committed message for this (topic, partition):u64
+				chunk length:u32
+
+				if (error == 0x1) this is a boundary check failure, and firstAvailSeqNum:u64 is serialized here
+			} ..
+		} ..
+	}
+
+	chunks
+	{
+
+	}
+
+
+	One chunk for each (topic, partition) specified in the header, one after the other.
+	Each chunk's length is also specified in the header.
+	Each chunk contains 1+ bundles. 
+	The first message in the first bundle's absolute sequence number is specified in the header; you
+	can determine each successive message's absolute sequence number in all other messages in the chunk by incrementing that
+	A chunk may contain a partial bundle (because the server returns upto requested bytes, without performing boundaries check, most of the time)
+	so you need to be careful about it.
+	See databus.encoding for bundle's schema
+
+
+
+ReplicaIDReq:
+	replicaId:u16
+
+	Immediately upon connecting, the first request from a replica(follower) should be a replica ID req, where the replica ID is advertised to the node
+
+
+
+FetchReq:
+	client version:u16
+	request id:u32
+	client id:str8
+	max wait:u64
+	min bytes:u32
+	topics count:u8
+
+		topic
+		{
+			name:str8
+			partitions count:u8
+
+			partition
+			{
+				partition id:u16
+				absulute sequence number: u64
+				fetch size:u32
+
+		} ..
+
+
+PublishReq:
+	client version:u16
+	request id:u32
+	client id:str8
+	required acks:u8
+	ack. timeout:u32
+	topics cnt:u8
+
+		topic
+		{
+			topic name:str8
+			partitions cnt:u8
+
+			partition
+			{
+				partition id:u16
+				bundle length:varint
+
+				bundle:...
+			} ..
+
+		} ..
+
+
+PublishResp:
+	request id:u32
+	For each topic specified in the matching publish request:
+		{
+			error:u8
+
+			if (error == 0xff)
+			{
+				// topic not found
+			}
+			else
+			{
+				// otherwise error is the error for the first partition of the topic specified in the matching publish request
+				for (int i{1}; i != reqTopicPartitinsCnt; ++i)
+				{
+					error for next partition in topic for this request:u8
+				}
+			}
+		}

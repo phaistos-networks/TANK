@@ -1,0 +1,64 @@
+# Log Segment
+Each log segment is comprised of an append-only log file and its append-only index.
+
+## Log Segment - log
+bundles, one after the other
+
+bundle
+{
+	flags:u8			00000000
+				       (6, 8]: compression codec
+				       (2, 6): total messages in message set, if total <= 15
+				       (0, 2]; unused
+
+	if total messages in message set > 15
+		total messages in messages set:variant
+
+
+	message set, one message after the other. The message set as
+	a whole may be compressed using the codec encoded in flags
+	
+	msg
+	{
+		flags:u8
+		creation ts in milliseconds:u64
+
+		if (flags&MSGFLAGS_HAVE_KEY)
+		{
+			keyLen:u8
+			key:...
+		}
+
+		message length:variant
+		data: ...
+	}
+}
+
+A bundle with a single message in its message set of length 100 then, assuming it's not compressed, requires about 13 bytes of overhead, and 8 of those are for the timestamp
+
+
+
+There is no need to encode the actual sequence number of either the individual messages, or of the first message
+in the bundle's message set, because we can always read starting from an index (real sequence, file offset), so in e.g
+responses, we return the absolute sequence number of the first message of the first bundle returned, and we just increment that.
+
+We could also done away with encoding the messages set total messages count, and only provide it in a produce request,  and that would work out just fine (even for wait_ctx design/impl, because we keep track of that in that state ), but we chose to keep it because:
+- we can encode a number of messages <= 15 in the flags, and most budnles will be around that size in messages count
+- It is cheap enough to do it even if we don't get to encode that in flags, because we use varint encoding
+- It makes some optimizations possible; the client can skip bundles quickly if the the desired offsets lie after the bundle parsed, and the server can quickly
+	determine the last recorded sequence number without having to parse the actual messages(incl.the need to decompress them if they are compressed)
+
+
+The followers need to determine the message set size (in messages), and this is not trivial if we they are waiting for the new bundles to published. An alternative impl. would track the last published bundle absolute sequence number and messages size and specify that in the response to consumers explicitly.
+
+
+
+## Log Segment - index
+entries of
+{
+	relative sequence number:u32
+	absolute file physical offset:u32
+}
+
+relative sequence number is the absolute sequence number of the first message in a bundle's message set - absolute base sequence number of the log segment (which in turn is the absolute sequence number of the
+first message of the first bundle in the log)
