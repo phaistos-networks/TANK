@@ -87,11 +87,19 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
                         for (uint32_t i{0}; i != it->msgsCnt; ++i)
                         {
                                 const auto &m = it->msgs[i];
+                                const uint8_t flags = m.key ? 0x1 : 0;
 
-                                b.Serialize(uint8_t(0));             // msg.flags
-                                b.Serialize(m.second);               // msg.ts
-                                b.SerializeVarUInt32(m.first.len);   // msg.len
-                                b.Serialize(m.first.p, m.first.len); // msg.data
+                                b.Serialize(uint8_t(flags));
+                                b.Serialize(m.ts);
+
+                                if (m.key)
+                                {
+                                        b.Serialize(m.key.len);
+                                        b.Serialize(m.key.p, m.key.len);
+                                }
+
+                                b.SerializeVarUInt32(m.content.len);
+                                b.Serialize(m.content.p, m.content.len);
                         }
 
                         if (!compressionCodec)
@@ -320,7 +328,6 @@ bool TankClient::shutdown(connection *const c, const uint32_t ref, const bool fa
         }
         c->pendingProduce.clear();
 
-
         if (auto b = std::exchange(c->inB, nullptr))
                 put_buffer(b);
 
@@ -431,6 +438,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
         const auto clientReqId = reqInfo.clientReqId;
         const auto *const reqSeqNums = reqInfo.seqNums;
         uint8_t reqOffsetIdx{0};
+        strwlen8_t key;
 
         Defer({ free(reqInfo.seqNums); });
 
@@ -635,6 +643,32 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         const auto ts = *(uint64_t *)p; // msg.timestamp
                                         p += sizeof(uint64_t);
 
+                                        if (msgFlags & 0x1)
+                                        {
+                                                if (p + sizeof(uint8_t) > endOfMsgSet || (p + (*p) + sizeof(uint8_t) > endOfMsgSet))
+                                                {
+                                                        SLog("Boundaries\n");
+                                                        goto next;
+                                                }
+                                                else
+                                                {
+                                                        const auto keyLen = *p++;
+
+                                                        if (p + keyLen > endOfMsgSet)
+                                                        {
+                                                                SLog("Boundaries\n");
+                                                                goto next;
+                                                        }
+                                                        else
+                                                        {
+                                                                key.Set((char *)p, keyLen);
+                                                                p += keyLen;
+                                                        }
+                                                }
+                                        }
+                                        else
+                                                key.Unset();
+
                                         if (!Compression::UnpackUInt32Check(p, endOfMsgSet))
                                         {
                                                 if (trace)
@@ -665,7 +699,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                 if (trace)
                                                         SLog("( flags = ", msgFlags, ", ts = ", ts, ", len = ", len, ", msgAbsSeqNum = ", msgAbsSeqNum, " [", content, ", requestedSeqNum = ", requestedSeqNum, "] )\n");
 
-                                                consumptionList.push_back({msgAbsSeqNum, ts, content});
+                                                consumptionList.push_back({msgAbsSeqNum, ts, key, content});
                                         }
                                         else
                                         {
@@ -743,7 +777,7 @@ bool TankClient::try_recv(connection *const c)
         for (;;)
         {
                 if (unlikely(ioctl(fd, FIONREAD, &n) == -1))
-			throw Switch::system_error("ioctl() failed:", strerror(errno));
+                        throw Switch::system_error("ioctl() failed:", strerror(errno));
 
                 b->reserve(n);
                 r = read(fd, b->End(), b->Capacity());
@@ -785,12 +819,12 @@ bool TankClient::try_recv(connection *const c)
 
                                 // TODO:
                                 // if msg == MSG_CONSUME, and len > threshold, then we could
-				// https://github.com/phaistos-networks/TANK/issues/1
+                                // https://github.com/phaistos-networks/TANK/issues/1
                                 if (p + len > e)
                                 {
-					// no need to e.g b->reserve(len) here
-					// because we already reserve()d FIONREAD result earlier and this could also
-					// cause problems with references in e.g consumedPartitionContent that derefs buffer's data
+                                        // no need to e.g b->reserve(len) here
+                                        // because we already reserve()d FIONREAD result earlier and this could also
+                                        // cause problems with references in e.g consumedPartitionContent that derefs buffer's data
                                         return true;
                                 }
                                 else if (!process(c, msg, p, len))
@@ -1009,10 +1043,7 @@ void TankClient::poll(uint32_t timeoutMS)
 }
 
 uint32_t TankClient::produce(const std::vector<
-                             std::pair<
-                                 topic_partition,
-                                 std::vector<
-                                     std::pair<strwlen32_t, uint64_t>>>> &req)
+                             std::pair<topic_partition, std::vector<msg>>> &req)
 {
         auto &out = produceOut;
 
@@ -1116,7 +1147,7 @@ int main(int argc, char *argv[])
                 client.produce(
                     {{{"bp_activity", 0},
                       {{"world of warcraft GAME", Timings::Milliseconds::SysTime()},
-                       {"Amiga 1200 Computer", Timings::Milliseconds::SysTime()},
+                       {"Amiga 1200 Computer", Timings::Milliseconds::SysTime(), "computer"},
                        {"lord of the rings, the return of the king", Timings::Milliseconds::SysTime()}}}});
         }
 
@@ -1130,7 +1161,7 @@ int main(int argc, char *argv[])
 
                         for (const auto mit : it.msgs)
                         {
-                                Print(mit->content, "(", mit->seqNum, ")\n");
+                                Print("[", mit->key, "]:", mit->content, "(", mit->seqNum, ")\n");
                         }
                 }
 

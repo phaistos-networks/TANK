@@ -1318,6 +1318,7 @@ bool Service::process_publish(connection *const c, const uint8_t *p, const size_
                         if (trace)
                         {
                                 static thread_local IOBuffer decompressionBuf;
+				strwlen8_t key;
 
                                 if (codec)
                                 {
@@ -1335,6 +1336,15 @@ bool Service::process_publish(connection *const c, const uint8_t *p, const size_
                                         const auto flags = *p++;
                                         const auto msgTs = *(uint64_t *)p;
                                         p += sizeof(uint64_t);
+
+					if (flags&0x1)
+					{
+						key.Set((char *)p + 1, *p);
+						p+=key.len + sizeof(uint8_t);
+					}
+					else
+						key.Unset();
+
                                         const auto msgLen = Compression::UnpackUInt32(p);
 
                                         (void)flags;
@@ -1342,7 +1352,7 @@ bool Service::process_publish(connection *const c, const uint8_t *p, const size_
                                         msgContent.Set((char *)p, msgLen);
                                         p += msgLen;
 
-                                        Print(msgContent, "\n");
+                                        Print("[", key, "] = ", msgContent, "\n");
                                 }
                         }
 

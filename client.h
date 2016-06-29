@@ -18,6 +18,13 @@ class TankClient
 
         };
 
+	struct msg
+	{
+		strwlen32_t content;
+		uint64_t ts;
+		strwlen8_t key;
+	};
+
 	using topic_partition = std::pair<strwlen8_t, uint16_t>;
 
         struct outgoing_payload
@@ -44,7 +51,7 @@ class TankClient
                 Switch::endpoint leader;
                 strwlen8_t topic;
                 uint16_t partitionId;
-                const std::pair<strwlen32_t, uint64_t> *msgs;
+		const msg *msgs;
                 size_t msgsCnt;
         };
 
@@ -125,6 +132,7 @@ class TankClient
         {
                 uint64_t seqNum;
                 uint64_t ts;
+		strwlen8_t key;
                 strwlen32_t content;
         };
 
@@ -357,7 +365,7 @@ class TankClient
 
         void poll(uint32_t timeoutMS);
 
-        uint32_t produce(const std::vector<std::pair<topic_partition, std::vector<std::pair<strwlen32_t, uint64_t>>>> &req);
+        uint32_t produce(const std::vector<std::pair<topic_partition, std::vector<msg>>> &req);
 
         Switch::endpoint leader_for(const strwlen8_t topic, const uint16_t partition)
         {
