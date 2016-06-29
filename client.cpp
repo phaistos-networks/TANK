@@ -115,7 +115,6 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
                                         throw Switch::system_error("Failed to compress content");
 
                                 const auto compressedMsgSetLen = cmpBuf.length() - o;
-
                                 const auto offset = b.length();
 
                                 b.SerializeVarUInt32(compressedMsgSetLen + bundleHeaderLength);
