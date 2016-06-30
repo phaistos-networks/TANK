@@ -9,7 +9,8 @@ bundle
 	flags:u8			00000000
 				       (6, 8]: compression codec
 				       (2, 6): total messages in message set, if total <= 15
-				       (0, 2]; unused
+				       (1): unused
+				       (0): unused
 
 	if total messages in message set > 15
 		total messages in messages set:variant

@@ -75,8 +75,19 @@ struct fd_handle
 // we don't need to acquire a lock to access this
 struct ro_segment
 {
-        // the absolute sequence number of the first message in this commit log
+        // the absolute sequence number of the first message in this segment
         const uint64_t baseSeqNum;
+	// the absolute sequence number of the last message in this segment
+	// i.e this segment contains [baseSeqNum, lastAssignedSeqNum]
+	//
+	// Knowing the range of messages stored in a segment will make it trivial to identify requests for
+	// messages that are missing.  e.g if someone deletes an immutalbe segment(not the first, neither the last)
+	// and someone requests messages that were stored in that segment, then we'd know this is so, and maybe advance
+	// to the next available sequence number, or whatever else we think is appropriate(TODO:)
+	// This will also help with compactions, where we will need to rebuild a sparse topic
+	const uint64_t lastAvailSeqNum;
+
+
         Switch::shared_refptr<fd_handle> fdh;
         uint32_t fileSize;
 
@@ -90,12 +101,12 @@ struct ro_segment
                 index_record lastRecorded;
         } index;
 
-        ro_segment(const uint64_t absSeqNum)
-            : baseSeqNum{absSeqNum}
+        ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum)
+            : baseSeqNum{absSeqNum}, lastAvailSeqNum{lastAbsSeqNum}
         {
         }
 
-        ro_segment(const uint64_t absSeqNum, const strwlen32_t base);
+        ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, const strwlen32_t base);
 
         ~ro_segment()
         {
@@ -237,7 +248,7 @@ struct topic_partition_log
         struct
         {
                 size_t roSegmentsCnt{10};
-                size_t roSegmentsSize{512};
+                size_t roSegmentsSize{512'000};
                 size_t maxSegmentSize{256};
                 size_t indexInterval{512}; // Kafka's default is 4k
         } limits;
@@ -368,7 +379,7 @@ struct topic_partition
 
         void consider_append_res(append_res &res, Switch::vector<wait_ctx *> &waitCtxWorkL);
 
-        append_res append_bundleToLeader(const uint8_t *const bundle, const size_t bundleLen, const uint8_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL);
+        append_res append_bundle_to_leader(const uint8_t *const bundle, const size_t bundleLen, const uint8_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL);
 
         lookup_res read_from_local(const bool fetchOnlyFromLeader, const bool fetchOnlyComittted, const uint64_t absSeqNum, const uint32_t fetchSize);
 };

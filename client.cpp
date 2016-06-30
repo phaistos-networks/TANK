@@ -2,6 +2,27 @@
 
 static constexpr bool trace{false};
 
+uint8_t TankClient::choose_compression_codec(const msg *const msgs, const size_t msgsCnt)
+{
+	// arbitrary selection heuristic
+	if (msgsCnt > 512)
+		return 1;
+	else
+	{
+		size_t sum{0};
+
+		for (size_t i{0}; i != msgsCnt; ++i)
+		{
+			sum+=msgs[i].content.len;
+			if (sum > 1024 * 1024)
+				return 1;
+                }
+        }
+
+	return 0;
+}
+
+
 bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::endpoint leader, const produce_ctx *const produce, const size_t cnt)
 {
         auto payload = std::make_unique<outgoing_payload>();
@@ -34,7 +55,7 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
         {
                 const auto *it = produce + i;
                 const auto topic = it->topic;
-                const uint8_t compressionCodec{1};
+                const uint8_t compressionCodec = choose_compression_codec(it->msgs, it->msgsCnt);
                 uint8_t partitionsCnt{0};
 
                 b.Serialize(topic.len);
@@ -121,6 +142,8 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
 
                                 if (unlikely(!Compression::Compress(Compression::Algo::SNAPPY, b.At(msgSetOffset), b.length() - msgSetOffset, &cmpBuf)))
                                         throw Switch::system_error("Failed to compress content");
+
+				// TODO: if cmpBuf.length() > (b.length - msgSetOffset) don't use compressed content
 
                                 const auto compressedMsgSetLen = cmpBuf.length() - o;
                                 const auto offset = b.length();

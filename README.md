@@ -14,6 +14,7 @@ It will eventually support, among other features:
 - encryption (wire transfers and bundle serialization)
 - improved client and extended API
 - HTTP/1 and HTTP/2 REST APIs
+- compactions based on message key
 
 
 Features include:

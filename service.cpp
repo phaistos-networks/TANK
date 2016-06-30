@@ -6,11 +6,11 @@
 
 static constexpr bool trace{false};
 
-ro_segment::ro_segment(const uint64_t absSeqNum, const strwlen32_t base)
-    : baseSeqNum{absSeqNum}
+ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, const strwlen32_t base)
+    : baseSeqNum{absSeqNum}, lastAvailSeqNum{lastAbsSeqNum}
 {
         index.data = nullptr;
-        int fd = open(Buffer::build(base, "/", absSeqNum, ".log").data(), O_RDONLY | O_LARGEFILE);
+        int fd = open(Buffer::build(base, "/", absSeqNum, "-", lastAbsSeqNum, ".ilog").data(), O_RDONLY | O_LARGEFILE);
 
         if (fd == -1)
                 throw Switch::system_error("Failed to access log file");
@@ -114,7 +114,7 @@ std::pair<uint32_t, uint32_t> ro_segment::snapUp(const uint64_t absSeqNum) const
 // returns the file offset of that message(which is the end of file before
 // that message); also respects maxSize
 // TODO: read in 4k chunks/time or something more appropriate
-static uint32_t searchBeforeOffset(const uint64_t baseSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum, int fd, const uint32_t fileSize, uint32_t fileOffset)
+static uint32_t search_before_offset(const uint64_t baseSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum, int fd, const uint32_t fileSize, uint32_t fileOffset)
 {
         uint8_t buf[sizeof(uint32_t) + sizeof(uint32_t) + 4];
         auto o = fileOffset;
@@ -232,7 +232,7 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
                         ref = *it;
                 }
 
-                res.range.SetEnd(searchBeforeOffset(cur.baseSeqNum, maxSize, maxAbsSeqNum, cur.fdh->fd, cur.fileSize, ref.absPhysical));
+                res.range.SetEnd(search_before_offset(cur.baseSeqNum, maxSize, maxAbsSeqNum, cur.fdh->fd, cur.fileSize, ref.absPhysical));
         }
 
         if (res.range.len > maxSize)
@@ -351,7 +351,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
                         if (trace)
                                 SLog("maxAbsSeqNum = ", maxAbsSeqNum, " => ", r, "\n");
 
-                        range.SetEnd(searchBeforeOffset(f->baseSeqNum, maxSize, maxAbsSeqNum, f->fdh->fd, f->fileSize, r.second));
+                        range.SetEnd(search_before_offset(f->baseSeqNum, maxSize, maxAbsSeqNum, f->fdh->fd, f->fileSize, r.second));
                 }
 
                 if (range.len > maxSize)
@@ -401,7 +401,7 @@ void topic_partition_log::consider_ro_segments()
                 if (trace)
                         SLog(ansifmt::color_red, "Removing ", segment->baseSeqNum, ansifmt::reset, "\n");
 
-                basePath.append("/", segment->baseSeqNum, ".log");
+                basePath.append("/", segment->baseSeqNum, "-", segment->lastAvailSeqNum, ".ilog");
                 unlink(basePath.data());
                 basePath.SetLength(basePathLen);
                 basePath.append("/", segment->baseSeqNum, ".index");
@@ -423,6 +423,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 {
         lock.lock();
 
+	const auto savedLastAssignedSeqNum = lastAssignedSeqNum;
         const auto absSeqNum = lastAssignedSeqNum + 1;
 
         lastAssignedSeqNum += bundleMsgsCnt;
@@ -437,7 +438,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 if (cur.fileSize != UINT32_MAX)
                 {
                         auto newROFiles = std::make_unique<Switch::vector<ro_segment *>>();
-                        auto newROFile = std::make_unique<ro_segment>(cur.baseSeqNum);
+                        auto newROFile = std::make_unique<ro_segment>(cur.baseSeqNum, savedLastAssignedSeqNum);
 
                         const auto n = cur.fdh.use_count();
 
@@ -448,6 +449,14 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 
                         newROFile->index.fileSize = lseek64(cur.index.fd, 0, SEEK_END);
                         newROFile->index.lastRecorded.relSeqNum = newROFile->index.lastRecorded.absPhysical = 0;
+
+			// We now encode the [first,last] range into the filename for simplicity and future-proofing; we 'd like to
+			// support sparse sequence numbers space
+			if (rename(Buffer::build(basePath, "/", cur.baseSeqNum, ".log").data(), 
+				Buffer::build(basePath, "/", cur.baseSeqNum, "-", savedLastAssignedSeqNum, ".ilog").data()) == -1)
+			{
+				throw Switch::system_error("Failed to rename():", strerror(errno));
+			}
 
                         if (newROFile->index.fileSize)
                         {
@@ -633,7 +642,7 @@ void topic_partition::consider_append_res(append_res &res, Switch::vector<wait_c
         waitingListLock.unlock();
 }
 
-append_res topic_partition::append_bundleToLeader(const uint8_t *const bundle, const size_t bundleLen, const uint8_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL)
+append_res topic_partition::append_bundle_to_leader(const uint8_t *const bundle, const size_t bundleLen, const uint8_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL)
 {
         // TODO: route to leader
         try
@@ -657,7 +666,14 @@ append_res topic_partition::append_bundleToLeader(const uint8_t *const bundle, c
 
 lookup_res topic_partition::read_from_local(const bool fetchOnlyFromLeader, const bool fetchOnlyComittted, const uint64_t absSeqNum, const uint32_t fetchSize)
 {
-        const uint64_t maxAbsSeqNum = UINT64_MAX;
+	// TODO:
+	// For a multi-node configurations, maxAbsSeqNum should be set to the last committed absolute sequence number (i.e highwater mark)
+	// range_for() will make sure it won't return any data for messages with id >= maxAbsSeqNum
+	//
+	// search_before_offset() will need to access the segment log file though, and that may not be optimal; instead
+	// we may just want to provide the client with maxAbsSeqNum so that it will stop processing chunk bundles if it
+	// reaches messages id >= maxAbsSeqNum
+        const uint64_t maxAbsSeqNum{UINT64_MAX};
 
         if (trace)
                 SLog("Fetching log segment for partition ", idx, ", abs.sequence number ", absSeqNum, ", fetchSize ", fetchSize, ", maxAbsSeqNum = ", maxAbsSeqNum, "\n");
@@ -684,10 +700,10 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
         try
         {
                 auto partition = Switch::make_sharedref(new topic_partition());
-                Switch::vector<uint64_t> seqNums;
+		Switch::vector<std::pair<uint64_t, uint64_t>> roLogs;
+		uint64_t curLogSeqNum{0};
                 const strwlen32_t b(basePath, basePathLen);
                 int fd;
-                uint64_t cur{UINT64_MAX};
                 auto l = new topic_partition_log();
 
                 partition->distinctId = _atomic_inc_relaxed(&nextDistinctPartitionId);
@@ -774,9 +790,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
 
                         const auto r = name.Divided('.');
 
-                        if (!r.first.IsDigits())
-                                Print("Unexpected name ", name, "\n");
-                        else if (r.second.Eq(_S("index")))
+                        if (r.second.Eq(_S("index")))
                         {
                                 // accept
                         }
@@ -784,50 +798,62 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         {
 				// TODO:
                         }
+			else if (r.second.Eq(_S("ilog")))
+			{
+				// Immutable log
+				const auto repr = r.first.Divided('-');
+				const auto baseSeqNum = repr.first.AsUint64(), lastAvailSeqNum = repr.second.AsUint64();
+
+				roLogs.push_back({baseSeqNum, lastAvailSeqNum});
+			}
                         else if (r.second.Eq(_S("log")))
                         {
-                                const auto absSeqNum = r.first.AsUint64();
+				// current, mutable log(segment)
+				if (unlikely(!r.first.IsDigits()))
+					throw Switch::system_error("Unexpected name ", name);
+				else
+                                {
+                                        const auto seq = r.first.AsUint64();
 
-                                seqNums.push_back(absSeqNum);
+                                        require(seq);
+                                        require(!curLogSeqNum);
+                                        curLogSeqNum = seq;
+                                }
                         }
                         else
                                 Print("Unexpected name ", name, "\n");
                 }
 
-                if (seqNums.size())
-                {
-                        std::sort(seqNums.begin(), seqNums.end());
+		if (trace)
+			SLog("roLogs.size() = ", roLogs.size(), ", curLogSeqNum = ", curLogSeqNum, "\n");
 
-                        l->firstAvailableSeqNum = seqNums.front();
+		if (roLogs.size())
+		{
+                        std::sort(roLogs.begin(), roLogs.end(), [](const auto &a, const auto &b) {
+                                return a.first < b.first;
+                        });
 
-                        cur = seqNums.back();
-                        seqNums.pop();
+			l->firstAvailableSeqNum = roLogs.front().first;
+			l->roSegments = new Switch::vector<ro_segment *>();
 
-                        if (seqNums.size())
-                        {
-                                auto roSegments = std::make_unique<Switch::vector<ro_segment *>>();
+			for (const auto &it : roLogs)
+			{
+				if (trace)
+					SLog("Initializing [", it.first, ",", it.second, "]\n");
 
-                                for (const auto seqNum : seqNums)
-                                        roSegments->push_back(new ro_segment(seqNum, b));
-
-                                l->roSegments = roSegments.release();
-                        }
-                        else
-                                l->roSegments = new Switch::vector<ro_segment *>();
+				l->roSegments->push_back(new ro_segment(it.first, it.second, b));
+			}
                 }
-                else
-                {
-                        l->roSegments = new Switch::vector<ro_segment *>();
-                        l->firstAvailableSeqNum = 0;
-                }
+		else
+		{
+			l->firstAvailableSeqNum = curLogSeqNum;
+			l->roSegments = new Switch::vector<ro_segment *>();
+		}
 
-                if (trace)
-                        SLog("cur = ", cur, ", roSegments->size() = ", l->roSegments->size(), "\n");
-
-                if (cur != UINT64_MAX)
+		if (curLogSeqNum)
                 {
                         // Have a current segment
-                        Snprint(basePath, sizeof(basePath), b, cur, ".log");
+                        Snprint(basePath, sizeof(basePath), b, curLogSeqNum, ".log");
                         fd = open(basePath, O_RDWR | O_LARGEFILE | O_CREAT, 0775);
 
                         if (fd == -1)
@@ -836,10 +862,10 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         l->cur.fdh.reset(new fd_handle(fd));
                         require(l->cur.fdh->use_count() == 2);
                         l->cur.fdh->Release();
-                        l->cur.baseSeqNum = cur;
+                        l->cur.baseSeqNum = curLogSeqNum;
                         l->cur.fileSize = lseek64(fd, 0, SEEK_END);
 
-                        Snprint(basePath, sizeof(basePath), b, cur, ".index");
+                        Snprint(basePath, sizeof(basePath), b, curLogSeqNum, ".index");
                         fd = open(basePath, O_RDWR | O_LARGEFILE | O_CREAT, 0775);
 
                         if (fd == -1)
@@ -935,6 +961,13 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         l->cur.sinceLastUpdate = UINT32_MAX;
                         l->cur.baseSeqNum = UINT64_MAX;
                         l->lastAssignedSeqNum = 0;
+
+			if (l->roSegments && l->roSegments->size())
+			{
+				// We can still use the last immutable segment
+				Print("Looks like someone deleted the active segment from ", bp, "\n");
+				l->lastAssignedSeqNum = l->roSegments->back()->lastAvailSeqNum;
+			}
                 }
 
                 return partition;
@@ -1357,7 +1390,7 @@ bool Service::process_publish(connection *const c, const uint8_t *p, const size_
                         }
 
                         const auto b = Timings::Microseconds::Tick();
-                        const auto res = partition->append_bundleToLeader(bundle, bundleLen, msgSetSize, expiredCtxList);
+                        const auto res = partition->append_bundle_to_leader(bundle, bundleLen, msgSetSize, expiredCtxList);
 
                         if (unlikely(!res.fdh))
                         {

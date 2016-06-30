@@ -232,6 +232,8 @@ class TankClient
 	Switch::unordered_map<Switch::endpoint, connection *> connectionsMap;
 
       private:
+      	static uint8_t choose_compression_codec(const msg *const, const size_t);
+
         // this is somewhat complicated, because we want to use varint for the bundle length and we want to
         // encode this efficiently (no copying or moving data across buffers)
         // so we construct payload->iov[] properly
@@ -329,11 +331,7 @@ class TankClient
         template <typename L>
         bool submit(const Switch::endpoint leader, outgoing_payload *const p, L &&l)
         {
-                auto *const c = leader_connection(leader);
-
-                if (!c)
-                        return false;
-                else
+                if (auto *const c = leader_connection(leader))
                 {
                         l(c);
 
@@ -345,6 +343,8 @@ class TankClient
                         else
                                 return true;
                 }
+		else
+			return false;
         }
 
       public:
