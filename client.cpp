@@ -2,37 +2,64 @@
 
 static constexpr bool trace{false};
 
+TankClient::~TankClient()
+{
+        while (switch_dlist_any(&connections))
+        {
+                auto c = switch_list_entry(connection, list, connections.next);
+
+                if (c->fd != -1)
+                {
+                        poller.DelFd(c->fd);
+                        close(c->fd);
+                }
+
+                if (auto b = c->inB)
+                        put_buffer(b);
+
+                while (auto it = c->front())
+                {
+                        c->pop_front();
+                        delete it;
+                }
+
+                switch_dlist_del(&c->list);
+                delete c;
+        }
+}
+
 uint8_t TankClient::choose_compression_codec(const msg *const msgs, const size_t msgsCnt)
 {
-	// arbitrary selection heuristic
-	if (msgsCnt > 512)
-		return 1;
-	else
-	{
-		size_t sum{0};
+        // arbitrary selection heuristic
+        if (msgsCnt > 512)
+                return 1;
+        else
+        {
+                size_t sum{0};
 
-		for (size_t i{0}; i != msgsCnt; ++i)
-		{
-			sum+=msgs[i].content.len;
-			if (sum > 32 * 1024)
-				return 1;
+                for (size_t i{0}; i != msgsCnt; ++i)
+                {
+                        sum += msgs[i].content.len;
+                        if (sum > 4096)
+                                return 1;
                 }
         }
 
-	return 0;
+        return 0;
 }
-
 
 bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::endpoint leader, const produce_ctx *const produce, const size_t cnt)
 {
-        auto payload = std::make_unique<outgoing_payload>();
-        auto &b = payload->b;
-        auto &b2 = payload->b2;
+        // TODO: may want to reuse existing connection payload if available and enough iovecs left?
+        auto payload = get_payload();
+        auto &b = *payload->b;
+        auto &b2 = *payload->b2;
         const strwlen8_t clientId(_S("c++"));
         uint32_t base{0};
         uint8_t topicsCnt{0};
         const auto reqId = ids_tracker.leader_reqs.next++;
 
+        require(payload->iovCnt == 0);
         ranges.clear();
         produceCtx.clear();
 
@@ -98,7 +125,6 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
 
                         if (it->msgsCnt >= 16)
                                 b.SerializeVarUInt32(it->msgsCnt);
-
                         // END:bundle header; serialize messages set
 
                         produceCtx.Serialize<uint16_t>(it->partitionId);
@@ -136,30 +162,31 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
                         }
                         else
                         {
+                                const auto msgSetLen = b.length() - msgSetOffset, bundleHeaderLength = msgSetOffset - bundleOffset;
                                 auto &cmpBuf = b2;
                                 const auto o = cmpBuf.length();
-                                const auto bundleHeaderLength = msgSetOffset - bundleOffset;
 
-                                if (unlikely(!Compression::Compress(Compression::Algo::SNAPPY, b.At(msgSetOffset), b.length() - msgSetOffset, &cmpBuf)))
+                                if (unlikely(!Compression::Compress(Compression::Algo::SNAPPY, b.At(msgSetOffset), msgSetLen, &cmpBuf)))
                                         throw Switch::system_error("Failed to compress content");
 
-				if (trace)
-					SLog(b.length() - msgSetOffset, " => ", cmpBuf.length(), "\n");
+                                if (trace)
+                                        SLog(msgSetLen, " => ", cmpBuf.length(), "\n");
 
-				// TODO: if cmpBuf.length() > (b.length - msgSetOffset) don't use compressed content
+                                // TODO: if cmpBuf.length() > (b.length - msgSetOffset) don't use compressed content
 
                                 const auto compressedMsgSetLen = cmpBuf.length() - o;
-                                const auto offset = b.length();
 
+                                b.SetLength(msgSetOffset);
+                                const auto offset = b.length();
                                 b.SerializeVarUInt32(compressedMsgSetLen + bundleHeaderLength);
                                 base = b.length();
 
-                                ranges.push_back({offset, base - offset});               // bundle length:varint
+                                ranges.push_back({offset, b.length() - offset});        // bundle length:varint
                                 ranges.push_back({bundleOffset, bundleHeaderLength});    // bundle header
-                                ranges.push_back({o | (1u << 30), cmpBuf.length() - o}); // compressed bundle messages set
+                                ranges.push_back({o | (1u << 30), compressedMsgSetLen}); // compressed bundle messages set
 
-                                b.SetLength(msgSetOffset);
                         }
+
                 } while (++i != cnt && (it = produce + i)->topic == topic);
 
                 *(uint8_t *)b.At(partitionsCntOffset) = partitionsCnt;
@@ -172,20 +199,21 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
         if (trace)
                 SLog("b.length = ", b.length(), ", b2.length = ", b2.length(), "\n");
 
-        b.EnsureCapacity(sizeof(uint8_t) + sizeof(uint32_t));
-        payload->iov[0] = {b.End(), sizeof(uint8_t) + sizeof(uint32_t)};
+        require(payload->iovCnt + 1 + ranges.size() <= sizeof_array(payload->iov));
+
+        b.reserve(sizeof(uint8_t) + sizeof(uint32_t));
+        payload->iov[payload->iovCnt++] = {b.End(), sizeof(uint8_t) + sizeof(uint32_t)};
         b.Serialize(uint8_t(1));        // req.msgtype (1= produce)
         b.Serialize<uint32_t>(reqSize); // req.size
 
-        payload->iovCnt = 1;
         for (const auto &r : ranges)
         {
                 const auto o = r.offset & (~(1u << 30));
 
                 if (o == r.offset)
-                        payload->iov[(payload->iovCnt)++] = {(void *)b.At(r.offset), r.len};
+                        payload->iov[payload->iovCnt++] = {(void *)b.At(r.offset), r.len};
                 else
-                        payload->iov[(payload->iovCnt)++] = {(void *)b2.At(o), r.len};
+                        payload->iov[payload->iovCnt++] = {(void *)b2.At(o), r.len};
         }
 
         auto ctx = (uint8_t *)malloc(produceCtx.length());
@@ -196,14 +224,14 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
         memcpy(ctx, produceCtx.data(), produceCtx.length());
         pendingProduceReqs.Add(reqId, {clientReqId, Timings::Milliseconds::Tick(), ctx, produceCtx.length()});
 
-        return submit(leader, payload.release(),
+        return submit(leader, payload,
                       [reqId](connection *const c) { c->pendingProduce.insert(reqId); });
 }
 
 bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::endpoint leader, const consume_ctx *const from, const size_t total, const uint64_t maxWait, const uint32_t minSize)
 {
-        auto payload = std::make_unique<outgoing_payload>();
-        auto &b = payload->b;
+        auto payload = get_payload();
+        auto &b = *payload->b;
         const strwlen8_t clientId(_S("c++"));
         uint64_t absSeqNums[256];
         uint8_t absSeqNumsCnt{0};
@@ -268,7 +296,7 @@ bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::e
 
         payload->iov[payload->iovCnt++] = {(void *)b.data(), b.length()};
 
-        return submit(leader, payload.release(), [reqId](connection *const c) {
+        return submit(leader, payload, [reqId](connection *const c) {
                 c->pendingConsume.insert(reqId);
         });
 }
@@ -941,7 +969,7 @@ bool TankClient::try_send(connection *const c)
                                         if (++(it->iovIdx) == it->iovCnt)
                                         {
                                                 c->pop_front();
-                                                delete it;
+						put_payload(it);
                                                 c->outgoingFront = next;
                                                 goto next;
                                         }
@@ -1223,12 +1251,14 @@ int main(int argc, char *argv[])
 			IOBuffer b;
 			const auto now = Timings::Milliseconds::SysTime();
 
+			Print("Reading ", argv[2], " ..\n");
 			if (b.ReadFromFile(argv[2]) <= 0)
 			{
 				Print("Unable to read ", argv[2], "\n");
 				return 1;
 			}
 
+			Print("Processing\n");
                         for (const auto &line : b.AsS32().Split('\n'))
                         {
                                 msgs.push_back({line, now});
@@ -1283,6 +1313,7 @@ int main(int argc, char *argv[])
                         for (const auto &it : client.faults())
                         {
                                 Print("Fault for ", it.clientReqId, "\n");
+				exit(0);
                                 switch (it.type)
                                 {
                                         case TankClient::fault::Type::BoundaryCheck:

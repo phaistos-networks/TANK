@@ -5,9 +5,9 @@
 #include <switch.h>
 #include <switch_deque.h>
 #include <switch_dictionary.h>
+#include <switch_ll.h>
 #include <switch_mallocators.h>
 #include <switch_vector.h>
-#include <switch_ll.h>
 
 // Tank, because its a large container of liquid or gas
 // and data flow (as in, liquid), and also, this is a Trinity character name
@@ -19,21 +19,21 @@ class TankClient
 
         };
 
-	struct msg
-	{
-		strwlen32_t content;
-		uint64_t ts;
-		strwlen8_t key;
-	};
+        struct msg
+        {
+                strwlen32_t content;
+                uint64_t ts;
+                strwlen8_t key;
+        };
 
-	using topic_partition = std::pair<strwlen8_t, uint16_t>;
+        using topic_partition = std::pair<strwlen8_t, uint16_t>;
 
         struct outgoing_payload
         {
                 outgoing_payload *next;
-                IOBuffer b, b2;
+                IOBuffer *b{nullptr}, *b2{nullptr};
 
-                struct iovec iov[128];
+                struct iovec iov[256];
                 uint8_t iovCnt{0};
                 uint8_t iovIdx{0};
         };
@@ -52,7 +52,7 @@ class TankClient
                 Switch::endpoint leader;
                 strwlen8_t topic;
                 uint16_t partitionId;
-		const msg *msgs;
+                const msg *msgs;
                 size_t msgsCnt;
         };
 
@@ -60,11 +60,11 @@ class TankClient
         {
                 int fd{-1};
                 outgoing_payload *outgoingFront{nullptr}, *outgoingBack{nullptr};
-		switch_dlist list;
+                switch_dlist list;
                 IOBuffer *inB{nullptr};
                 uint32_t pendingResponses;
                 std::set<uint32_t> pendingConsume, pendingProduce;
-		Switch::endpoint peer;
+                Switch::endpoint peer;
 
                 struct State
                 {
@@ -101,11 +101,10 @@ class TankClient
                         outgoingFront = outgoingFront->next;
                 }
 
-		connection()
-		{
-			switch_dlist_init(&list);
-		}
-
+                connection()
+                {
+                        switch_dlist_init(&list);
+                }
         };
 
         void deregister_connection_attempt(connection *const c)
@@ -140,7 +139,7 @@ class TankClient
         {
                 uint64_t seqNum;
                 uint64_t ts;
-		strwlen8_t key;
+                strwlen8_t key;
                 strwlen32_t content;
         };
 
@@ -151,17 +150,17 @@ class TankClient
                 uint16_t partition;
                 range_base<consumed_msg *, uint32_t> msgs;
 
-		// We can't rely on msgs.back().seqNum + 1 to compute the next sequence number
-		// to consume from, because if no message at all can be parsed because
-		// of the request fetch size, msgs will be empty()
-		struct
-		{
-			// to get more messages
-			// consume from (topic, partition) starting from seqNum, 
-			// and set fetchSize to be at least minFetchSize
-			uint64_t seqNum;
-			uint32_t minFetchSize;
-		} next;
+                // We can't rely on msgs.back().seqNum + 1 to compute the next sequence number
+                // to consume from, because if no message at all can be parsed because
+                // of the request fetch size, msgs will be empty()
+                struct
+                {
+                        // to get more messages
+                        // consume from (topic, partition) starting from seqNum,
+                        // and set fetchSize to be at least minFetchSize
+                        uint64_t seqNum;
+                        uint32_t minFetchSize;
+                } next;
         };
 
         struct fault
@@ -173,8 +172,8 @@ class TankClient
                         UnknownTopic = 1,
                         UnknownPartition,
                         Access,
-			Network,
-			BoundaryCheck
+                        Network,
+                        BoundaryCheck
                 } type;
 
                 enum class Req : uint8_t
@@ -186,10 +185,9 @@ class TankClient
                 strwlen8_t topic;
                 uint16_t partition;
 
-		union
-		{
-			// Set when fault is BoundaryCheck
-			struct
+                union {
+                        // Set when fault is BoundaryCheck
+                        struct
                         {
                                 uint64_t firstAvailSeqNum;
                                 uint64_t highWaterMark;
@@ -219,7 +217,7 @@ class TankClient
                 } leader_reqs;
         } ids_tracker;
 
-	switch_dlist connections;
+        switch_dlist connections;
         Switch::vector<std::pair<connection *, IOBuffer *>> connsBufs;
         simple_allocator resultsAllocator{4 * 1024 * 1024};
         Switch::vector<partition_content> consumedPartitionContent;
@@ -233,15 +231,16 @@ class TankClient
         Switch::vector<connection *> connectionAttempts, connsList;
         EPoller poller;
         Switch::vector<connection *, DeleteDestructor> connectionsPool;
+        Switch::vector<outgoing_payload *, DeleteDestructor> payloadsPool;
         Switch::vector<IOBuffer *, DeleteDestructor> buffersPool;
         Switch::vector<range32_t> ranges;
         IOBuffer produceCtx;
         Switch::unordered_map<uint32_t, active_consume_req> pendingConsumeReqs;
         Switch::unordered_map<uint32_t, active_produce_req> pendingProduceReqs;
-	Switch::unordered_map<Switch::endpoint, connection *> connectionsMap;
+        Switch::unordered_map<Switch::endpoint, connection *> connectionsMap;
 
       private:
-      	static uint8_t choose_compression_codec(const msg *const, const size_t);
+        static uint8_t choose_compression_codec(const msg *const, const size_t);
 
         // this is somewhat complicated, because we want to use varint for the bundle length and we want to
         // encode this efficiently (no copying or moving data across buffers)
@@ -274,8 +273,38 @@ class TankClient
 
         void put_buffer(IOBuffer *const b)
         {
-                b->clear();
-                buffersPool.push_back(b);
+                require(b);
+                if (b->Reserved() > 1024 * 1024 || buffersPool.size() > 128)
+                        delete b;
+                else
+                {
+                        b->clear();
+                        buffersPool.push_back(b);
+                }
+        }
+
+        auto get_payload()
+        {
+                auto res = payloadsPool.size() ? payloadsPool.Pop() : new outgoing_payload();
+
+                res->b = get_buffer();
+                res->b2 = get_buffer();
+
+                return res;
+        }
+
+        void put_payload(outgoing_payload *const p)
+        {
+                p->iovCnt = p->iovIdx = 0;
+                p->next = nullptr;
+
+                put_buffer(p->b);
+                put_buffer(p->b2);
+
+                p->b = nullptr;
+                p->b2 = nullptr;
+
+                payloadsPool.push_back(p);
         }
 
         auto get_connection()
@@ -323,41 +352,17 @@ class TankClient
                         else
                                 return true;
                 }
-		else
-			return false;
+                else
+                        return false;
         }
 
       public:
-      	TankClient()
-	{
-		switch_dlist_init(&connections);
-	}
+        TankClient()
+        {
+                switch_dlist_init(&connections);
+        }
 
-	~TankClient()
-	{
-		while (switch_dlist_any(&connections))
-		{
-			auto c = switch_list_entry(connection, list, connections.next);
-
-			if (c->fd != -1)
-			{
-				poller.DelFd(c->fd);
-				close(c->fd);
-			}
-
-			if (auto b = c->inB)
-				put_buffer(b);
-
-                        while (auto it = c->front())
-                        {
-                                c->pop_front();
-                                delete it;
-                        }
-
-                        switch_dlist_del(&c->list);
-			delete c;
-		}
-	}
+        ~TankClient();
 
         const auto &consumed() const
         {
@@ -380,7 +385,7 @@ class TankClient
 
         Switch::endpoint leader_for(const strwlen8_t topic, const uint16_t partition)
         {
-		// for now, hardcoded
+                // for now, hardcoded
                 return {IP4Addr(127, 0, 0, 1), 1025};
         }
 
@@ -389,15 +394,15 @@ class TankClient
 
 namespace Switch
 {
-	template<>
-	struct hash<TankClient::topic_partition>
-	{
-		inline uint32_t operator()(const TankClient::topic_partition &v)
-		{
-			uint32_t seed = Switch::hash<strwlen8_t>{}(v.first);
+        template <>
+        struct hash<TankClient::topic_partition>
+        {
+                inline uint32_t operator()(const TankClient::topic_partition &v)
+                {
+                        uint32_t seed = Switch::hash<strwlen8_t>{}(v.first);
 
-			Switch::hash_combine(seed, Switch::hash<uint16_t>{}(v.second));
-			return seed;
-		}
-	};
+                        Switch::hash_combine(seed, Switch::hash<uint16_t>{}(v.second));
+                        return seed;
+                }
+        };
 }

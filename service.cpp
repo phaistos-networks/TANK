@@ -433,7 +433,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
         {
                 const auto basePathLen = basePath.length();
 
-                if (trace || 1)
+                if (trace)
                         SLog("Need to switch to another commit log (", cur.fileSize, "> ", limits.maxSegmentSize, ") ", cur.index.skipList.size(), "\n");
 
                 if (cur.fileSize != UINT32_MAX)
@@ -2091,9 +2091,9 @@ int Service::start(int argc, char **argv)
                                         c->state.lastInputTS = Timings::Milliseconds::Tick();
                                 }
 
-                                for (const auto *const e = b->End(); !(c->state.flags & (1u << uint8_t(connection::State::Flags::Busy)));)
+                                for (const auto *const e = (uint8_t *)b->End(); !(c->state.flags & (1u << uint8_t(connection::State::Flags::Busy)));)
                                 {
-                                        const auto *p = b->AtOffset();
+                                        const auto *p = (uint8_t *)b->AtOffset();
 
                                         if (e - p >= sizeof(uint8_t) + sizeof(uint32_t))
                                         {
@@ -2101,8 +2101,12 @@ int Service::start(int argc, char **argv)
                                                 const uint32_t msgLen = *(uint32_t *)p;
                                                 p += sizeof(uint32_t);
 
-                                                if (unlikely(msgLen > 128 * 1024 * 1024))
-                                                        return shutdown(c, __LINE__);
+                                                if (unlikely(msgLen > 256 * 1024 * 1024))
+						{
+							Print("** TOO large incoming packet of length ", size_repr(msgLen), "\n");
+                                                        shutdown(c, __LINE__);
+							goto nextEvent;
+						}
                                                 else if (p + msgLen > e)
                                                         goto l1;
                                                 else if (!process_msg(c, msg, reinterpret_cast<const uint8_t *>(p), msgLen))
@@ -2119,7 +2123,7 @@ int Service::start(int argc, char **argv)
                                                         break;
                                                 }
 						else
-							b->SetOffset(p);
+							b->SetOffset((char *)p);
                                         }
                                         else
                                                 break;
@@ -2141,6 +2145,7 @@ int Service::start(int argc, char **argv)
 
                 nextEvent:;
                 }
+
 
                 if (nowMS > nextIdleCheck)
                 {
@@ -2174,6 +2179,7 @@ int Service::start(int argc, char **argv)
                                 abort_wait_ctx(expiredCtxList.Pop());
                 }
         }
+
 }
 
 int main(int argc, char *argv[])
