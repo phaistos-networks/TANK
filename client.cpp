@@ -2,6 +2,32 @@
 
 static constexpr bool trace{false};
 
+TankClient::outgoing_payload *TankClient::get_payload_for(connection *const c, const size_t min)
+{
+	if (auto p = c->outgoingBack)
+	{
+		const auto n = sizeof_array(p->iov) - p->iovCnt;
+
+		if (n > 32 && n >= min)
+			return p;
+	}
+
+        return get_payload();
+}
+
+void TankClient::bind_fd(connection *const c, int fd)
+{
+        c->fd = fd;
+
+        // we can't write() anything until we got POLLOUT after we connect()
+        c->state.flags |= (1u << uint8_t(connection::State::Flags::ConnectionAttempt)) | (1u << uint8_t(connection::State::Flags::NeedOutAvail));
+        poller.AddFd(fd, POLLIN | POLLOUT, c);
+        c->state.lastInputTS = Timings::Milliseconds::Tick();
+        c->state.lastOutputTS = c->state.lastInputTS;
+        connectionAttempts.push_back(c);
+        c->pendingResponses = 0;
+}
+
 TankClient::~TankClient()
 {
         while (switch_dlist_any(&connections))
@@ -31,7 +57,7 @@ TankClient::~TankClient()
 uint8_t TankClient::choose_compression_codec(const msg *const msgs, const size_t msgsCnt)
 {
         // arbitrary selection heuristic
-        if (msgsCnt > 512)
+        if (msgsCnt > 128)
                 return 1;
         else
         {
@@ -50,11 +76,10 @@ uint8_t TankClient::choose_compression_codec(const msg *const msgs, const size_t
 
 bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::endpoint leader, const produce_ctx *const produce, const size_t cnt)
 {
-        // TODO: may want to reuse existing connection payload if available and enough iovecs left?
+        // TODO: use get_payload_for()
         auto payload = get_payload();
         auto &b = *payload->b;
         auto &b2 = *payload->b2;
-        const strwlen8_t clientId(_S("c++"));
         uint32_t base{0};
         uint8_t topicsCnt{0};
         const auto reqId = ids_tracker.leader_reqs.next++;
@@ -172,7 +197,7 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
                                 if (trace)
                                         SLog(msgSetLen, " => ", cmpBuf.length(), "\n");
 
-                                // TODO: if cmpBuf.length() > (b.length - msgSetOffset) don't use compressed content
+				// TODO: if cmpBuf.length() > msgSetLen, don't use compressed content(not worth it) - also unset flags compression codec bits
 
                                 const auto compressedMsgSetLen = cmpBuf.length() - o;
 
@@ -230,9 +255,9 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
 
 bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::endpoint leader, const consume_ctx *const from, const size_t total, const uint64_t maxWait, const uint32_t minSize)
 {
+        // TODO: use get_payload_for()
         auto payload = get_payload();
         auto &b = *payload->b;
-        const strwlen8_t clientId(_S("c++"));
         uint64_t absSeqNums[256];
         uint8_t absSeqNumsCnt{0};
         uint8_t topicsCnt{0};
@@ -332,29 +357,6 @@ bool TankClient::shutdown(connection *const c, const uint32_t ref, const bool fa
         if (c->state.flags & (1u << uint8_t(connection::State::Flags::ConnectionAttempt)))
                 deregister_connection_attempt(c);
 
-#if 0
-		if (fault)
-                {
-                        int fd;
-
-                        if (!(c->state.flags & (1u << uint8_t(connection::State::Flags::RetryingConnection))))
-                        {
-                                c->state.flags |= (1u << uint8_t(connection::State::Flags::RetryingConnection));
-                        }
-
-                        fd = init_connection_to({IP4Addr(127, 0, 0, 1), 1025});
-
-                        if (fd == -1)
-                        {
-				SLog("Failed to initialize a new connection\n");
-                        }
-                        else
-                        {
-				bind_fd(c, fd);
-                        }
-                }
-#endif
-
         while (auto it = c->front())
         {
                 c->pop_front();
@@ -448,6 +450,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                                 {
                                         if (trace)
                                                 SLog("Unknown partition ", topicName, ".", partitionId, "\n");
+
                                         capturedFaults.push_back({clientReqId, fault::Type::UnknownPartition, fault::Req::Produce, topicName, partitionId});
                                 }
                                 else if (err)
@@ -867,6 +870,7 @@ bool TankClient::try_recv(connection *const c)
                         {
                                 if (trace)
                                         SLog("Connection established\n");
+
                                 c->state.flags &= ~(1u << uint8_t(connection::State::Flags::ConnectionAttempt));
                                 deregister_connection_attempt(c);
                         }
@@ -1241,7 +1245,7 @@ int main(int argc, char *argv[])
         if (req.Eq(_S("get")))
         {
                 client.consume(
-                    {{{"bp_activity", 0}, {argc > 2 ? strwlen32_t(argv[2]).AsUint32() : UINT64_MAX, 2048*1024}}}, 10000, 128);
+                    {{{"bp_activity", 0}, {argc > 2 ? strwlen32_t(argv[2]).AsUint32() : UINT64_MAX, 10'000}}}, 10000, 128);
         }
         else if (req.Eq(_S("set")))
         {
@@ -1313,7 +1317,6 @@ int main(int argc, char *argv[])
                         for (const auto &it : client.faults())
                         {
                                 Print("Fault for ", it.clientReqId, "\n");
-				exit(0);
                                 switch (it.type)
                                 {
                                         case TankClient::fault::Type::BoundaryCheck:

@@ -8,7 +8,7 @@ client: client.o
 	$(CC) client.o -o ./client $(LDFLAGS)
 
 service: service.o
-	$(CC) service.o -o ./service $(LDFLAGS)
+	$(CC) service.o -o ./tank $(LDFLAGS)
 
 
 .o: .cpp

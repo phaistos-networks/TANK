@@ -217,6 +217,7 @@ class TankClient
                 } leader_reqs;
         } ids_tracker;
 
+	strwlen8_t clientId{"c++"};
         switch_dlist connections;
         Switch::vector<std::pair<connection *, IOBuffer *>> connsBufs;
         simple_allocator resultsAllocator{4 * 1024 * 1024};
@@ -293,6 +294,8 @@ class TankClient
                 return res;
         }
 
+	outgoing_payload *get_payload_for(connection *, const size_t);
+
         void put_payload(outgoing_payload *const p)
         {
                 p->iovCnt = p->iovIdx = 0;
@@ -315,23 +318,12 @@ class TankClient
         void put_connection(connection *const c)
         {
                 c->state.flags = 0;
-                connectionsPool.Push(c);
+                connectionsPool.push_back(c);
         }
 
         int init_connection_to(const Switch::endpoint e);
 
-        void bind_fd(connection *const c, int fd)
-        {
-                c->fd = fd;
-
-                // we can't send anything until we got POLLOUT after we connect()
-                c->state.flags |= (1u << uint8_t(connection::State::Flags::ConnectionAttempt)) | (1u << uint8_t(connection::State::Flags::NeedOutAvail));
-                poller.AddFd(fd, POLLIN | POLLOUT, c);
-                c->state.lastInputTS = Timings::Milliseconds::Tick();
-                c->state.lastOutputTS = c->state.lastInputTS;
-                connectionAttempts.push_back(c);
-                c->pendingResponses = 0;
-        }
+        void bind_fd(connection *const c, int fd);
 
         connection *init_connection(const Switch::endpoint e);
 
@@ -353,7 +345,10 @@ class TankClient
                                 return true;
                 }
                 else
+		{
+			put_payload(p);
                         return false;
+		}
         }
 
       public:
@@ -390,6 +385,11 @@ class TankClient
         }
 
         uint32_t consume(const Switch::vector<std::pair<topic_partition, std::pair<uint64_t, uint32_t>>> &req, const uint64_t maxWait, const uint32_t minSize);
+
+	void set_client_id(const char *const p, const uint32_t len)
+	{
+		clientId.Set(p, len);
+	}
 };
 
 namespace Switch

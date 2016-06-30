@@ -1892,6 +1892,7 @@ int Service::start(int argc, char **argv)
         }
         else
         {
+		// TODO: only if running in standaloen mode; otherwise interface with the etcd cluster for configuration
                 size_t totalPartitions{0};
 
                 try
