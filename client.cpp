@@ -713,9 +713,17 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                 goto next;
                                         }
 
+
                                         const auto msgAbsSeqNum = logBaseSeqNum++; // This message's absolute sequence number
 
-                                        if (requestedSeqNum >= UINT64_MAX - 1 || msgAbsSeqNum >= requestedSeqNum)
+					if (msgAbsSeqNum > highWaterMark)
+                                        {
+                                                if (trace)
+                                                        SLog("Reached past high water mark(last assigned sequence number) ", msgAbsSeqNum, " > ", highWaterMark, "\n");
+
+                                                goto next;
+                                        }
+                                        else if (requestedSeqNum >= UINT64_MAX - 1 || msgAbsSeqNum >= requestedSeqNum)
                                         {
                                                 const strwlen32_t content((char *)p, len); // message content
 

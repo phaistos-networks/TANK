@@ -325,11 +325,12 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
                 return read_cur(absSeqNum, maxSize, maxAbsSeqNum);
         }
 
-        const auto *const prevSegments = roSegments;
+	auto prevSegments = roSegments;
 
         lock.unlock_shared();
 
-        const auto *const end = prevSegments->end();
+	// TODO: https://github.com/phaistos-networks/TANK/issues/2
+        const auto end = prevSegments->end();
         const auto it = std::upper_bound_or_match(prevSegments->begin(), end, absSeqNum, [](const auto s, const auto absSeqNum) {
                 return TrivialCmp(absSeqNum, s->baseSeqNum);
         });
@@ -482,9 +483,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                         newROFiles->Append(roSegments->values(), roSegments->size());
                         newROFiles->push_back(newROFile.release());
 
-                        delete roSegments;
-                        roSegments = newROFiles.release();
-
+			roSegments.reset(newROFiles.release());
                         consider_ro_segments();
                 }
                 else
@@ -671,7 +670,8 @@ lookup_res topic_partition::read_from_local(const bool fetchOnlyFromLeader, cons
 	// range_for() will make sure it won't return any data for messages with id >= maxAbsSeqNum
 	//
 	// search_before_offset() will need to access the segment log file though, and that may not be optimal; instead
-	// we may just want to provide the client with maxAbsSeqNum so that it will stop processing chunk bundles if it
+	// we may just want to rely on the client stopping processing chunk bundles if it reaches message id > maxAbsSeqNum(provided 
+	// in the fetch response), which it already takes into account
 	// reaches messages id >= maxAbsSeqNum
         const uint64_t maxAbsSeqNum{UINT64_MAX};
 
@@ -834,7 +834,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         });
 
 			l->firstAvailableSeqNum = roLogs.front().first;
-			l->roSegments = new Switch::vector<ro_segment *>();
+			l->roSegments.reset(new Switch::vector<ro_segment *>());
 
 			for (const auto &it : roLogs)
 			{
@@ -847,7 +847,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
 		else
 		{
 			l->firstAvailableSeqNum = curLogSeqNum;
-			l->roSegments = new Switch::vector<ro_segment *>();
+			l->roSegments.reset(new Switch::vector<ro_segment *>());
 		}
 
 		if (curLogSeqNum)

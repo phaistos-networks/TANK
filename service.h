@@ -79,12 +79,7 @@ struct ro_segment
         const uint64_t baseSeqNum;
 	// the absolute sequence number of the last message in this segment
 	// i.e this segment contains [baseSeqNum, lastAssignedSeqNum]
-	//
-	// Knowing the range of messages stored in a segment will make it trivial to identify requests for
-	// messages that are missing.  e.g if someone deletes an immutalbe segment(not the first, neither the last)
-	// and someone requests messages that were stored in that segment, then we'd know this is so, and maybe advance
-	// to the next available sequence number, or whatever else we think is appropriate(TODO:)
-	// This will also help with compactions, where we will need to rebuild a sparse topic
+	// See: https://github.com/phaistos-networks/TANK/issues/2 for rationale
 	const uint64_t lastAvailSeqNum;
 
 
@@ -258,7 +253,7 @@ struct topic_partition_log
         //
         // roSegments can also be atomically exchanged with a new vector, so we don't need to protect that either
         // make sure roSegments is sorted
-        Switch::vector<ro_segment *> *roSegments{nullptr};
+	std::shared_ptr<Switch::vector<ro_segment *>> roSegments;
 
         ~topic_partition_log()
         {
@@ -266,8 +261,6 @@ struct topic_partition_log
                 {
                         for (auto it : *roSegments)
                                 delete it;
-
-                        delete roSegments;
                 }
         }
 
