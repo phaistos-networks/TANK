@@ -7,6 +7,7 @@
 #include <switch_dictionary.h>
 #include <switch_mallocators.h>
 #include <switch_vector.h>
+#include <switch_ll.h>
 
 // Tank, because its a large container of liquid or gas
 // and data flow (as in, liquid), and also, this is a Trinity character name
@@ -59,6 +60,7 @@ class TankClient
         {
                 int fd{-1};
                 outgoing_payload *outgoingFront{nullptr}, *outgoingBack{nullptr};
+		switch_dlist list;
                 IOBuffer *inB{nullptr};
                 uint32_t pendingResponses;
                 std::set<uint32_t> pendingConsume, pendingProduce;
@@ -98,6 +100,12 @@ class TankClient
                 {
                         outgoingFront = outgoingFront->next;
                 }
+
+		connection()
+		{
+			switch_dlist_init(&list);
+		}
+
         };
 
         void deregister_connection_attempt(connection *const c)
@@ -211,6 +219,7 @@ class TankClient
                 } leader_reqs;
         } ids_tracker;
 
+	switch_dlist connections;
         Switch::vector<std::pair<connection *, IOBuffer *>> connsBufs;
         simple_allocator resultsAllocator{4 * 1024 * 1024};
         Switch::vector<partition_content> consumedPartitionContent;
@@ -295,38 +304,9 @@ class TankClient
                 c->pendingResponses = 0;
         }
 
-        connection *init_connection(const Switch::endpoint e)
-        {
-                auto fd = init_connection_to(e);
+        connection *init_connection(const Switch::endpoint e);
 
-                if (fd == -1)
-                        return nullptr;
-                else
-                {
-                        auto c = get_connection();
-
-			c->peer = e;
-                        bind_fd(c, fd);
-                        return c;
-                }
-        }
-
-        connection *leader_connection(Switch::endpoint leader)
-        {
-		connection **ptr;
-
-		if (connectionsMap.Add(leader, nullptr, &ptr))
-		{
-			*ptr = init_connection(leader);
-			if (unlikely(!(*ptr)))
-			{
-				connectionsMap.Remove(leader);
-				return nullptr;
-			}
-		}
-
-		return *ptr;
-        }
+        connection *leader_connection(Switch::endpoint leader);
 
         template <typename L>
         bool submit(const Switch::endpoint leader, outgoing_payload *const p, L &&l)
@@ -348,6 +328,37 @@ class TankClient
         }
 
       public:
+      	TankClient()
+	{
+		switch_dlist_init(&connections);
+	}
+
+	~TankClient()
+	{
+		while (switch_dlist_any(&connections))
+		{
+			auto c = switch_list_entry(connection, list, connections.next);
+
+			if (c->fd != -1)
+			{
+				poller.DelFd(c->fd);
+				close(c->fd);
+			}
+
+			if (auto b = c->inB)
+				put_buffer(b);
+
+                        while (auto it = c->front())
+                        {
+                                c->pop_front();
+                                delete it;
+                        }
+
+                        switch_dlist_del(&c->list);
+			delete c;
+		}
+	}
+
         const auto &consumed() const
         {
                 return consumedPartitionContent;

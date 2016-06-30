@@ -14,7 +14,7 @@ uint8_t TankClient::choose_compression_codec(const msg *const msgs, const size_t
 		for (size_t i{0}; i != msgsCnt; ++i)
 		{
 			sum+=msgs[i].content.len;
-			if (sum > 1024 * 1024)
+			if (sum > 128 * 1024)
 				return 1;
                 }
         }
@@ -273,7 +273,7 @@ bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::e
 bool TankClient::shutdown(connection *const c, const uint32_t ref, const bool fault)
 {
         if (trace)
-                SLog("Shutting Down ", ref, "\n");
+                SLog("Shutting Down ", ref, " ", Timings::Microseconds::SysTime(), "\n");
 
 #if 0
 	// this doesn't work if we haven't been able to connect yet e.g 
@@ -293,6 +293,7 @@ bool TankClient::shutdown(connection *const c, const uint32_t ref, const bool fa
         if (trace)
                 SLog("Shutting down ", peer, "\n");
 
+	switch_dlist_del_and_reset(&c->list);
         connectionsMap.Remove(peer);
         poller.DelFd(c->fd);
         close(c->fd);
@@ -365,7 +366,9 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
         const auto reqId = *(uint32_t *)p;
         p += sizeof(uint32_t);
         const auto res = pendingProduceReqs.detach(reqId);
-        expect(res);
+
+	if (unlikely(!res))
+		throw Switch::data_error(reqId, " no longer registered with pendingProduceReqs");
 
         const auto reqInfo = res.value();
         const auto clientReqId = reqInfo.clientReqId;
@@ -790,6 +793,7 @@ bool TankClient::process(connection *const c, const uint8_t msg, const uint8_t *
                 case 3:
                         if (trace)
                                 SLog("PING\n");
+
                         return true;
 
                 default:
@@ -858,7 +862,8 @@ bool TankClient::try_recv(connection *const c)
                                         // cause problems with references in e.g consumedPartitionContent that derefs buffer's data
                                         return true;
                                 }
-                                else if (!process(c, msg, p, len))
+
+                                if (!process(c, msg, p, len))
                                         return false;
                                 else
                                 {
@@ -956,6 +961,40 @@ bool TankClient::try_send(connection *const c)
         }
 
         return true;
+}
+
+TankClient::connection *TankClient::init_connection(const Switch::endpoint e)
+{
+        auto fd = init_connection_to(e);
+
+        if (fd == -1)
+                return nullptr;
+        else
+        {
+                auto c = get_connection();
+
+                c->peer = e;
+                bind_fd(c, fd);
+                switch_dlist_insert_after(&connections, &c->list);
+                return c;
+        }
+}
+
+TankClient::connection *TankClient::leader_connection(Switch::endpoint leader)
+{
+        connection **ptr;
+
+        if (connectionsMap.Add(leader, nullptr, &ptr))
+        {
+                *ptr = init_connection(leader);
+                if (unlikely(!(*ptr)))
+                {
+                        connectionsMap.Remove(leader);
+                        return nullptr;
+                }
+        }
+
+        return *ptr;
 }
 
 int TankClient::init_connection_to(const Switch::endpoint e)
@@ -1171,49 +1210,96 @@ int main(int argc, char *argv[])
         if (req.Eq(_S("get")))
         {
                 client.consume(
-                    {{{"bp_activity", 0}, {argc > 2 ? strwlen32_t(argv[2]).AsUint32() : UINT64_MAX, 2048}}}, 10000, 128);
+                    {{{"bp_activity", 0}, {argc > 2 ? strwlen32_t(argv[2]).AsUint32() : UINT64_MAX, 2048*1024}}}, 10000, 128);
         }
         else if (req.Eq(_S("set")))
         {
-                client.produce(
-                    {{{"bp_activity", 0},
-                      {{"world of warcraft GAME", Timings::Milliseconds::SysTime()},
-                       {"Amiga 1200 Computer", Timings::Milliseconds::SysTime(), "computer"},
-                       {"lord of the rings, the return of the king", Timings::Milliseconds::SysTime()}}}});
+		if (argc > 2)
+		{
+			std::vector<TankClient::msg> msgs;
+			IOBuffer b;
+			const auto now = Timings::Milliseconds::SysTime();
+
+			if (b.ReadFromFile(argv[2]) <= 0)
+			{
+				Print("Unable to read ", argv[2], "\n");
+				return 1;
+			}
+
+                        for (const auto &line : b.AsS32().Split('\n'))
+                        {
+                                msgs.push_back({line, now});
+
+                                if (msgs.size() == 128)
+                                {
+                                        client.produce(
+                                            {{{"bp_activity", 0},
+                                              msgs}
+
+                                            });
+
+                                        msgs.clear();
+                                }
+                        }
+
+                        if (msgs.size())
+                        {
+                                client.produce(
+                                    {{{"bp_activity", 0},
+                                      msgs}
+
+                                    });
+                        }
+                }
+		else
+                {
+                        client.produce(
+                            {{{"bp_activity", 0},
+                              {{"world of warcraft GAME", Timings::Milliseconds::SysTime()},
+                               {"Amiga 1200 Computer", Timings::Milliseconds::SysTime(), "computer"},
+                               {"lord of the rings, the return of the king", Timings::Milliseconds::SysTime()}}}});
+                }
         }
 
-        for (;;)
+	try
+	{
+                for (;;)
+                {
+                        client.poll(1000);
+
+                        for (const auto &it : client.consumed())
+                        {
+                                Print("Consumed from ", it.topic, ".", it.partition, ", next {", it.next.seqNum, ", ", it.next.minFetchSize, "}\n");
+
+                                for (const auto mit : it.msgs)
+                                {
+                                        Print("[", mit->key, "]:", mit->content, "(", mit->seqNum, ")\n");
+                                }
+                        }
+
+                        for (const auto &it : client.faults())
+                        {
+                                Print("Fault for ", it.clientReqId, "\n");
+                                switch (it.type)
+                                {
+                                        case TankClient::fault::Type::BoundaryCheck:
+                                                Print("firstAvailSeqNum = ", it.ctx.firstAvailSeqNum, ", hwMark = ", it.ctx.highWaterMark, "\n");
+                                                break;
+
+                                        default:
+                                                break;
+                                }
+                        }
+
+                        for (const auto &it : client.produce_acks())
+                        {
+                                Print("Produced OK ", it.clientReqId, "\n");
+                        }
+                }
+        }
+        catch (const std::exception &e)
         {
-                client.poll(1000);
-
-                for (const auto &it : client.consumed())
-                {
-                        Print("Consumed from ", it.topic, ".", it.partition, ", next {", it.next.seqNum, ", ", it.next.minFetchSize, "}\n");
-
-                        for (const auto mit : it.msgs)
-                        {
-                                Print("[", mit->key, "]:", mit->content, "(", mit->seqNum, ")\n");
-                        }
-                }
-
-                for (const auto &it : client.faults())
-                {
-                        Print("Fault for ", it.clientReqId, "\n");
-                        switch (it.type)
-                        {
-                                case TankClient::fault::Type::BoundaryCheck:
-                                        Print("firstAvailSeqNum = ", it.ctx.firstAvailSeqNum, ", hwMark = ", it.ctx.highWaterMark, "\n");
-                                        break;
-
-                                default:
-                                        break;
-                        }
-                }
-
-                for (const auto &it : client.produce_acks())
-                {
-                        Print("Produced OK ", it.clientReqId, "\n");
-                }
+		Print("failed:", e.what(), "\n");
         }
 
         return 0;

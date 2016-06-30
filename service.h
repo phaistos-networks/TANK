@@ -761,7 +761,7 @@ class Service
 
         bool register_consumer_wait(connection *const c, const uint32_t requestId, const uint64_t maxWait, const uint32_t minBytes, topic_partition **const partitions, const uint32_t totalPartitions);
 
-        bool process_publish(connection *const c, const uint8_t *p, const size_t len);
+        bool process_produce(connection *const c, const uint8_t *p, const size_t len);
 
         bool process_msg(connection *const c, const uint8_t msg, const uint8_t *const data, const size_t len);
 

@@ -433,8 +433,8 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
         {
                 const auto basePathLen = basePath.length();
 
-                if (trace)
-                        SLog("Need to switch to another commit log (", cur.fileSize, "> ", limits.maxSegmentSize, ")\n");
+                if (trace || 1)
+                        SLog("Need to switch to another commit log (", cur.fileSize, "> ", limits.maxSegmentSize, ") ", cur.index.skipList.size(), "\n");
 
                 if (cur.fileSize != UINT32_MAX)
                 {
@@ -869,7 +869,10 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         fd = open(basePath, O_RDWR | O_LARGEFILE | O_CREAT, 0775);
 
                         if (fd == -1)
+			{
+				// TODO: rebuild it
                                 throw Switch::system_error("open() failed:", strerror(errno));
+			}
 
                         l->cur.index.fd = fd;
                         // if this an empty commit log, need to update the index immediately
@@ -1246,7 +1249,7 @@ bool Service::process_replica_reg(connection *const c, const uint8_t *p, const s
         return true;
 }
 
-bool Service::process_publish(connection *const c, const uint8_t *p, const size_t len)
+bool Service::process_produce(connection *const c, const uint8_t *p, const size_t len)
 {
         auto respHeader = get_buffer();
         auto q = c->outQ;
@@ -1279,6 +1282,7 @@ bool Service::process_publish(connection *const c, const uint8_t *p, const size_
 
         if (trace)
                 SLog("Parsing ", topicsCnt, "\n");
+
         for (uint32_t i{0}; i != topicsCnt; ++i)
         {
                 topicName.Set((char *)p + 1, *p);
@@ -1424,7 +1428,7 @@ bool Service::process_msg(connection *const c, const uint8_t msg, const uint8_t 
         switch (msg)
         {
                 case 1:
-                        return process_publish(c, data, len);
+                        return process_produce(c, data, len);
 
                 case 2:
                         return process_consume(c, data, len);
@@ -1634,7 +1638,7 @@ void Service::destroy_wait_ctx(wait_ctx *const wctx)
 bool Service::shutdown(connection *const c, const uint32_t ref)
 {
         if (trace)
-                SLog("SHUTDOWN at ", ref, "\n");
+                SLog("SHUTDOWN at ", ref, " ", Timings::Microseconds::SysTime(), "\n");
 
         require(c->fd != -1);
         poller.DelFd(c->fd);
@@ -1958,14 +1962,17 @@ int Service::start(int argc, char **argv)
         sa.sin_port = htons(listenAddr.port);
         sa.sin_family = AF_INET;
 
-        Switch::SetReuseAddr(listenFd, 1);
-        if (bind(listenFd, (sockaddr *)&sa, sizeof(sa)))
+        if (Switch::SetReuseAddr(listenFd, 1) == -1)
+	{
+		Print("SO_REUSEADDR: ", strerror(errno), "\n");
+		return 1;
+	}
+        else if (bind(listenFd, (sockaddr *)&sa, sizeof(sa)))
         {
                 Print("bind() failed:", strerror(errno), "\n");
                 return 1;
         }
-
-        if (listen(listenFd, 128))
+        else if (listen(listenFd, 128))
         {
                 Print("listen() failed:", strerror(errno), "\n");
                 return 1;
@@ -1999,20 +2006,32 @@ int Service::start(int argc, char **argv)
                                 socklen_t saLen = sizeof(sa);
                                 int newFd = accept4(fd, (sockaddr *)&sa, &saLen, SOCK_NONBLOCK | SOCK_CLOEXEC);
 
-                                require(saLen == sizeof(sockaddr_in));
+                                if (newFd == -1)
+                                {
+                                        if (errno != EINTR && errno != EAGAIN)
+                                        {
+                                                Print("accept4(): ", strerror(errno), "\n");
+                                                return 1;
+                                        }
+                                }
+                                else
+                                {
+                                        require(saLen == sizeof(sockaddr_in));
 
-                                auto c = get_connection();
+                                        auto c = get_connection();
 
-                                c->fd = newFd;
-                                c->replicaId = 0;
-                                switch_dlist_init(&c->connectionsList);
-                                switch_dlist_init(&c->waitCtxList);
-                                switch_dlist_insert_after(&allConnections, &c->connectionsList);
+                                        c->fd = newFd;
+                                        c->replicaId = 0;
+                                        switch_dlist_init(&c->connectionsList);
+                                        switch_dlist_init(&c->waitCtxList);
+                                        switch_dlist_insert_after(&allConnections, &c->connectionsList);
 
-                                // We are going to ping as soon as we can so that the client will know we have been accepted
-                                // but we can't write(fd, ..) now; so we 'll need to wait for POLLOUT and then ping
-                                c->state.flags = (1u << uint8_t(connection::State::Flags::PendingIntro)) | (1u << uint8_t(connection::State::Flags::NeedOutAvail));
-                                poller.AddFd(c->fd, POLLIN | POLLOUT, c);
+                                        // We are going to ping as soon as we can so that the client will know we have been accepted
+                                        // but we can't write(fd, ..) now; so we 'll need to wait for POLLOUT and then ping
+                                        c->state.flags = (1u << uint8_t(connection::State::Flags::PendingIntro)) | (1u << uint8_t(connection::State::Flags::NeedOutAvail));
+                                        poller.AddFd(c->fd, POLLIN | POLLOUT, c);
+                                }
+
                                 continue;
                         }
 
@@ -2030,7 +2049,11 @@ int Service::start(int argc, char **argv)
                                 if (!b)
                                         b = c->inB = get_buffer();
 
-                                ioctl(fd, FIONREAD, &n);
+                                if (unlikely(ioctl(fd, FIONREAD, &n) == -1))
+				{
+					Print("ioctl():", strerror(errno), "\n");
+					return 1;
+				}
                                 b->EnsureCapacity(n);
                                 r = read(fd, b->End(), n);
 
@@ -2079,23 +2102,25 @@ int Service::start(int argc, char **argv)
                                                 if (p == e)
                                                 {
                                                         b->clear();
+							Drequire(b->Offset() == 0);
                                                         c->inB = nullptr;
                                                         put_buffer(b);
                                                         break;
                                                 }
-                                                else
-                                                {
-                                                        b->SetOffset(p);
-
-                                                        if (b->Offset() > 4 * 1024)
-                                                        {
-                                                                b->DeleteChunk(0, b->Offset());
-                                                                b->SetOffset(uint32_t(0));
-                                                        }
-                                                }
+						else
+							b->SetOffset(p);
                                         }
                                         else
                                                 break;
+                                }
+
+                                if (auto b = c->inB)
+                                {
+                                        if (b->Offset() > 4 * 1024 * 1024)
+                                        {
+                                                b->DeleteChunk(0, b->Offset());
+                                                b->SetOffset(uint32_t(0));
+                                        }
                                 }
                         }
 
