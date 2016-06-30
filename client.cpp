@@ -14,7 +14,7 @@ uint8_t TankClient::choose_compression_codec(const msg *const msgs, const size_t
 		for (size_t i{0}; i != msgsCnt; ++i)
 		{
 			sum+=msgs[i].content.len;
-			if (sum > 128 * 1024)
+			if (sum > 32 * 1024)
 				return 1;
                 }
         }
@@ -142,6 +142,9 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
 
                                 if (unlikely(!Compression::Compress(Compression::Algo::SNAPPY, b.At(msgSetOffset), b.length() - msgSetOffset, &cmpBuf)))
                                         throw Switch::system_error("Failed to compress content");
+
+				if (trace)
+					SLog(b.length() - msgSetOffset, " => ", cmpBuf.length(), "\n");
 
 				// TODO: if cmpBuf.length() > (b.length - msgSetOffset) don't use compressed content
 

@@ -771,6 +771,8 @@ class Service
 
         void destroy_wait_ctx(wait_ctx *const wctx);
 
+	void cleanup_connection(connection *);
+
         bool shutdown(connection *const c, const uint32_t ref);
 
         bool try_send_ifnot_blocked(connection *const c)
@@ -792,6 +794,8 @@ class Service
                 switch_dlist_init(&allConnections);
                 switch_dlist_init(&waitExpList);
         }
+
+	~Service();
 
         int start(int argc, char **argv);
 };

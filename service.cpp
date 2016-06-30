@@ -1635,12 +1635,8 @@ void Service::destroy_wait_ctx(wait_ctx *const wctx)
         put_waitctx(wctx);
 }
 
-bool Service::shutdown(connection *const c, const uint32_t ref)
+void Service::cleanup_connection(connection *const c)
 {
-        if (trace)
-                SLog("SHUTDOWN at ", ref, " ", Timings::Microseconds::SysTime(), "\n");
-
-        require(c->fd != -1);
         poller.DelFd(c->fd);
         close(c->fd);
         c->fd = -1;
@@ -1662,6 +1658,15 @@ bool Service::shutdown(connection *const c, const uint32_t ref)
 
         if (auto q = std::exchange(c->outQ, nullptr))
                 put_outgoing_queue(q);
+}
+
+bool Service::shutdown(connection *const c, const uint32_t ref)
+{
+        if (trace)
+                SLog("SHUTDOWN at ", ref, " ", Timings::Microseconds::SysTime(), "\n");
+
+        require(c->fd != -1);
+	cleanup_connection(c);
 
         return false;
 }
@@ -1825,6 +1830,12 @@ bool Service::try_send(connection *const c)
         }
 
         return true;
+}
+
+Service::~Service()
+{
+	while (switch_dlist_any(&allConnections))
+		cleanup_connection(switch_list_entry(connection, connectionsList, allConnections.next));
 }
 
 int Service::start(int argc, char **argv)
