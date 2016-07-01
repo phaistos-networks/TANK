@@ -5,6 +5,8 @@ int main(int argc, char *argv[])
         TankClient client;
         const strwlen32_t req(argv[1]);
 
+	client.set_default_leader(":1025");
+
         if (req.Eq(_S("get")))
         {
                 client.consume(

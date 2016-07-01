@@ -218,6 +218,7 @@ class TankClient
                 } leader_reqs;
         } ids_tracker;
 
+	Switch::endpoint defaultLeader{};
 	strwlen8_t clientId{"c++"};
         switch_dlist connections;
         Switch::vector<std::pair<connection *, IOBuffer *>> connsBufs;
@@ -381,8 +382,10 @@ class TankClient
 
         Switch::endpoint leader_for(const strwlen8_t topic, const uint16_t partition)
         {
-                // for now, hardcoded
-                return {IP4Addr(127, 0, 0, 1), 1025};
+		if (!defaultLeader)
+			throw Switch::data_error("Default leader not specified: use set_default_leader() to specify it");
+
+		return defaultLeader;
         }
 
         uint32_t consume(const std::vector<std::pair<topic_partition, std::pair<uint64_t, uint32_t>>> &req, const uint64_t maxWait, const uint32_t minSize);
@@ -391,6 +394,14 @@ class TankClient
 	{
 		clientId.Set(p, len);
 	}
+
+	void set_default_leader(const strwlen32_t e)
+        {
+                defaultLeader = Switch::ParseSrvEndpoint(e, {_S("tank")}, 11011);
+
+                if (!defaultLeader)
+                        throw Switch::data_error("Unable to parse default leader endpoint");
+        }
 };
 
 #ifdef LEAN_SWITCH
