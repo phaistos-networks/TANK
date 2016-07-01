@@ -383,7 +383,7 @@ class TankClient
                 return {IP4Addr(127, 0, 0, 1), 1025};
         }
 
-        uint32_t consume(const Switch::vector<std::pair<topic_partition, std::pair<uint64_t, uint32_t>>> &req, const uint64_t maxWait, const uint32_t minSize);
+        uint32_t consume(const std::vector<std::pair<topic_partition, std::pair<uint64_t, uint32_t>>> &req, const uint64_t maxWait, const uint32_t minSize);
 
 	void set_client_id(const char *const p, const uint32_t len)
 	{

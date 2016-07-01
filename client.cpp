@@ -1193,7 +1193,7 @@ uint32_t TankClient::produce(const std::vector<
         return clientReqId;
 }
 
-uint32_t TankClient::consume(const Switch::vector<
+uint32_t TankClient::consume(const std::vector<
                                  std::pair<topic_partition,
                                            std::pair<uint64_t, uint32_t>>> &req,
                              const uint64_t maxWait, const uint32_t minSize)
