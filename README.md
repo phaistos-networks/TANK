@@ -1,4 +1,4 @@
-Tank is a high performance distributed log, inspired in part by Kafka, and other similar services and technologies. 
+Tank is a high performance distributed log, inspired in part by Kafka, and other similar services and technologies.
 
 You should begin by [reading about the core concepts](https://github.com/phaistos-networks/TANK/wiki/Core-Concepts) and the [client API](https://github.com/phaistos-networks/TANK/wiki/Client-API).
 
@@ -9,14 +9,14 @@ It compiles and works perfectly fine here though.
 This is our first major open source release as a company, and we plan to accelerate our OSS release efforts in the future.
 
 It will eventually support, among other features:
-- clusters via leader/followers arrangement using etcd, similar in semantics to Kafka (but no single controller, and simpler configuration and operation)
+- [clusters via leader/followers arrangement](https://github.com/phaistos-networks/TANK/wiki/Operation-Modes) using etcd, similar in semantics to Kafka (but no single controller, and simpler configuration and operation)
 - higher level clients, based on Kafka's current client design (depending on the needs of our developers, but PRs will be welcome)
 - hooks into other Phaistos infrastructure
-- a Kafka like streams abstraction
+- a Kafka like streams topologies abstraction
 - encryption (wire transfers and bundle serialization)
 - improved client and extended API
 - HTTP/1 and HTTP/2 REST APIs
-- compactions based on message key
+- compactions based on message key (will retain the last published message for each key)
 
 
 Features include:
