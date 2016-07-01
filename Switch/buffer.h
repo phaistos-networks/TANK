@@ -1291,7 +1291,7 @@ class IOBuffer
 template <typename VT, typename LT>
 static inline void PrintImpl(Buffer &out, const range_base<VT, LT> &r)
 {
-	out.AppendFmt("[%llu, %llu)", uint64_t(r.Left()), uint64_t(r.Right()));
+	out.AppendFmt("[%lu, %lu)", uint64_t(r.Left()), uint64_t(r.Right()));
 }
 
 struct _srcline_repr

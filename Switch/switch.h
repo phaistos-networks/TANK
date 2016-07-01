@@ -6,6 +6,9 @@
 #include <string.h>
 #include <type_traits>
 #include <unistd.h>
+#include <cmath>
+#include <cstdlib>
+
 
 #define require(x) assert(x)
 #define Drequire(x) assert(x)
