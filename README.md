@@ -21,8 +21,8 @@ It will eventually support, among other features:
 Features include:
 - Very high performance
 - Very tight encoding of messages(into bundles)
-- Simple design
-
+- Simple design (Simple is Beautiful; Convenience is Key)
+ 
 You should probably use Kafka (the Confluent folk are particularly great ), or Google DataFlow, or any other open source broker/queue instead of Tank - they are all perfectly fine, some more than other. 
 Tank's goal is highest performance and simplicity. 
 
