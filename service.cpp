@@ -249,10 +249,10 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
 
         lock.lock_shared();
 
-        // UINT64_MAX is reserved: fetch only newly produced bundles
+        // (UINT64_MAX) is reserved: fetch only newly produced bundles
         // see process_consume()
-        // UINT64_MAX -1 is also reserved; start from the first available sequence
-        if (absSeqNum == UINT64_MAX - 1)
+        // (0) is also reserved; start from the first available sequence
+        if (absSeqNum == 0)
         {
                 if (trace)
                         SLog("Asked to fetch starting from first available sequence number ", firstAvailableSeqNum, "\n");
@@ -681,7 +681,70 @@ lookup_res topic_partition::read_from_local(const bool fetchOnlyFromLeader, cons
         return std::move(log_->range_for(absSeqNum, fetchSize, maxAbsSeqNum));
 }
 
-Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint16_t idx, const char *const bp)
+bool Service::parse_limits_config(const char *const path, partition_limits *const l)
+{
+        int fd = open(path, O_RDONLY | O_LARGEFILE);
+
+        if (fd == -1)
+                throw Switch::system_error("Failed to access topic/partition config file:", strerror(errno));
+        else if (const auto fileSize = lseek64(fd, 0, SEEK_END))
+        {
+                auto fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, fd, 0);
+
+                close(fd);
+                if (fileData == MAP_FAILED)
+                        throw Switch::system_error("Failed to access topic/partition config file:", strerror(errno));
+
+                madvise(fileData, fileSize, MADV_SEQUENTIAL);
+                Defer({ munmap(fileData, fileSize); });
+
+                for (auto &&line : strwlen32_t((char *)fileData, fileSize).Split('\n'))
+                {
+                        strwlen32_t k, v;
+
+                        if (auto p = line.Search('#'))
+                                line.SetEnd(p);
+
+                        std::tie(k, v) = line.Divided('=');
+                        k.TrimWS();
+                        v.TrimWS();
+
+                        if (k && v)
+                        {
+                                if (k.EqNoCase(_S("limits.segments.count")))
+                                {
+                                        l->roSegmentsCnt = v.AsUint32();
+                                        if (l->roSegmentsCnt < 2 && l->roSegmentsCnt)
+                                                throw Switch::range_error("Invalid limits.segments.count");
+                                }
+                                else if (k.EqNoCase(_S("limits.segments.size")))
+                                {
+                                        l->roSegmentsSize = v.AsUint32();
+                                        if (l->roSegmentsSize < 128 && l->roSegmentsSize)
+                                                throw Switch::range_error("Invalid limits.segments.size");
+                                }
+                                else if (k.EqNoCase(_S("limits.segment.size")))
+                                {
+                                        l->maxSegmentSize = v.AsUint32();
+                                        if (l->maxSegmentSize < 128)
+                                                throw Switch::range_error("Invalid limits.segment.size");
+                                }
+                                else if (k.EqNoCase(_S("index.interval")))
+                                {
+                                        l->indexInterval = v.AsUint32();
+                                        if (l->indexInterval < 128)
+                                                throw Switch::range_error("Invalid index.interval");
+                                }
+                                else
+                                        Print("Unknown topic/partition configuration key '", k, "'\n");
+                        }
+                }
+        }
+
+	return true;
+}
+
+Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint16_t idx, const char *const bp, const partition_limits &partitionLogLimits)
 {
         char basePath[PATH_MAX];
         size_t basePathLen = strlen(bp);
@@ -706,6 +769,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                 int fd;
                 auto l = new topic_partition_log();
 
+		l->limits = partitionLogLimits;
                 partition->distinctId = _atomic_inc_relaxed(&nextDistinctPartitionId);
 
                 partition->log_.reset(l);
@@ -725,66 +789,8 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
 
                         if (name.Eq(_S("config")))
                         {
-                                int fd = open(Buffer::build(basePath, "/", name).data(), O_RDONLY | O_LARGEFILE);
-
-                                if (fd == -1)
-                                        throw Switch::system_error("Failed to access topic/partition config file:", strerror(errno));
-                                else if (const auto fileSize = lseek64(fd, 0, SEEK_END))
-                                {
-                                        auto fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, fd, 0);
-
-                                        close(fd);
-                                        if (fileData == MAP_FAILED)
-                                                throw Switch::system_error("Failed to access topic/partition config file:", strerror(errno));
-
-                                        madvise(fileData, fileSize, MADV_SEQUENTIAL);
-                                        Defer({ munmap(fileData, fileSize); });
-
-                                        for (auto &&line : strwlen32_t((char *)fileData, fileSize).Split('\n'))
-                                        {
-                                                strwlen32_t k, v;
-
-                                                if (auto p = line.Search('#'))
-                                                        line.SetEnd(p);
-
-                                                std::tie(k, v) = line.Divided('=');
-                                                k.TrimWS();
-                                                v.TrimWS();
-
-                                                if (k && v)
-                                                {
-                                                        if (k.EqNoCase(_S("limits.segments.count")))
-                                                        {
-                                                                l->limits.roSegmentsCnt = v.AsUint32();
-                                                                if (l->limits.roSegmentsCnt < 2 && l->limits.roSegmentsCnt)
-                                                                        throw Switch::range_error("Invalid limits.segments.count");
-                                                        }
-                                                        else if (k.EqNoCase(_S("limits.segments.size")))
-                                                        {
-                                                                l->limits.roSegmentsSize = v.AsUint32();
-                                                                if (l->limits.roSegmentsSize < 128 && l->limits.roSegmentsSize)
-                                                                        throw Switch::range_error("Invalid limits.segments.size");
-                                                        }
-                                                        else if (k.EqNoCase(_S("limits.segment.size")))
-                                                        {
-                                                                l->limits.maxSegmentSize = v.AsUint32();
-                                                                if (l->limits.maxSegmentSize < 128)
-                                                                        throw Switch::range_error("Invalid limits.segment.size");
-                                                        }
-                                                        else if (k.EqNoCase(_S("index.interval")))
-                                                        {
-                                                                l->limits.indexInterval = v.AsUint32();
-                                                                if (l->limits.indexInterval < 128)
-                                                                        throw Switch::range_error("Invalid index.interval");
-                                                        }
-                                                        else
-                                                                Print("Unknown topic/partition configuration key '", k, "'\n");
-                                                }
-                                        }
-                                }
-                                else
-                                        close(fd);
-
+				// override
+				parse_limits_config(Buffer::build(basePath, "/", name).data(), &l->limits);
                                 continue;
                         }
 
@@ -1892,7 +1898,7 @@ int Service::start(int argc, char **argv)
         }
         else
         {
-		// TODO: only if running in standaloen mode; otherwise interface with the etcd cluster for configuration
+		// TODO: only if running in standalone mode; otherwise interface with the etcd cluster for configuration
                 size_t totalPartitions{0};
 
                 try
@@ -1912,10 +1918,16 @@ int Service::start(int argc, char **argv)
                                 {
                                         const auto topicBasePathLen = basePath_.length();
                                         uint32_t partitionsCnt{0}, sum{0};
+					partition_limits partitionLimits;
 
                                         for (const auto &&name : DirectoryEntries(basePath_.data()))
                                         {
-                                                if (name.IsDigits())
+						if (name.Eq(_S("config")))
+						{
+							// topic overrides defaults
+							parse_limits_config(basePath_.data(), &partitionLimits);
+						}
+                                                else if (name.IsDigits())
                                                 {
                                                         if (stat64(basePath_.data(), &st) == -1)
                                                                 throw Switch::system_error("Failed to stat(", basePath_, "): ", strerror(errno));
@@ -1937,7 +1949,7 @@ int Service::start(int argc, char **argv)
                                                 for (uint16_t i{0}; i != partitionsCnt; ++i)
                                                 {
                                                         basePath_.append("/", i);
-                                                        auto partition = init_local_partition(i, basePath_.data());
+                                                        auto partition = init_local_partition(i, basePath_.data(), partitionLimits);
 
                                                         t->register_partition(partition.release());
                                                         basePath_.SetLength(topicBasePathLen);

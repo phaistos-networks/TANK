@@ -1,4 +1,4 @@
-#include "client.h"
+#include "tank_client.h"
 
 static constexpr bool trace{false};
 
@@ -557,8 +557,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                         // Original fetch request absolute sequence number requested
                         // Special values:
-                        // UINT64_MAX 		: get data produced from now on, don't return any old records
-                        // UINT64_MAX - 1 	: fetch fromt the first available sequence number
+                        // UINT64_MAX 	: get data produced from now on, don't return any old records
+                        // 0 		: fetch fromt the first available sequence number
                         const auto requestedSeqNum = reqSeqNums[reqOffsetIdx++];
 
                         if (trace)
@@ -642,7 +642,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 if (trace)
                                         SLog("bundleFlags = ", bundleFlags, ", codec = ", codec, ", msgsSetSize = ", msgsSetSize, "\n");
 
-                                if (requestedSeqNum < UINT64_MAX - 1 && requestedSeqNum >= logBaseSeqNum + msgsSetSize)
+                                if (requestedSeqNum < UINT64_MAX && requestedSeqNum >= logBaseSeqNum + msgsSetSize)
                                 {
                                         // Optimization: can skip this bundle altogether
                                         if (trace)
@@ -672,7 +672,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         switch (codec)
                                         {
                                                 case 1:
-                                                        Compression::UnCompress(Compression::Algo::SNAPPY, p, bundleEnd - p, &produceCtx);
+                                                        if (unlikely(!Compression::UnCompress(Compression::Algo::SNAPPY, p, bundleEnd - p, &produceCtx)))
+								throw Switch::data_error("Failed to decompress bundle message set");
                                                         break;
 
                                                 default:
@@ -760,7 +761,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                                 goto next;
                                         }
-                                        else if (requestedSeqNum >= UINT64_MAX - 1 || msgAbsSeqNum >= requestedSeqNum)
+                                        else if (requestedSeqNum == UINT64_MAX  || msgAbsSeqNum >= requestedSeqNum)
                                         {
                                                 const strwlen32_t content((char *)p, len); // message content
 
@@ -1202,6 +1203,7 @@ uint32_t TankClient::consume(const Switch::vector<
         out.clear();
         if (trace)
                 SLog("About to request consume from ", req.size(), " topics\n");
+
         for (const auto &p : req)
         {
                 const auto ref = p.first;
@@ -1235,109 +1237,4 @@ uint32_t TankClient::consume(const Switch::vector<
         }
 
         return clientReqId;
-}
-
-int main(int argc, char *argv[])
-{
-        TankClient client;
-        const strwlen32_t req(argv[1]);
-
-        if (req.Eq(_S("get")))
-        {
-                client.consume(
-                    {{{"bp_activity", 0}, {argc > 2 ? strwlen32_t(argv[2]).AsUint32() : UINT64_MAX, 10'000}}}, 10000, 128);
-        }
-        else if (req.Eq(_S("set")))
-        {
-		if (argc > 2)
-		{
-			std::vector<TankClient::msg> msgs;
-			IOBuffer b;
-			const auto now = Timings::Milliseconds::SysTime();
-
-			Print("Reading ", argv[2], " ..\n");
-			if (b.ReadFromFile(argv[2]) <= 0)
-			{
-				Print("Unable to read ", argv[2], "\n");
-				return 1;
-			}
-
-			Print("Processing\n");
-                        for (const auto &line : b.AsS32().Split('\n'))
-                        {
-                                msgs.push_back({line, now});
-
-                                if (msgs.size() == 128)
-                                {
-                                        client.produce(
-                                            {{{"bp_activity", 0},
-                                              msgs}
-
-                                            });
-
-                                        msgs.clear();
-                                }
-                        }
-
-                        if (msgs.size())
-                        {
-                                client.produce(
-                                    {{{"bp_activity", 0},
-                                      msgs}
-
-                                    });
-                        }
-                }
-		else
-                {
-                        client.produce(
-                            {{{"bp_activity", 0},
-                              {{"world of warcraft GAME", Timings::Milliseconds::SysTime()},
-                               {"Amiga 1200 Computer", Timings::Milliseconds::SysTime(), "computer"},
-                               {"lord of the rings, the return of the king", Timings::Milliseconds::SysTime()}}}});
-                }
-        }
-
-	try
-	{
-                for (;;)
-                {
-                        client.poll(1000);
-
-                        for (const auto &it : client.consumed())
-                        {
-                                Print("Consumed from ", it.topic, ".", it.partition, ", next {", it.next.seqNum, ", ", it.next.minFetchSize, "}\n");
-
-                                for (const auto mit : it.msgs)
-                                {
-                                        Print("[", mit->key, "]:", mit->content, "(", mit->seqNum, ")\n");
-                                }
-                        }
-
-                        for (const auto &it : client.faults())
-                        {
-                                Print("Fault for ", it.clientReqId, "\n");
-                                switch (it.type)
-                                {
-                                        case TankClient::fault::Type::BoundaryCheck:
-                                                Print("firstAvailSeqNum = ", it.ctx.firstAvailSeqNum, ", hwMark = ", it.ctx.highWaterMark, "\n");
-                                                break;
-
-                                        default:
-                                                break;
-                                }
-                        }
-
-                        for (const auto &it : client.produce_acks())
-                        {
-                                Print("Produced OK ", it.clientReqId, "\n");
-                        }
-                }
-        }
-        catch (const std::exception &e)
-        {
-		Print("failed:", e.what(), "\n");
-        }
-
-        return 0;
 }

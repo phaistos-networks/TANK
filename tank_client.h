@@ -3,7 +3,6 @@
 #include <network.h>
 #include <set>
 #include <switch.h>
-#include <switch_deque.h>
 #include <switch_dictionary.h>
 #include <switch_ll.h>
 #include <switch_mallocators.h>

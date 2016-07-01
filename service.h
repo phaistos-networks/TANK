@@ -177,6 +177,14 @@ struct lookup_res
         }
 };
 
+struct partition_limits
+{
+        size_t roSegmentsCnt{10};
+        size_t roSegmentsSize{512'000};
+        size_t maxSegmentSize{256};
+        size_t indexInterval{512}; // Kafka's default is 4k
+} limits;
+
 static void PrintImpl(Buffer &out, const lookup_res &res)
 {
         if (res.fault != lookup_res::Fault::NoFault)
@@ -240,13 +248,8 @@ struct topic_partition_log
 
         } cur; // the _current_ (latest) segment
 
-        struct
-        {
-                size_t roSegmentsCnt{10};
-                size_t roSegmentsSize{512'000};
-                size_t maxSegmentSize{256};
-                size_t indexInterval{512}; // Kafka's default is 4k
-        } limits;
+	partition_limits limits;
+
 
         // a topic partition is comprised of a set of segments(log file, index file) which
         // are immutable, and we don't need to serialize access to them, and a cur(rent) segment, which is not immutable.
@@ -668,6 +671,8 @@ class Service
         Switch::vector<topic_partition *> deferList;
 
       private:
+        static bool parse_limits_config(const char *, partition_limits *);
+
         auto get_outgoing_queue()
         {
                 return outgoingQueuesPool.size() ? outgoingQueuesPool.Pop() : new outgoing_queue();
@@ -714,7 +719,7 @@ class Service
                         throw Switch::exception("Topic ", t->name(), " already registered");
         }
 
-        Switch::shared_refptr<topic_partition> init_local_partition(const uint16_t idx, const char *const bp);
+        Switch::shared_refptr<topic_partition> init_local_partition(const uint16_t idx, const char *const bp, const partition_limits&);
 
         bool isValidBrokerId(const uint16_t replicaId)
         {
