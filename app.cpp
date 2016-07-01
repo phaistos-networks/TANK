@@ -42,8 +42,6 @@ int main(int argc, char *argv[])
 			madvise(fileData, fileSize, MADV_SEQUENTIAL);
 
 
-
-
 			Print("Processing\n");
                         for (const auto &line : strwlen32_t((char *)fileData, fileSize).Split('\n'))
                         {
