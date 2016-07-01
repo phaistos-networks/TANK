@@ -1,7 +1,9 @@
 #pragma once
+#include "common.h"
+#include <set>
+#include <vector>
 #include <compress.h>
 #include <network.h>
-#include <set>
 #include <switch.h>
 #include <switch_dictionary.h>
 #include <switch_ll.h>
@@ -230,9 +232,9 @@ class TankClient
         uint32_t nextConsumeReqId{1}, nextProduceReqId{1};
         Switch::vector<connection *> connectionAttempts, connsList;
         EPoller poller;
-        Switch::vector<connection *, DeleteDestructor> connectionsPool;
-        Switch::vector<outgoing_payload *, DeleteDestructor> payloadsPool;
-        Switch::vector<IOBuffer *, DeleteDestructor> buffersPool;
+        Switch::vector<connection *> connectionsPool;
+        Switch::vector<outgoing_payload *> payloadsPool;
+        Switch::vector<IOBuffer *> buffersPool;
         Switch::vector<range32_t> ranges;
         IOBuffer produceCtx;
         Switch::unordered_map<uint32_t, active_consume_req> pendingConsumeReqs;
@@ -391,12 +393,37 @@ class TankClient
 	}
 };
 
+#ifdef LEAN_SWITCH
+namespace std
+{
+        template <>
+        struct hash<TankClient::topic_partition>
+        {
+		using argument_type = TankClient::topic_partition;
+		using result_type = std::size_t;
+
+                inline result_type operator()(const argument_type &v) const
+                {
+			size_t hash{2166136261U};
+
+			for (uint32_t i{0}; i != v.first.len; ++i)
+				 hash = (hash * 16777619) ^ v.first.p[i];
+
+                        hash ^= std::hash<uint16_t>{}(v.second) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+                        return hash;
+                }
+        };
+}
+#else
 namespace Switch
 {
         template <>
         struct hash<TankClient::topic_partition>
         {
-                inline uint32_t operator()(const TankClient::topic_partition &v)
+		using argument_type = TankClient::topic_partition;
+		using result_type = uint32_t;
+
+                inline result_type operator()(const argument_type &v) const
                 {
                         uint32_t seed = Switch::hash<strwlen8_t>{}(v.first);
 
@@ -405,3 +432,4 @@ namespace Switch
                 }
         };
 }
+#endif

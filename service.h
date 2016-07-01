@@ -1,11 +1,19 @@
 #pragma once
+#include "common.h"
 #include <fs.h>
 #include <network.h>
 #include <switch.h>
 #include <switch_ll.h>
 #include <switch_refcnt.h>
+#include <switch_vector.h>
+#include <switch_dictionary.h>
+#include <thread.h>
+#ifndef LEAN_SWITCH
 #include <switch_sharedmutex.h>
+#endif
+#include <sys/mman.h>
 #include <sys/sendfile.h>
+
 
 // The index is sparse, so we need to be able to locate the _last_ index entry for relative sequence number <= targetRelativeSeqNumber
 // so that we can either
@@ -196,9 +204,11 @@ static void PrintImpl(Buffer &out, const lookup_res &res)
 // An append-only log for storing bundles, divided into segments
 struct topic_partition_log
 {
+#ifndef LEAN_SWITCH
         // in practice, we 'll only need to acquire the lock when accessing the last/current commit log
         // all other immutable frozen commit log files do not require serialization
         Switch::SharedMutexReadPriority lock;
+#endif
 
         // The first available absolute sequence number across all segments
         uint64_t firstAvailableSeqNum;
@@ -250,7 +260,6 @@ struct topic_partition_log
 
 	partition_limits limits;
 
-
         // a topic partition is comprised of a set of segments(log file, index file) which
         // are immutable, and we don't need to serialize access to them, and a cur(rent) segment, which is not immutable.
         //
@@ -262,7 +271,7 @@ struct topic_partition_log
         {
                 if (roSegments)
                 {
-                        for (auto it : *roSegments)
+                        for (ro_segment *it : *roSegments)
                                 delete it;
                 }
         }
@@ -274,17 +283,6 @@ struct topic_partition_log
         append_res append_bundle(const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt);
 
         void consider_ro_segments();
-};
-
-struct partition_state
-{
-        uint64_t controllerEpoch; // epoch of the controller that elected the leader
-        uint16_t leaderReplica;   // leader broker id
-        uint64_t leaderEpoch;     // leader epoch
-        uint8_t isrSize;
-        uint8_t replFactor;
-        Switch::vector<uint16_t> isr; // all replicas in ISR
-        Switch::vector<uint16_t> replicas;
 };
 
 struct connection;
@@ -350,15 +348,18 @@ struct topic_partition
         {
                 uint16_t brokerId;
                 uint64_t epoch;
-                Switch::shared_refptr<replica> replica;
+                Switch::shared_refptr<struct replica> replica;
         } leader;
 
         // this node may or may not be a replica for this partition
         std::unique_ptr<topic_partition_log> log_;
+#ifndef LEAN_SWITCH
         Switch::SharedMutexReadPriority replicasLock;
-        Switch::vector<replica *> insyncReplicas;
         Switch::unordered_map<uint16_t, replica *, ReleaseRefDestructor> replicasMap;
-        uint64_t controllerEpoch;
+#else
+	Switch::unordered_map<uint16_t, replica *> replicasMap;
+#endif
+        Switch::vector<replica *> insyncReplicas;
 
         auto highwater_mark() const
         {
@@ -384,12 +385,12 @@ struct topic
     : public RefCounted<topic>
 {
         const strwlen8_t name_;
-        Switch::vector<topic_partition *, ReleaseRefDestructor> *partitions_;
+        Switch::vector<topic_partition *> *partitions_;
 
         topic(const strwlen8_t name)
             : name_{name.Copy(), name.len}
         {
-                partitions_ = new Switch::vector<topic_partition *, ReleaseRefDestructor>();
+                partitions_ = new Switch::vector<topic_partition *>();
         }
 
         auto name() const
@@ -402,7 +403,13 @@ struct topic
                 if (auto *const p = const_cast<char *>(name_.p))
                         free(p);
 
-                delete partitions_;
+		if (partitions_)
+                {
+                        while (partitions_->size())
+                                delete partitions_->Pop();
+
+                        delete partitions_;
+                }
         }
 
         void register_partition(topic_partition *const p)
@@ -657,10 +664,14 @@ class Service
 {
       private:
         Switch::vector<wait_ctx *> waitCtxPool[255];
+#ifndef LEAN_SWITCH
         Switch::unordered_map<strwlen8_t, topic *, ReleaseRefDestructor> topics;
+#else
+        Switch::unordered_map<strwlen8_t, topic *> topics;
+#endif
         Buffer basePath_;
         uint16_t selfBrokerId{1};
-        Switch::vector<IOBuffer *, DeleteDestructor> bufs;
+        Switch::vector<IOBuffer *> bufs;
         Switch::vector<connection *> connsPool;
         Switch::vector<outgoing_queue *> outgoingQueuesPool;
         switch_dlist allConnections, waitExpList;
@@ -681,7 +692,7 @@ class Service
         void put_outgoing_queue(outgoing_queue *const q)
         {
                 q->clear([this](auto buf) {
-                        put_buffer(buf);
+                        this->put_buffer(buf);
                 });
 
                 outgoingQueuesPool.push_back(q);
@@ -733,8 +744,15 @@ class Service
 
         const topic_partition *getPartition(const strwlen8_t topic, const uint16_t partitionIdx) const
         {
+#ifdef LEAN_SWITCH
+		const auto it = topics.find(topic);
+
+		if (it != topics.end())
+			return it->second->partition(partitionIdx);
+#else
                 if (const auto t = topics[topic])
                         return t->partition(partitionIdx);
+#endif
 
                 return nullptr;
         }

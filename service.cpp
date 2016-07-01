@@ -3,6 +3,10 @@
 #include <sys/stat.h>
 #include <text.h>
 #include <unistd.h>
+#include <compress.h>
+#include <timings.h>
+#include <ansifmt.h>
+#include <text.h>
 
 static constexpr bool trace{false};
 
@@ -159,7 +163,7 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
         bool inSkiplist;
         const auto relSeqNum = uint32_t(absSeqNum - cur.baseSeqNum);
         const auto &skipList = cur.index.skipList;
-        const auto *const end = skipList.end();
+        const auto end = skipList.end();
         const auto it = std::upper_bound_or_match(skipList.begin(), end, relSeqNum, [](const auto &a, const auto seqNum) {
                 return TrivialCmp(seqNum, a.first);
         });
@@ -173,13 +177,17 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
 
                 res.absBaseSeqNum = cur.baseSeqNum + it->first;
                 res.range.Set(it->second, cur.fileSize - it->second);
+#ifndef LEAN_SWITCH
                 lock.unlock_shared();
+#endif
 
                 inSkiplist = true;
         }
         else
         {
+#ifndef LEAN_SWITCH
                 lock.unlock_shared();
+#endif
 
                 require(cur.index.ondisk.span); // we checked if it's in this current segment
 
@@ -247,7 +255,9 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         if (trace)
                 SLog("Read for absSeqNum = ", absSeqNum, ", lastAssignedSeqNum = ", lastAssignedSeqNum, ", firstAvailableSeqNum = ", firstAvailableSeqNum, "\n");
 
+#ifndef LEAN_SWITCH
         lock.lock_shared();
+#endif
 
         // (UINT64_MAX) is reserved: fetch only newly produced bundles
         // see process_consume()
@@ -274,7 +284,9 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         if (maxSize == 0)
         {
                 // Should be handled by the client
+#ifndef LEAN_SWITCH
                 lock.unlock_shared();
+#endif
 
                 if (trace)
                         SLog("maxSize == 0\n");
@@ -283,7 +295,9 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         else if (maxAbsSeqNum < absSeqNum)
         {
                 // Should be handled by the client
+#ifndef LEAN_SWITCH
                 lock.unlock_shared();
+#endif
 
                 if (trace)
                         SLog("Past maxAbsSeqNum = ", maxAbsSeqNum, "\n");
@@ -293,7 +307,10 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         {
                 // return empty
                 // UPDATE: let's wait instead
+#ifndef LEAN_SWITCH
                 lock.unlock_shared();
+#endif
+
 
                 if (trace)
                         SLog("Empty\n");
@@ -303,7 +320,9 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         {
                 // past last assigned sequence number? nope
                 // throw an error
+#ifndef LEAN_SWITCH
                 lock.unlock_shared();
+#endif
 
                 if (trace)
                         SLog("PAST absSeqNum(", absSeqNum, ") > lastAssignedSeqNum(", lastAssignedSeqNum, ")\n");
@@ -311,7 +330,9 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         }
         else if (absSeqNum < firstAvailableSeqNum)
         {
+#ifndef LEAN_SWITCH
                 lock.unlock_shared();
+#endif
 
                 if (trace)
                         SLog("< firstAvailableSeqNum\n");
@@ -327,7 +348,9 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
 
 	auto prevSegments = roSegments;
 
+#ifndef LEAN_SWITCH
         lock.unlock_shared();
+#endif
 
 	// TODO: https://github.com/phaistos-networks/TANK/issues/2
         const auto end = prevSegments->end();
@@ -422,7 +445,9 @@ void topic_partition_log::consider_ro_segments()
 
 append_res topic_partition_log::append_bundle(const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt)
 {
+#ifndef LEAN_SWITCH
         lock.lock();
+#endif
 
 	const auto savedLastAssignedSeqNum = lastAssignedSeqNum;
         const auto absSeqNum = lastAssignedSeqNum + 1;
@@ -539,7 +564,9 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 
                 if (unlikely(write(cur.index.fd, out, sizeof(out)) != sizeof(out)))
                 {
+#ifndef LEAN_SWITCH
                         lock.unlock();
+#endif
                         return {nullptr, {}, {}};
                 }
 
@@ -563,7 +590,9 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
         require(cur.fdh.use_count() == before + 1);
         if (writev(fd, iov, sizeof_array(iov)) != entryLen)
         {
+#ifndef LEAN_SWITCH
                 lock.unlock();
+#endif
                 return {nullptr, {}, {}};
         }
         else
@@ -571,7 +600,9 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 cur.fileSize += entryLen;
                 cur.sinceLastUpdate += entryLen;
 
+#ifndef LEAN_SWITCH
                 lock.unlock();
+#endif
                 return {fdh, fileRange, {absSeqNum, uint16_t(bundleMsgsCnt)}};
         }
 }
@@ -757,8 +788,10 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
         if (trace)
                 SLog("Initializing partition ", bp, "\n");
 
+#ifndef LEAN_SWITCH
         if (!SwitchFS::BuildPath(basePath))
                 throw Switch::system_error("Failed to create or access directory ", basePath);
+#endif
 
         try
         {
@@ -770,7 +803,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                 auto l = new topic_partition_log();
 
 		l->limits = partitionLogLimits;
-                partition->distinctId = _atomic_inc_relaxed(&nextDistinctPartitionId);
+                partition->distinctId = ++nextDistinctPartitionId;
 
                 partition->log_.reset(l);
                 partition->idx = idx;
@@ -1411,6 +1444,10 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                         if (trace)
                                 SLog("Took ", duration_repr(Timings::Microseconds::Since(b)), " for ", msgSetSize, " msgs in bundle message set: ", expiredCtxList.size(), "\n");
 
+#ifdef LEAN_SWITCH
+			(void)b;
+#endif
+
                         respHeader->Serialize(uint8_t(0));
 
                         while (expiredCtxList.size())
@@ -1842,6 +1879,14 @@ Service::~Service()
 {
 	while (switch_dlist_any(&allConnections))
 		cleanup_connection(switch_list_entry(connection, connectionsList, allConnections.next));
+
+	while (bufs.size())
+		delete bufs.Pop();
+
+#ifdef LEAN_SWITCH
+	for (auto &it : topics)
+		it.second->Release();
+#endif
 }
 
 int Service::start(int argc, char **argv)
@@ -2147,7 +2192,7 @@ int Service::start(int argc, char **argv)
                                         if (b->Offset() > 4 * 1024 * 1024)
                                         {
                                                 b->DeleteChunk(0, b->Offset());
-                                                b->SetOffset(uint32_t(0));
+                                                b->SetOffset(uint64_t(0));
                                         }
                                 }
                         }

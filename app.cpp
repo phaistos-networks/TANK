@@ -17,16 +17,35 @@ int main(int argc, char *argv[])
 			std::vector<TankClient::msg> msgs;
 			IOBuffer b;
 			const auto now = Timings::Milliseconds::SysTime();
+			int fd = open(argv[2], O_RDONLY|O_LARGEFILE);
 
 			Print("Reading ", argv[2], " ..\n");
-			if (b.ReadFromFile(argv[2]) <= 0)
+
+			if (fd == -1)
 			{
 				Print("Unable to read ", argv[2], "\n");
 				return 1;
 			}
 
+			const auto fileSize = lseek64(fd, 0, SEEK_END);
+
+			if (!fileSize)
+			{
+				close(fd);
+				Print("Empty file\n");
+				return 1;
+			}
+
+			auto fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, fd, 0);
+
+			assert(fileData != MAP_FAILED);
+			madvise(fileData, fileSize, MADV_SEQUENTIAL);
+
+
+
+
 			Print("Processing\n");
-                        for (const auto &line : b.AsS32().Split('\n'))
+                        for (const auto &line : strwlen32_t((char *)fileData, fileSize).Split('\n'))
                         {
                                 msgs.push_back({line, now});
 
@@ -50,6 +69,8 @@ int main(int argc, char *argv[])
 
                                     });
                         }
+
+			munmap(fileData, fileSize);
                 }
 		else
                 {

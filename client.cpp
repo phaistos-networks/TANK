@@ -52,6 +52,17 @@ TankClient::~TankClient()
                 switch_dlist_del(&c->list);
                 delete c;
         }
+
+	while (connectionsPool.size())
+		delete connectionsPool.Pop();
+
+	while (payloadsPool.size())
+		delete payloadsPool.Pop();
+	
+	while (buffersPool.size())
+		delete buffersPool.Pop();
+
+
 }
 
 uint8_t TankClient::choose_compression_codec(const msg *const msgs, const size_t msgsCnt)
@@ -366,8 +377,6 @@ bool TankClient::shutdown(connection *const c, const uint32_t ref, const bool fa
         for (const auto id : c->pendingConsume)
         {
                 const auto res = pendingConsumeReqs.detach(id);
-
-                require(res);
                 const auto info = res.value();
 
                 capturedFaults.push_back({info.clientReqId, fault::Type::Network, fault::Req::Consume, {}, 0});
@@ -377,8 +386,6 @@ bool TankClient::shutdown(connection *const c, const uint32_t ref, const bool fa
         for (const auto id : c->pendingProduce)
         {
                 const auto res = pendingProduceReqs.detach(id);
-
-                require(res);
                 const auto info = res.value();
 
                 capturedFaults.push_back({info.clientReqId, fault::Type::Network, fault::Req::Produce, {}, 0});
@@ -399,10 +406,6 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
         const auto reqId = *(uint32_t *)p;
         p += sizeof(uint32_t);
         const auto res = pendingProduceReqs.detach(reqId);
-
-	if (unlikely(!res))
-		throw Switch::data_error(reqId, " no longer registered with pendingProduceReqs");
-
         const auto reqInfo = res.value();
         const auto clientReqId = reqInfo.clientReqId;
 
@@ -492,8 +495,6 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
         p += sizeof(uint32_t);
         const auto topicsCnt = *p++;
         const auto res = pendingConsumeReqs.detach(reqId);
-
-        expect(res);
         auto reqInfo = res.value();
         const auto clientReqId = reqInfo.clientReqId;
         const auto *const reqSeqNums = reqInfo.seqNums;
@@ -785,7 +786,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                         // we couldn't parse a single message from any bundle for this (topic, partition)  - i.e consumptionsList.empty() == true
                         const auto next = consumptionList.size() ? Max(requestedSeqNum, consumptionList.back().seqNum + 1) : requestedSeqNum;
 
-                        if (const auto cnt = consumptionList.size())
+                        if (const uint32_t cnt = consumptionList.size())
                         {
                                 if (i == topicsCnt - 1 && k == partitionsCnt - 1)
                                 {
@@ -1018,6 +1019,24 @@ TankClient::connection *TankClient::init_connection(const Switch::endpoint e)
 
 TankClient::connection *TankClient::leader_connection(Switch::endpoint leader)
 {
+#ifdef LEAN_SWITCH
+	auto it = connectionsMap.find(leader);
+
+	if (it != connectionsMap.end())
+		return it->second;
+	else
+	{
+		auto p = init_connection(leader);
+
+		if (!p)
+			return nullptr;
+		else
+		{
+			connectionsMap.insert({leader, p});
+			return p;
+		}
+	}
+#else
         connection **ptr;
 
         if (connectionsMap.Add(leader, nullptr, &ptr))
@@ -1031,6 +1050,7 @@ TankClient::connection *TankClient::leader_connection(Switch::endpoint leader)
         }
 
         return *ptr;
+#endif
 }
 
 int TankClient::init_connection_to(const Switch::endpoint e)
@@ -1053,7 +1073,11 @@ int TankClient::init_connection_to(const Switch::endpoint e)
                 RFLog("socket() failed:", strerror(errno), "\n");
                 return -1;
         }
-        else if (connect(fd, (sockaddr *)&sa, sizeof(sa)) == -1 && errno != EINPROGRESS)
+
+	if (trace)
+		SLog("Connecting to ", e, "\n");
+	
+       if (connect(fd, (sockaddr *)&sa, sizeof(sa)) == -1 && errno != EINPROGRESS)
         {
                 close(fd);
                 RFLog("connect() failed:", strerror(errno), "\n");
@@ -1080,7 +1104,7 @@ void TankClient::poll(uint32_t timeoutMS)
                         else if (b->Offset() > 1 * 1024 * 1024)
                         {
                                 b->DeleteChunk(0, b->Offset());
-                                b->SetOffset(uint32_t(0));
+                                b->SetOffset(uint64_t(0));
                         }
                 }
         }
