@@ -885,7 +885,7 @@ class Buffer
 
         inline void SetReserved(const uint32_t newSize)
         {
-#ifdef SWITCH_HAVE_MALLOC_USABLE_SIZE
+#ifndef SWITCH_HAVE_MALLOC_USABLE_SIZE
 		reserved_ = newSize;
 #else
                 (void)newSize;
@@ -1303,7 +1303,7 @@ class IOBuffer
 template <typename VT, typename LT>
 static inline void PrintImpl(Buffer &out, const range_base<VT, LT> &r)
 {
-	out.AppendFmt("[%llu, %llu)", uint64_t(r.Left()), uint64_t(r.Right()));
+	out.AppendFmt("[%" PRIu64 ", %" PRIu64 ")", uint64_t(r.Left()), uint64_t(r.Right()));
 }
 
 struct _srcline_repr
