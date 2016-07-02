@@ -1897,11 +1897,11 @@ int Service::start(int argc, char **argv)
         struct stat64 st;
         Switch::endpoint listenAddr;
 
-        while ((r = getopt(argc, argv, "b:l:")) != -1)
+        while ((r = getopt(argc, argv, "p:l:")) != -1)
         {
                 switch (r)
                 {
-                        case 'b':
+                        case 'p':
                                 basePath_.clear();
                                 basePath_.append(strwlen32_t(optarg, strlen(optarg)));
                                 break;

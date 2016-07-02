@@ -2,6 +2,14 @@
 
 int main(int argc, char *argv[])
 {
+	if (argc < 2)
+	{
+		Print("This is a demo app; it will connect to Tank broker at 127.0.0.1:1025 and will either produce(publish) or consume(fetch) some data from it\n");
+		Print("Use ./app get to some some data. If you specify an argument, that will be the sequence number to begin consuming from\n");
+		Print("Use ./app set to set some data. Use ./app set filePath to read lines from that file and set each as a distinct message\n");
+
+		return 0;
+	}
         TankClient client;
         const strwlen32_t req(argv[1]);
 
