@@ -3,27 +3,69 @@
 
 int main(int argc, char *argv[])
 {
-	if (argc < 2)
-	{
-		Print("This is a demo app; it will connect to Tank broker at 127.0.0.1:1025 and will either produce(publish) or consume(fetch) some data from it\n");
-		Print("Use ./app get to some some data. If you specify an argument, that will be the sequence number to begin consuming from\n");
-		Print("Use ./app set to set some data. Use ./app set filePath to read lines from that file and set each as a distinct message\n");
+	Buffer endpoint, topic;
+	uint16_t partition{0};
+	int r;
+	
+	topic.Append(_S("bp_activity"));
+	endpoint.Append(_S("127.0.0.1:1025"));
+	while ((r = getopt(argc, argv, "b:t:p:")) != -1)
+        {
+                switch (r)
+                {
+                        case 'b':
+                                endpoint.clear();
+                                endpoint.Append(optarg);
+                                break;
 
+                        case 't':
+                                topic.clear();
+                                topic.Append(optarg);
+                                break;
+
+                        case 'p':
+                                partition = strwlen32_t(optarg).AsUint32();
+                                break;
+
+                        default:
+                                return 1;
+                }
+        }
+
+        argc-=optind;
+	argv+=optind;
+
+
+	if (argc < 1)
+	{
+		Print("This is a demo app; it will connect to Tank broker at ", endpoint, " and will either produce(publish) or consume(fetch) some data from it\n");
+		Print("(selected topic '", topic, "', partition ", partition, ")\n");
+		Print("Use ./app get to some some data. If you specify an argument, that will be the sequence number to begin consuming from.\n");
+		Print("\tIf that argument is EOF it will 'tail' that partition. If it is 0, it will stream starting from the first available message\n");
+		Print("Use ./app set to set some data. Use ./app set filePath to read lines from that file and set each as a distinct message\n");
+		Print("Options:\n");
+		Print("-e endpoint: standalone broker endpoint (default 127.0.0.1:1025)\n");
+		Print("-t topic: selected topic name (default bp_activity)\n");
+		Print("-p partition: selected partition (default 0)\n");
+		Print("e.g ./app -b :1025 -t events -p 0 set   first second third fourth\n");
+		Print("e.g ./app -b :1025 -t events get\n");
 		return 0;
 	}
         TankClient client;
-        const strwlen32_t req(argv[1]);
+        const strwlen32_t req(argv[0]);
 
-	client.set_default_leader(":1025");
+	client.set_default_leader(endpoint.AsS32());
 
         if (req.Eq(_S("get")))
         {
+                const uint64_t base = argc > 1 ? !memcmp(argv[1], _S("EOF")) ? UINT64_MAX : strwlen32_t(argv[1]).AsUint64() : 0;
+
                 client.consume(
-                    {{{"bp_activity", 0}, {argc > 2 ? strwlen32_t(argv[2]).AsUint32() : UINT64_MAX, 10'000}}}, 10000, 128);
+                    {{{topic.AsS8(), partition}, {base, 10'000}}}, 10000, 0);
         }
         else if (req.Eq(_S("set")))
         {
-                if (argc > 2 && argv[2][0] == '/')
+                if (argc > 1 && argv[1][0] == '/')
                 {
                         std::vector<TankClient::msg> msgs;
                         IOBuffer b;
@@ -60,7 +102,7 @@ int main(int argc, char *argv[])
                                 if (msgs.size() == 128)
                                 {
                                         client.produce(
-                                            {{{"bp_activity", 0},
+                                            {{{topic.AsS8(), partition},
                                               msgs}
 
                                             });
@@ -72,7 +114,7 @@ int main(int argc, char *argv[])
                         if (msgs.size())
                         {
                                 client.produce(
-                                    {{{"bp_activity", 0},
+                                    {{{topic.AsS8(), partition},
                                       msgs}
 
                                     });
@@ -80,7 +122,7 @@ int main(int argc, char *argv[])
 
                         munmap(fileData, fileSize);
                 }
-                else if (argc == 2)
+                else if (argc == 1)
                 {
                         Print("Use ./app set msg1 msg2 msg2 .. to set messages\n");
                         return 0;
@@ -89,14 +131,14 @@ int main(int argc, char *argv[])
                 {
                         std::vector<TankClient::msg> msgs;
 
-                        for (uint32_t i{2}; i != argc; ++i)
+                        for (uint32_t i{1}; i != argc; ++i)
                                 msgs.push_back({argv[i], Timings::Milliseconds::Tick()});
 
                         const auto req = client.produce(
-                            {{{"bp_activity", 0},
+                            {{{topic.AsS8(), partition},
                               msgs}});
 
-			Print("Publishing ", dotnotation_repr(msgs.size()), " msg(s) to bp_activity.0, client request id = ", req, "\n");
+			Print("Publishing ", dotnotation_repr(msgs.size()), " msg(s) to ", topic, ".", partition, ", client request id = ", req, "\n");
                 }
         }
 

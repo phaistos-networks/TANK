@@ -1895,6 +1895,7 @@ int Service::start(int argc, char **argv)
         uint64_t nextIdleCheck{0}, nextExpWaitCtxCheck{0};
         int r;
         struct stat64 st;
+        size_t totalPartitions{0};
         Switch::endpoint listenAddr;
 
         while ((r = getopt(argc, argv, "p:l:")) != -1)
@@ -1922,13 +1923,13 @@ int Service::start(int argc, char **argv)
 
         if (!listenAddr)
         {
-                Print("Listen address not specified\n");
+                Print("Listen address not specified. Use -l address to specify it\n");
                 return 1;
         }
 
         if (!basePath_.length())
         {
-                Print("Base path not specified\n");
+                Print("Base path not specified. Use -p path to specify it\n");
                 return 1;
         }
         else if (stat64(basePath_.data(), &st) == -1)
@@ -1944,8 +1945,6 @@ int Service::start(int argc, char **argv)
         else
         {
 		// TODO: only if running in standalone mode; otherwise interface with the etcd cluster for configuration
-                size_t totalPartitions{0};
-
                 try
                 {
                         const auto basePathLen = basePath_.length();
@@ -2013,14 +2012,21 @@ int Service::start(int argc, char **argv)
                         return 1;
                 }
 
-                Print(ansifmt::bold, "<=TANK=>", ansifmt::reset, " ", dotnotation_repr(topics.size()), " topics registered, ", dotnotation_repr(totalPartitions), " partitions; will listen for new connections at ", listenAddr, "\n");
+		if (!topics.size())
+		{
+		}
+
         }
 
         if (topics.empty())
         {
-                Print("No topics registered\n");
+                Print("No topics found in ", basePath_, ". You may want to create a few, like so:\n");
+                Print("mkdir -p ", basePath_, "/events/0 ", basePath_, "/orders/0 \n");
+		Print("This will create topics events and orders and define one partition with id 0 for each of them. Restart Tank after you have created a few topics/partitions\n");
                 return 1;
         }
+
+        Print(ansifmt::bold, "<=TANK=>", ansifmt::reset, " ", dotnotation_repr(topics.size()), " topics registered, ", dotnotation_repr(totalPartitions), " partitions; will listen for new connections at ", listenAddr, "\n");
 
         listenFd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 
