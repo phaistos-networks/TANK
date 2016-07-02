@@ -1,4 +1,5 @@
 #include "tank_client.h"
+#include <text.h>
 
 int main(int argc, char *argv[])
 {
@@ -22,37 +23,36 @@ int main(int argc, char *argv[])
         }
         else if (req.Eq(_S("set")))
         {
-		if (argc > 2)
-		{
-			std::vector<TankClient::msg> msgs;
-			IOBuffer b;
-			const auto now = Timings::Milliseconds::SysTime();
-			int fd = open(argv[2], O_RDONLY|O_LARGEFILE);
+                if (argc > 2 && argv[2][0] == '/')
+                {
+                        std::vector<TankClient::msg> msgs;
+                        IOBuffer b;
+                        const auto now = Timings::Milliseconds::SysTime();
+                        int fd = open(argv[2], O_RDONLY | O_LARGEFILE);
 
-			Print("Reading ", argv[2], " ..\n");
+                        Print("Reading ", argv[2], " ..\n");
 
-			if (fd == -1)
-			{
-				Print("Unable to read ", argv[2], "\n");
-				return 1;
-			}
+                        if (fd == -1)
+                        {
+                                Print("Unable to read ", argv[2], "\n");
+                                return 1;
+                        }
 
-			const auto fileSize = lseek64(fd, 0, SEEK_END);
+                        const auto fileSize = lseek64(fd, 0, SEEK_END);
 
-			if (!fileSize)
-			{
-				close(fd);
-				Print("Empty file\n");
-				return 1;
-			}
+                        if (!fileSize)
+                        {
+                                close(fd);
+                                Print("Empty file\n");
+                                return 1;
+                        }
 
-			auto fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, fd, 0);
+                        auto fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, fd, 0);
 
-			assert(fileData != MAP_FAILED);
-			madvise(fileData, fileSize, MADV_SEQUENTIAL);
+                        assert(fileData != MAP_FAILED);
+                        madvise(fileData, fileSize, MADV_SEQUENTIAL);
 
-
-			Print("Processing\n");
+                        Print("Processing\n");
                         for (const auto &line : strwlen32_t((char *)fileData, fileSize).Split('\n'))
                         {
                                 msgs.push_back({line, now});
@@ -78,19 +78,29 @@ int main(int argc, char *argv[])
                                     });
                         }
 
-			munmap(fileData, fileSize);
+                        munmap(fileData, fileSize);
                 }
-		else
+                else if (argc == 2)
                 {
-                        client.produce(
+                        Print("Use ./app set msg1 msg2 msg2 .. to set messages\n");
+                        return 0;
+                }
+                else
+                {
+                        std::vector<TankClient::msg> msgs;
+
+                        for (uint32_t i{2}; i != argc; ++i)
+                                msgs.push_back({argv[i], Timings::Milliseconds::Tick()});
+
+                        const auto req = client.produce(
                             {{{"bp_activity", 0},
-                              {{"world of warcraft GAME", Timings::Milliseconds::SysTime()},
-                               {"Amiga 1200 Computer", Timings::Milliseconds::SysTime(), "computer"},
-                               {"lord of the rings, the return of the king", Timings::Milliseconds::SysTime()}}}});
+                              msgs}});
+
+			Print("Publishing ", dotnotation_repr(msgs.size()), " msg(s) to bp_activity.0, client request id = ", req, "\n");
                 }
         }
 
-	try
+        try
 	{
                 for (;;)
                 {
@@ -108,12 +118,32 @@ int main(int argc, char *argv[])
 
                         for (const auto &it : client.faults())
                         {
-                                Print("Fault for ", it.clientReqId, "\n");
+                                Print("Fault for ", it.clientReqId, ", type of fault:");
+
                                 switch (it.type)
                                 {
                                         case TankClient::fault::Type::BoundaryCheck:
+						Print("BoundaryCheck\n");
                                                 Print("firstAvailSeqNum = ", it.ctx.firstAvailSeqNum, ", hwMark = ", it.ctx.highWaterMark, "\n");
                                                 break;
+
+					case TankClient::fault::Type::UnknownTopic:
+						Print("Unknown topic\n");
+						break;
+
+					case TankClient::fault::Type::UnknownPartition:
+						Print("Unknown partition\n");
+						break;
+
+
+					case TankClient::fault::Type::Access:
+						Print("Access\n");
+						break;
+
+					case TankClient::fault::Type::Network:
+						Print("Network\n");
+						break;
+
 
                                         default:
                                                 break;
