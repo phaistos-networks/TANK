@@ -141,10 +141,17 @@ int main(int argc, char *argv[])
 			Print("Publishing ", dotnotation_repr(msgs.size()), " msg(s) to ", topic, ".", partition, ", client request id = ", req, "\n");
                 }
         }
+	else
+	{
+		Print("Unsupported command ", req, "\n");
+		return 1;
+	}
 
         try
 	{
-                for (;;)
+		bool noEvents{true};
+
+		while (noEvents)
                 {
                         client.poll(1000);
 
@@ -156,6 +163,7 @@ int main(int argc, char *argv[])
                                 {
                                         Print("[", mit->key, "]:", mit->content, "(", mit->seqNum, ")\n");
                                 }
+				noEvents = false;
                         }
 
                         for (const auto &it : client.faults())
@@ -190,11 +198,13 @@ int main(int argc, char *argv[])
                                         default:
                                                 break;
                                 }
+				noEvents = false;
                         }
 
                         for (const auto &it : client.produce_acks())
                         {
                                 Print("Produced OK ", it.clientReqId, "\n");
+				noEvents = false;
                         }
                 }
         }
