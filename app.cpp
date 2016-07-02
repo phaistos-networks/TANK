@@ -7,7 +7,7 @@ int main(int argc, char *argv[])
 	uint16_t partition{0};
 	int r;
 	
-	topic.Append(_S("bp_activity"));
+	topic.Append(_S("events"));
 	endpoint.Append(_S("127.0.0.1:1025"));
 	while ((r = getopt(argc, argv, "b:t:p:")) != -1)
         {
@@ -45,7 +45,7 @@ int main(int argc, char *argv[])
 		Print("Use ./app set to set some data. Use ./app set filePath to read lines from that file and set each as a distinct message\n");
 		Print("Options:\n");
 		Print("-b endpoint: standalone broker endpoint (default 127.0.0.1:1025)\n");
-		Print("-t topic: selected topic name (default bp_activity)\n");
+		Print("-t topic: selected topic name (default is \"events\")\n");
 		Print("-p partition: selected partition (default 0)\n");
 		Print("e.g ./app -b :1025 -t events -p 0 set   first second third fourth\n");
 		Print("e.g ./app -b :1025 -t events get\n");
