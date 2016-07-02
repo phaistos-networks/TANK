@@ -44,7 +44,7 @@ int main(int argc, char *argv[])
 		Print("\tIf that argument is EOF it will 'tail' that partition. If it is 0, it will stream starting from the first available message\n");
 		Print("Use ./app set to set some data. Use ./app set filePath to read lines from that file and set each as a distinct message\n");
 		Print("Options:\n");
-		Print("-e endpoint: standalone broker endpoint (default 127.0.0.1:1025)\n");
+		Print("-b endpoint: standalone broker endpoint (default 127.0.0.1:1025)\n");
 		Print("-t topic: selected topic name (default bp_activity)\n");
 		Print("-p partition: selected partition (default 0)\n");
 		Print("e.g ./app -b :1025 -t events -p 0 set   first second third fourth\n");
