@@ -4,6 +4,24 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/syscall.h>
+#ifdef __MACH__
+#include <mach/clock.h>
+#include <mach/mach.h>
+#endif
+
+#ifdef __MACH__
+static clock_serv_t cclock;
+
+[[gnu::constructor]] static void __init()
+{
+        host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
+}
+
+[[gnu::destructor]] static void __dtor()
+{
+        mach_port_deallocate(mach_task_self(), cclock);
+}
+#endif
 
 namespace Timings
 {
@@ -13,7 +31,16 @@ namespace Timings
                 {
                         struct timespec res;
 
+#ifdef __MACH__
+                        mach_timespec_t mts;
+
+                        clock_get_time(cclock, &mts);
+                        res.tv_sec = mts.tv_sec;
+                        res.tv_nsec = mts.tv_nsec;
+#else
                         clock_gettime(CLOCK_MONOTONIC, &res);
+#endif
+
                         return (res.tv_sec * 1000000000ULL) + res.tv_nsec;
                 }
 
@@ -143,12 +170,12 @@ namespace Timings
 
                         if (unlikely(gettimeofday(&tv, nullptr) == -1))
                         {
-				abort();
+                                abort();
                         }
                         else if (unlikely(tv.tv_sec < 1451982426u))
                         {
-				abort();
-			}
+                                abort();
+                        }
                         else
                                 return ((tv.tv_sec * 1000000000ULL) + (tv.tv_usec * 1000ULL)) / asNanoseconds;
                 }

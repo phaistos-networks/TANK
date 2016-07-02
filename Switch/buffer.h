@@ -1,5 +1,7 @@
 #pragma once
+#ifdef __linux__
 #include <malloc.h>
+#endif
 #include <stdarg.h>
 
 class Buffer
@@ -163,7 +165,11 @@ class Buffer
       public:
         [[gnu::always_inline]] inline uint32_t Reserved() const
         {
+#ifdef SWITCH_HAVE_MALLOC_USABLE_SIZE
                 return likely(buffer) ? malloc_usable_size(buffer) : 0;
+#else
+		return reserved_;
+#endif
         }
 
         [[gnu::always_inline]] inline auto length() const
@@ -550,7 +556,9 @@ class Buffer
                         if (unlikely(!buffer))
                                 std::abort();
 
+#ifdef SWITCH_HAVE_MALLOC_USABLE_SIZE
                         newSize = malloc_usable_size(buffer);
+#endif
 
                         SetReserved(newSize);
                         SetOwnsBuffer(true);
@@ -860,15 +868,15 @@ class Buffer
 
         [[gnu::always_inline]] inline virtual bool OwnsBuffer() const
         {
-                // Ref: SGL ImmutableString
-                // We need to know if we own the buffer, for otherwise Reserved() will fail (malloc_usable_size(const char*) will abort)
-
                 return true;
         }
 
       protected:
         char *buffer;
         uint32_t length_;
+#ifndef SWITCH_HAVE_MALLOC_USABLE_SIZE
+	uint32_t reserved_{0};
+#endif
 
         [[gnu::always_inline]] inline void SetOwnsBuffer(const bool v)
         {
@@ -877,7 +885,11 @@ class Buffer
 
         inline void SetReserved(const uint32_t newSize)
         {
+#ifdef SWITCH_HAVE_MALLOC_USABLE_SIZE
+		reserved_ = newSize;
+#else
                 (void)newSize;
+#endif
         }
 };
 
@@ -1291,7 +1303,7 @@ class IOBuffer
 template <typename VT, typename LT>
 static inline void PrintImpl(Buffer &out, const range_base<VT, LT> &r)
 {
-	out.AppendFmt("[%lu, %lu)", uint64_t(r.Left()), uint64_t(r.Right()));
+	out.AppendFmt("[%llu, %llu)", uint64_t(r.Left()), uint64_t(r.Right()));
 }
 
 struct _srcline_repr

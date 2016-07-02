@@ -5,6 +5,7 @@
 #include <limits>
 #include <memory>
 #include <utility>
+#include <cmath>
 
 // http://gcc.gnu.org/onlinedocs/gcc/Other-Builtins.html
 // returns true if this is a static const, most likely allocated in RODATA segment

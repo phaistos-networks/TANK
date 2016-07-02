@@ -1,5 +1,9 @@
 #pragma once
 #include "buffer.h"
+#ifndef __linux__
+#include <pthread.h>
+#endif
+
 
 struct ptr_repr
 {
@@ -90,37 +94,37 @@ static inline void PrintImpl(Buffer &out, char *p)
 
 static inline void PrintImpl(Buffer &out, const uint32_t &v)
 {
-	out.AppendFmt("%u", v);
+	out.AppendFmt("%" PRIu32, v);
 }
 
 static inline void PrintImpl(Buffer &out, const uint8_t &v)
 {
-	out.AppendFmt("%u", v);
+	out.AppendFmt("%" PRIu32, v);
 }
 
 static inline void PrintImpl(Buffer &out, const uint16_t &v)
 {
-	out.AppendFmt("%u", v);
+	out.AppendFmt("%" PRIu32, v);
 }
 
 static inline void PrintImpl(Buffer &out, const int16_t &v)
 {
-	out.AppendFmt("%u", v);
+	out.AppendFmt("%" PRId32, v);
 }
 
 static inline void PrintImpl(Buffer &out, const int8_t &v)
 {
-	out.AppendFmt("%u", v);
+	out.AppendFmt("%" PRId32, v);
 }
 
 static inline void PrintImpl(Buffer &out, const uint64_t &v)
 {
-	out.AppendFmt("%lu", v);
+	out.AppendFmt("%" PRIu64, v);
 }
 
 static inline void PrintImpl(Buffer &out, const int64_t &v)
 {
-	out.AppendFmt("%ld", v);
+	out.AppendFmt("%" PRId64, v);
 }
 
 static inline void PrintImpl(Buffer &out, const Buffer &o)
@@ -153,11 +157,43 @@ static void PrintImpl(Buffer &b, const T &v, const Args&... args)
 	PrintImpl(b, args...);
 }
 
+#ifndef __linux__
+static pthread_key_t bufKey;
+
+[[gnu::constructor]] static void _init()
+{
+	pthread_key_create(&bufKey, nullptr);
+}
+
+[[gnu::destructor]] static void _tear_down()
+{
+	pthread_key_delete(bufKey);
+}
+#endif
+
+static Buffer &thread_local_buf()
+{
+#ifdef __linux__
+        static thread_local Buffer b;
+
+        return b;
+#else
+        auto p = (Buffer  *)pthread_getspecific(bufKey);
+
+        if (!p)
+        {
+                p = new Buffer();
+                pthread_setspecific(bufKey, p);
+        }
+
+        return *p;
+#endif
+}
 
 template<typename T, typename... Args>
 static void Print(const T &v, const Args&... args)
 {
-	static thread_local Buffer b;
+	auto &b = thread_local_buf();
 
 	b.clear();
 	PrintImpl(b, v);
@@ -214,7 +250,7 @@ static void PrintImpl(Buffer &b, const T &v)
 template<typename... Args>
 static size_t Snprint(char *out, const size_t outLen, Args&&... args)
 {
-	static thread_local Buffer b;
+	auto &b = thread_local_buf();
 
 	b.clear();
 	ToBuffer(b, std::forward<Args>(args)...);

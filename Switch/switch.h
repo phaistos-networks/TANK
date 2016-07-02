@@ -1,4 +1,5 @@
 #pragma once
+#include "portability.h"
 #include <assert.h>
 #include <ctype.h>
 #include <stdint.h>
@@ -8,7 +9,6 @@
 #include <unistd.h>
 #include <cmath>
 #include <cstdlib>
-
 
 #define require(x) assert(x)
 #define Drequire(x) assert(x)
