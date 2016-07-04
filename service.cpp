@@ -7,6 +7,7 @@
 #include <timings.h>
 #include <ansifmt.h>
 #include <text.h>
+#include <signal.h>
 
 static constexpr bool trace{false};
 
@@ -1912,6 +1913,8 @@ int Service::start(int argc, char **argv)
         size_t totalPartitions{0};
         Switch::endpoint listenAddr;
 
+	signal(SIGPIPE, SIG_IGN);
+	signal(SIGHUP, SIG_IGN);
         while ((r = getopt(argc, argv, "p:l:")) != -1)
         {
                 switch (r)
