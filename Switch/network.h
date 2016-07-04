@@ -154,15 +154,17 @@ namespace Switch
                 }
 
                 if (r.second)
-		{
-			if (!r.second.IsDigits())
-				return {0, 0};
+                {
+                        if (!r.second.IsDigits())
+                                return {0, 0};
 
-                        res.port = r.second.AsUint32();
-			if (res.port > 65536)
-				return {0, 0};
-		}
-		else
+                        const auto port = r.second.AsUint32();
+                        if (port > 65536)
+                                return {0, 0};
+                        else
+                                res.port = port;
+                }
+                else
 	                res.port = srvPort;
 
                 return res;

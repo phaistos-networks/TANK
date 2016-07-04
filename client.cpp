@@ -1361,6 +1361,35 @@ uint32_t TankClient::produce(const std::vector<
         return clientReqId;
 }
 
+void TankClient::set_topic_leader(const strwlen8_t topic, const strwlen32_t endpoint)
+{
+	Drequire(topic);
+	const auto e = Switch::ParseSrvEndpoint(endpoint, {_S("tank")}, 11011);
+
+	if (!e)
+		throw Switch::data_error("Unable to parse leader endpoint");
+
+	leadersMap.Add(topic, e);
+}
+
+Switch::endpoint TankClient::leader_for(const strwlen8_t topic, const uint16_t partition)
+{
+#ifndef LEAN_SWITCH
+	if (const auto *const p = leadersMap.FindPointer(topic))
+		return *p;
+#else
+	const auto it = leadersMap.find(topic);
+
+	if (it != leadersMap.end())
+		return it->second;
+#endif
+
+        if (!defaultLeader)
+                throw Switch::data_error("Default leader not specified: use set_default_leader() to specify it");
+
+        return defaultLeader;
+}
+
 uint32_t TankClient::consume(const std::vector<
                                  std::pair<topic_partition,
                                            std::pair<uint64_t, uint32_t>>> &req,

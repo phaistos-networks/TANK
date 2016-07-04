@@ -227,6 +227,8 @@ class TankClient
 		uint64_t until;
 	};
 
+	// topic to standalone broker
+	Switch::unordered_map<strwlen8_t, Switch::endpoint> leadersMap;
 	Switch::endpoint defaultLeader{};
 	Switch::unordered_map<Switch::endpoint, unreachable_broker_ctx> naBrokers;
 	strwlen8_t clientId{"c++"};
@@ -395,13 +397,7 @@ class TankClient
 
         uint32_t produce(const std::vector<std::pair<topic_partition, std::vector<msg>>> &req);
 
-        Switch::endpoint leader_for(const strwlen8_t topic, const uint16_t partition)
-        {
-		if (!defaultLeader)
-			throw Switch::data_error("Default leader not specified: use set_default_leader() to specify it");
-
-		return defaultLeader;
-        }
+        Switch::endpoint leader_for(const strwlen8_t topic, const uint16_t partition);
 
         uint32_t consume(const std::vector<std::pair<topic_partition, std::pair<uint64_t, uint32_t>>> &req, const uint64_t maxWait, const uint32_t minSize);
 
@@ -417,6 +413,8 @@ class TankClient
                 if (!defaultLeader)
                         throw Switch::data_error("Unable to parse default leader endpoint");
         }
+
+	void set_topic_leader(const strwlen8_t topic, const strwlen32_t e);
 };
 
 #ifdef LEAN_SWITCH
