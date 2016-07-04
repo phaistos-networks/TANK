@@ -73,9 +73,6 @@ TankClient::~TankClient()
                 delete c;
         }
 
-	if (trace)
-		SLog("Pools\n");
-
 	while (connectionsPool.size())
 		delete connectionsPool.Pop();
 
@@ -479,10 +476,6 @@ bool TankClient::shutdown(connection *const c, const uint32_t ref, const bool fa
 
         c->outgoingFront = c->outgoingBack = nullptr;
 	put_connection(c);
-
-	if (trace)
-		SLog("Did shutdown ", peer, "\n");
-
 
         return false;
 }
