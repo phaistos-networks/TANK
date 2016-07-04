@@ -451,10 +451,11 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 
 	const auto savedLastAssignedSeqNum = lastAssignedSeqNum;
         const auto absSeqNum = lastAssignedSeqNum + 1;
+	const size_t skipListCapacity = Min<size_t>(65536, limits.maxIndexSize / (sizeof(uint32_t) + sizeof(uint32_t)));
 
         lastAssignedSeqNum += bundleMsgsCnt;
 
-        if (cur.fileSize > limits.maxSegmentSize || cur.index.skipList.size() > 65536)
+        if (cur.fileSize > limits.maxSegmentSize || cur.index.skipList.size() > skipListCapacity)
         {
                 const auto basePathLen = basePath.length();
 
@@ -765,6 +766,12 @@ bool Service::parse_limits_config(const char *const path, partition_limits *cons
                                         l->indexInterval = v.AsUint32();
                                         if (l->indexInterval < 128)
                                                 throw Switch::range_error("Invalid index.interval");
+                                }
+				else if (k.EqNoCase(_S("limits.index.size")))
+                                {
+                                        l->maxIndexSize = v.AsUint32();
+                                        if (l->maxIndexSize < 128)
+                                                throw Switch::range_error("Invalid limits.index.size\n");
                                 }
                                 else
                                         Print("Unknown topic/partition configuration key '", k, "'\n");

@@ -187,10 +187,12 @@ struct lookup_res
 
 struct partition_limits
 {
-        size_t roSegmentsCnt{10};
-        size_t roSegmentsSize{512'000};
-        size_t maxSegmentSize{256};
-        size_t indexInterval{512}; // Kafka's default is 4k
+	// Kafka defaults
+        size_t roSegmentsCnt{0};
+        size_t roSegmentsSize{0};
+        size_t maxSegmentSize{1 * 1024 * 1024 * 1024};
+        size_t indexInterval{4096};
+	size_t maxIndexSize{10 * 1024 * 1024};
 } limits;
 
 static void PrintImpl(Buffer &out, const lookup_res &res)
