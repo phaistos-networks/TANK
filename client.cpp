@@ -751,11 +751,13 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         if (trace)
                                                 SLog("compressed, need to decompress messages set\n");
 
-                                        produceCtx.clear();
+					auto rawData = get_buffer();
+
+					rawData->clear();
                                         switch (codec)
                                         {
                                                 case 1:
-                                                        if (unlikely(!Compression::UnCompress(Compression::Algo::SNAPPY, p, bundleEnd - p, &produceCtx)))
+                                                        if (unlikely(!Compression::UnCompress(Compression::Algo::SNAPPY, p, bundleEnd - p, rawData)))
                                                                 throw Switch::data_error("Failed to decompress bundle message set");
                                                         break;
 
@@ -764,7 +766,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                         exit(1);
                                         }
 
-                                        msgSetContent.Set(reinterpret_cast<const uint8_t *>(produceCtx.data()), produceCtx.length());
+                                        msgSetContent.Set(reinterpret_cast<const uint8_t *>(rawData->data()), rawData->length());
+					usedBufs.push_back(rawData);
                                 }
                                 else
                                         msgSetContent.Set(p, Min<size_t>(end - p, bundleEnd - p));
@@ -1223,6 +1226,7 @@ int TankClient::init_connection_to(const Switch::endpoint e)
 
 void TankClient::poll(uint32_t timeoutMS)
 {
+	// Reset state / buffers used for tracking collected content and responses in last poll() call
         for (auto &it : connsBufs)
         {
                 auto c = it.first;
@@ -1244,6 +1248,12 @@ void TankClient::poll(uint32_t timeoutMS)
         }
         connsBufs.clear();
 
+	while (usedBufs.size())
+		put_buffer(usedBufs.Pop());
+
+
+
+	// Adjust timeout if we have any ongoing connection attempts
         if (connectionAttempts.size())
         {
                 const auto first = connectionAttempts.front()->state.lastInputTS + 256;

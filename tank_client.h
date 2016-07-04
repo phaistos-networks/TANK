@@ -232,6 +232,7 @@ class TankClient
 	strwlen8_t clientId{"c++"};
         switch_dlist connections;
         Switch::vector<std::pair<connection *, IOBuffer *>> connsBufs;
+	Switch::vector<IOBuffer *> usedBufs;
         simple_allocator resultsAllocator{4 * 1024 * 1024};
         Switch::vector<partition_content> consumedPartitionContent;
         Switch::vector<fault> capturedFaults;
