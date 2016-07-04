@@ -290,6 +290,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
 
                 if (trace)
                         SLog("maxSize == 0\n");
+
                 return {lookup_res::Fault::Empty, highWatermark};
         }
         else if (maxAbsSeqNum < absSeqNum)
@@ -301,6 +302,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
 
                 if (trace)
                         SLog("Past maxAbsSeqNum = ", maxAbsSeqNum, "\n");
+
                 return {lookup_res::Fault::Empty, highWatermark};
         }
         else if (absSeqNum == lastAssignedSeqNum + 1)
@@ -314,6 +316,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
 
                 if (trace)
                         SLog("Empty\n");
+
                 return {lookup_res::Fault::AtEOF, highWatermark};
         }
         else if (absSeqNum > lastAssignedSeqNum)
@@ -326,6 +329,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
 
                 if (trace)
                         SLog("PAST absSeqNum(", absSeqNum, ") > lastAssignedSeqNum(", lastAssignedSeqNum, ")\n");
+
                 return {lookup_res::Fault::BoundaryCheck, highWatermark};
         }
         else if (absSeqNum < firstAvailableSeqNum)
@@ -336,6 +340,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
 
                 if (trace)
                         SLog("< firstAvailableSeqNum\n");
+
                 return {lookup_res::Fault::BoundaryCheck, highWatermark};
         }
         else if (absSeqNum >= cur.baseSeqNum)
@@ -343,6 +348,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
                 // Great, definitely in the current segment
                 if (trace)
                         SLog("absSeqNum >= cur.baseSeqNum(", cur.baseSeqNum, "). Will get from current\n");
+
                 return read_cur(absSeqNum, maxSize, maxAbsSeqNum);
         }
 
@@ -397,12 +403,14 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
 
                 if (trace)
                         SLog("Will use first R/O segment\n");
+
                 return {f->fdh, f->baseSeqNum, {0, Min<uint32_t>(maxSize, f->fileSize)}, highWatermark};
         }
         else
         {
                 if (trace)
                         SLog("Will use current segment\n");
+
                 return {cur.fdh, cur.baseSeqNum, {0, Min<uint32_t>(maxSize, cur.fileSize)}, highWatermark};
         }
 }
@@ -1162,6 +1170,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                                 case lookup_res::Fault::AtEOF:
                                                         if (trace)
                                                                 SLog("Got AtEOF; will wait\n");
+
                                                         deferList.push_back(partition);
                                                         break;
 
@@ -1224,6 +1233,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                         {
                                 if (trace)
                                         SLog("No longer needed outQ\n");
+
                                 put_outgoing_queue(q);
                                 c->outQ = nullptr;
                         }
@@ -1369,6 +1379,7 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                         {
                                 if (trace)
                                         SLog("Undefined topic partition ", partitionId, "\n");
+
                                 p = e;
                                 respHeader->Serialize<uint8_t>(1);
                                 continue;
@@ -1867,11 +1878,7 @@ bool Service::try_send(connection *const c)
         c->outQ = nullptr;
 
         if (haveCork)
-        {
-                if (trace)
-                        SLog("Releasing cork\n");
                 Switch::SetTCPCork(fd, 0);
-        }
 
         if (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail)))
         {
@@ -2019,10 +2026,6 @@ int Service::start(int argc, char **argv)
                         return 1;
                 }
 
-		if (!topics.size())
-		{
-		}
-
         }
 
         if (topics.empty())
@@ -2136,7 +2139,7 @@ int Service::start(int argc, char **argv)
 					Print("ioctl():", strerror(errno), "\n");
 					return 1;
 				}
-                                b->EnsureCapacity(n);
+                                b->reserve(n);
                                 r = read(fd, b->End(), n);
 
                                 if (r == -1)

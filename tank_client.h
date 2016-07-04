@@ -83,6 +83,7 @@ class TankClient
                 void push_back(outgoing_payload *const p)
                 {
                         p->iovIdx = 0;
+			p->next = nullptr;
 
                         if (outgoingBack)
                                 outgoingBack->next = p;
@@ -100,6 +101,8 @@ class TankClient
                 void pop_front()
                 {
                         outgoingFront = outgoingFront->next;
+			if (!outgoingFront)
+				outgoingBack = nullptr;
                 }
 
                 connection()

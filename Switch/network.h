@@ -159,6 +159,8 @@ namespace Switch
 				return {0, 0};
 
                         res.port = r.second.AsUint32();
+			if (res.port > 65536)
+				return {0, 0};
 		}
 		else
 	                res.port = srvPort;

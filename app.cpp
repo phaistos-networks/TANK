@@ -63,7 +63,7 @@ int main(int argc, char *argv[])
                 const uint64_t base = argc > 1 ? !memcmp(argv[1], _S("EOF")) ? UINT64_MAX : strwlen32_t(argv[1]).AsUint64() : 0;
 
                 client.consume(
-                    {{{topic.AsS8(), partition}, {base, 10'000}}}, 10000, 0);
+                    {{{topic.AsS8(), partition}, {base, 1*1024*1024}}}, 10000, 0);
         }
         else if (req.Eq(_S("set")))
         {
