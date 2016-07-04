@@ -218,7 +218,14 @@ class TankClient
                 } leader_reqs;
         } ids_tracker;
 
+	struct unreachable_broker_ctx
+	{
+		uint32_t prevSleep;
+		uint64_t until;
+	};
+
 	Switch::endpoint defaultLeader{};
+	Switch::unordered_map<Switch::endpoint, unreachable_broker_ctx> naBrokers;
 	strwlen8_t clientId{"c++"};
         switch_dlist connections;
         Switch::vector<std::pair<connection *, IOBuffer *>> connsBufs;
@@ -256,6 +263,8 @@ class TankClient
         //
         // maxWait: The maximum amount of time the server will block before answering a fetch request, if ther isn't sufficeint data to immediately satisfy the requirement set by minSize
         bool consume_from_leader(const uint32_t clientReqId, const Switch::endpoint leader, const consume_ctx *const from, const size_t total, const uint64_t maxWait, const uint32_t minSize);
+
+	void track_na_broker(const Switch::endpoint);
 
         bool shutdown(connection *const c, const uint32_t ref, const bool fault = false);
 
@@ -303,8 +312,10 @@ class TankClient
                 p->iovCnt = p->iovIdx = 0;
                 p->next = nullptr;
 
-                put_buffer(p->b);
-                put_buffer(p->b2);
+                if (p->b)
+                        put_buffer(p->b);
+                if (p->b2)
+                        put_buffer(p->b2);
 
                 p->b = nullptr;
                 p->b2 = nullptr;

@@ -1,5 +1,6 @@
 #include "tank_client.h"
 #include <text.h>
+#include <stdlib.h>
 
 int main(int argc, char *argv[])
 {
@@ -7,6 +8,7 @@ int main(int argc, char *argv[])
 	uint16_t partition{0};
 	int r;
 	
+	srand(time(nullptr));
 	topic.Append(_S("events"));
 	endpoint.Append(_S("127.0.0.1:1025"));
 	while ((r = getopt(argc, argv, "b:t:p:")) != -1)
@@ -192,7 +194,20 @@ int main(int argc, char *argv[])
 
 					case TankClient::fault::Type::Network:
 						Print("Network\n");
-						break;
+#if 0
+						for (;;)
+                                                {
+                                                        Timings::Seconds::Sleep(1);
+                                                        client.produce(
+                                                            {{{"foo", 0},
+                                                              {
+                                                                  {"hello", Timings::Milliseconds::Tick()},
+                                                              }}});
+
+							     client.poll(1000);
+                                                }
+#endif
+                                                break;
 
 
                                         default:

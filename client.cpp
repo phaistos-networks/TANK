@@ -1,4 +1,5 @@
 #include "tank_client.h"
+#include <switch_algorithms.h>
 
 static constexpr bool trace{false};
 
@@ -30,9 +31,28 @@ void TankClient::bind_fd(connection *const c, int fd)
 
 TankClient::~TankClient()
 {
+	if (trace)
+		SLog("~TankClient()\n");
+
         while (switch_dlist_any(&connections))
         {
                 auto c = switch_list_entry(connection, list, connections.next);
+
+		for (const auto id : c->pendingConsume)
+		{
+			const auto res = pendingConsumeReqs.detach(id);
+			auto info = res.value();
+
+			free(info.seqNums);
+		}
+
+                for (const auto id : c->pendingProduce)
+                {
+                        const auto res = pendingProduceReqs.detach(id);
+                        const auto info = res.value();
+
+                        free(info.ctx);
+                }
 
                 if (c->fd != -1)
                 {
@@ -46,12 +66,15 @@ TankClient::~TankClient()
                 while (auto it = c->front())
                 {
                         c->pop_front();
-                        delete it;
+			put_payload(it);
                 }
 
                 switch_dlist_del(&c->list);
                 delete c;
         }
+
+	if (trace)
+		SLog("Pools\n");
 
 	while (connectionsPool.size())
 		delete connectionsPool.Pop();
@@ -61,8 +84,6 @@ TankClient::~TankClient()
 	
 	while (buffersPool.size())
 		delete buffersPool.Pop();
-
-
 }
 
 uint8_t TankClient::choose_compression_codec(const msg *const msgs, const size_t msgsCnt)
@@ -260,8 +281,16 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
         memcpy(ctx, produceCtx.data(), produceCtx.length());
         pendingProduceReqs.Add(reqId, {clientReqId, Timings::Milliseconds::Tick(), ctx, produceCtx.length()});
 
-        return submit(leader, payload,
+        const auto res =  submit(leader, payload,
                       [reqId](connection *const c) { c->pendingProduce.insert(reqId); });
+
+	if (!res)
+	{
+		free(ctx);
+		pendingProduceReqs.Remove(reqId);
+	}
+
+	return res;
 }
 
 bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::endpoint leader, const consume_ctx *const from, const size_t total, const uint64_t maxWait, const uint32_t minSize)
@@ -332,9 +361,57 @@ bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::e
 
         payload->iov[payload->iovCnt++] = {(void *)b.data(), b.length()};
 
-        return submit(leader, payload, [reqId](connection *const c) {
+        const auto res = submit(leader, payload, [reqId](connection *const c) {
                 c->pendingConsume.insert(reqId);
         });
+
+	if (!res)
+	{
+		free(seqsNumsData);
+		pendingConsumeReqs.Remove(reqId);
+	}
+
+	return res;
+}
+
+void TankClient::track_na_broker(const Switch::endpoint broker)
+{
+	// Use of a simple circuit breaker so that we won't be retrying connections immediately
+#ifndef LEAN_SWITCH
+	unreachable_broker_ctx *ctxp;
+
+	if (naBrokers.Add(broker, {}, &ctxp))
+		ctxp->prevSleep = 400;
+	
+	const auto delay = SwitchAlgorithms::ComputeExponentialBackoffWithDeccorelatedJitter(Timings::Seconds::ToMillis(8), 500, ctxp->prevSleep);
+
+	if (trace)
+		SLog("delay ", delay, " for prevSleep = ", ctxp->prevSleep, "\n");
+
+	ctxp->prevSleep = delay;
+	ctxp->until = nowMS + delay;
+#else
+	unreachable_broker_ctx ctx;
+	auto it = naBrokers.find(broker);
+
+	if (it != naBrokers.end())
+		ctx = it->second;
+	else
+		ctx.prevSleep = 400;
+
+	const auto delay = SwitchAlgorithms::ComputeExponentialBackoffWithDeccorelatedJitter(Timings::Seconds::ToMillis(8), 500, ctx.prevSleep);
+
+	if (trace)
+		SLog(ansifmt::bold, "delay ", delay, " for prevSleep = ", ctx.prevSleep, ansifmt::reset, "\n");
+
+	ctx.prevSleep = delay;
+	ctx.until = nowMS + delay;
+
+	// insert_or_assign() is c++17  
+	if (it != naBrokers.end())
+		naBrokers.erase(it);
+	naBrokers.emplace(broker, ctx);
+#endif
 }
 
 bool TankClient::shutdown(connection *const c, const uint32_t ref, const bool fault)
@@ -358,7 +435,10 @@ bool TankClient::shutdown(connection *const c, const uint32_t ref, const bool fa
 #endif
 
         if (trace)
-                SLog("Shutting down ", peer, "\n");
+                SLog("Shutting down ", peer, ", fault: ", fault, "\n");
+
+	if (fault)
+		track_na_broker(peer);
 
 	switch_dlist_del_and_reset(&c->list);
         connectionsMap.Remove(peer);
@@ -369,16 +449,17 @@ bool TankClient::shutdown(connection *const c, const uint32_t ref, const bool fa
                 deregister_connection_attempt(c);
 
         while (auto it = c->front())
-        {
-                c->pop_front();
-                delete it;
-        }
+	{
+		put_payload(it);
+		c->pop_front();
+	}
 
         for (const auto id : c->pendingConsume)
         {
                 const auto res = pendingConsumeReqs.detach(id);
-                const auto info = res.value();
+                auto info = res.value();
 
+		free(info.seqNums);
                 capturedFaults.push_back({info.clientReqId, fault::Type::Network, fault::Req::Consume, {}, 0});
         }
         c->pendingConsume.clear();
@@ -388,6 +469,7 @@ bool TankClient::shutdown(connection *const c, const uint32_t ref, const bool fa
                 const auto res = pendingProduceReqs.detach(id);
                 const auto info = res.value();
 
+		free(info.ctx);
                 capturedFaults.push_back({info.clientReqId, fault::Type::Network, fault::Req::Produce, {}, 0});
         }
         c->pendingProduce.clear();
@@ -396,7 +478,12 @@ bool TankClient::shutdown(connection *const c, const uint32_t ref, const bool fa
                 put_buffer(b);
 
         c->outgoingFront = c->outgoingBack = nullptr;
-        connectionsPool.push_back(c);
+	put_connection(c);
+
+	if (trace)
+		SLog("Did shutdown ", peer, "\n");
+
+
         return false;
 }
 
@@ -709,6 +796,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         {
                                                 if (p + sizeof(uint8_t) > endOfMsgSet || (p + (*p) + sizeof(uint8_t) > endOfMsgSet))
                                                 {
+							if (trace)
                                                         SLog("Boundaries\n");
                                                         goto next;
                                                 }
@@ -718,6 +806,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                                         if (p + keyLen > endOfMsgSet)
                                                         {
+								if (trace)
                                                                 SLog("Boundaries\n");
                                                                 goto next;
                                                         }
@@ -875,6 +964,7 @@ bool TankClient::try_recv(connection *const c)
 
                                 c->state.flags &= ~(1u << uint8_t(connection::State::Flags::ConnectionAttempt));
                                 deregister_connection_attempt(c);
+				naBrokers.Remove(c->peer);
                         }
 
                         c->state.lastInputTS = nowMS;
@@ -962,6 +1052,7 @@ bool TankClient::try_send(connection *const c)
                                         return shutdown(c, __LINE__, true);
                         }
 
+                        naBrokers.Remove(c->peer);
                         c->state.lastOutputTS = nowMS;
                         while (auto it = c->front())
                         {
@@ -1002,6 +1093,44 @@ bool TankClient::try_send(connection *const c)
 
 TankClient::connection *TankClient::init_connection(const Switch::endpoint e)
 {
+#ifndef LEAN_SWITCH
+	if (auto *const ptr = naBrokers.FindPointer(e))
+        {
+                if (trace)
+                        SLog("unreachable until ", ptr->until, " ", nowMS, " (", ptr->until - nowMS, ")\n");
+
+                if (ptr->until > nowMS)
+                {
+                        if (trace)
+                                SLog("circuit breaker close\n");
+                        return nullptr;
+                }
+
+                if (trace)
+                        SLog("circuit breaker open\n");
+        }
+#else
+	const auto it = naBrokers.find(e);
+
+	if (it != naBrokers.end())
+        {
+                auto ptr = &it->second;
+
+                if (trace)
+                        SLog("unreachable until ", ptr->until, " ", nowMS, " (", ptr->until - nowMS, ")\n");
+
+                if (ptr->until > nowMS)
+                {
+                        if (trace)
+                                SLog("circuit breaker close\n");
+                        return nullptr;
+                }
+
+                if (trace)
+                        SLog("circuit breaker open\n");
+        }
+#endif
+
         auto fd = init_connection_to(e);
 
         if (fd == -1)
