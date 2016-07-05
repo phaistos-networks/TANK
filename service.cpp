@@ -180,7 +180,8 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
 
                 res.absBaseSeqNum = cur.baseSeqNum + it->first;
                 res.range.Set(it->second, cur.fileSize - it->second);
-#ifndef LEAN_SWITCH
+
+#ifdef TANK_SERIALIZE_OPS
                 lock.unlock_shared();
 #endif
 
@@ -188,7 +189,7 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
         }
         else
         {
-#ifndef LEAN_SWITCH
+#ifdef TANK_SERIALIZE_OPS
                 lock.unlock_shared();
 #endif
 
@@ -258,7 +259,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         if (trace)
                 SLog("Read for absSeqNum = ", absSeqNum, ", lastAssignedSeqNum = ", lastAssignedSeqNum, ", firstAvailableSeqNum = ", firstAvailableSeqNum, "\n");
 
-#ifndef LEAN_SWITCH
+#ifdef TANK_SERIALIZE_OPS
         lock.lock_shared();
 #endif
 
@@ -287,7 +288,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         if (maxSize == 0)
         {
                 // Should be handled by the client
-#ifndef LEAN_SWITCH
+#ifdef TANK_SERIALIZE_OPS
                 lock.unlock_shared();
 #endif
 
@@ -299,7 +300,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         else if (maxAbsSeqNum < absSeqNum)
         {
                 // Should be handled by the client
-#ifndef LEAN_SWITCH
+#ifdef TANK_SERIALIZE_OPS
                 lock.unlock_shared();
 #endif
 
@@ -312,7 +313,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         {
                 // return empty
                 // UPDATE: let's wait instead
-#ifndef LEAN_SWITCH
+#ifdef TANK_SERIALIZE_OPS
                 lock.unlock_shared();
 #endif
 
@@ -326,7 +327,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         {
                 // past last assigned sequence number? nope
                 // throw an error
-#ifndef LEAN_SWITCH
+#ifdef TANK_SERIALIZE_OPS
                 lock.unlock_shared();
 #endif
 
@@ -337,7 +338,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         }
         else if (absSeqNum < firstAvailableSeqNum)
         {
-#ifndef LEAN_SWITCH
+#ifdef TANK_SERIALIZE_OPS
                 lock.unlock_shared();
 #endif
 
@@ -357,7 +358,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
 
 	auto prevSegments = roSegments;
 
-#ifndef LEAN_SWITCH
+#ifdef TANK_SERIALIZE_OPS
         lock.unlock_shared();
 #endif
 
@@ -456,7 +457,7 @@ void topic_partition_log::consider_ro_segments()
 
 append_res topic_partition_log::append_bundle(const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt)
 {
-#ifndef LEAN_SWITCH
+#ifdef TANK_SERIALIZE_OPS
         lock.lock();
 #endif
 
@@ -576,7 +577,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 
                 if (unlikely(write(cur.index.fd, out, sizeof(out)) != sizeof(out)))
                 {
-#ifndef LEAN_SWITCH
+#ifdef TANK_SERIALIZE_OPS
                         lock.unlock();
 #endif
                         return {nullptr, {}, {}};
@@ -602,7 +603,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
         require(cur.fdh.use_count() == before + 1);
         if (writev(fd, iov, sizeof_array(iov)) != entryLen)
         {
-#ifndef LEAN_SWITCH
+#ifdef TANK_SERIALIZE_OPS
                 lock.unlock();
 #endif
                 return {nullptr, {}, {}};
@@ -612,7 +613,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 cur.fileSize += entryLen;
                 cur.sinceLastUpdate += entryLen;
 
-#ifndef LEAN_SWITCH
+#ifdef TANK_SERIALIZE_OPS
                 lock.unlock();
 #endif
                 return {fdh, fileRange, {absSeqNum, uint16_t(bundleMsgsCnt)}};
@@ -626,7 +627,9 @@ void topic_partition::consider_append_res(append_res &res, Switch::vector<wait_c
         if (trace)
                 SLog(ansifmt::color_blue, " waitingList.size() = ", waitingList.size(), ansifmt::reset, "\n");
 
+#ifdef TANK_SERIALIZE_OPS
         waitingListLock.lock();
+#endif
         for (uint32_t i{0}; i < waitingList.size();)
         {
                 auto it = waitingList[i];
@@ -681,7 +684,11 @@ void topic_partition::consider_append_res(append_res &res, Switch::vector<wait_c
                 else
                         ++i;
         }
+
+#ifdef TANK_SERIALIZE_OPS
         waitingListLock.unlock();
+#endif
+
 }
 
 append_res topic_partition::append_bundle_to_leader(const uint8_t *const bundle, const size_t bundleLen, const uint8_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL)
@@ -1282,9 +1289,14 @@ bool Service::register_consumer_wait(connection *const c, const uint32_t request
                 if (trace)
                         SLog("Partition ", ptr_repr(p), "\n");
 
+#ifdef TANK_SERIALIZE_OPS
                 p->waitingListLock.lock();
+#endif
                 p->waitingList.push_back(ctx);
+
+#ifdef TANK_SERIALIZE_OPS
                 p->waitingListLock.unlock();
+#endif
 
                 out->partition = p;
                 out->fdh = nullptr;
@@ -1691,9 +1703,16 @@ void Service::destroy_wait_ctx(wait_ctx *const wctx)
                         it.fdh = nullptr;
                 }
 
+#ifdef TANK_SERIALIZE_OPS
                 p->waitingListLock.lock();
+#endif
+
                 p->waitingList.RemoveByValue(wctx);
+
+#ifdef TANK_SERIALIZE_OPS
                 p->waitingListLock.unlock();
+#endif
+
         }
 
         if (switch_dlist_any(&wctx->expList))
