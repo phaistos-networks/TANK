@@ -83,7 +83,7 @@ class TankClient
                 void push_back(outgoing_payload *const p)
                 {
                         p->iovIdx = 0;
-			p->next = nullptr;
+                        p->next = nullptr;
 
                         if (outgoingBack)
                                 outgoingBack->next = p;
@@ -101,8 +101,8 @@ class TankClient
                 void pop_front()
                 {
                         outgoingFront = outgoingFront->next;
-			if (!outgoingFront)
-				outgoingBack = nullptr;
+                        if (!outgoingFront)
+                                outgoingBack = nullptr;
                 }
 
                 connection()
@@ -221,20 +221,21 @@ class TankClient
                 } leader_reqs;
         } ids_tracker;
 
-	struct unreachable_broker_ctx
-	{
-		uint32_t prevSleep;
-		uint64_t until;
-	};
+        struct unreachable_broker_ctx
+        {
+                uint32_t prevSleep;
+                uint64_t until;
+        };
 
-	// topic to standalone broker
-	Switch::unordered_map<strwlen8_t, Switch::endpoint> leadersMap;
-	Switch::endpoint defaultLeader{};
-	Switch::unordered_map<Switch::endpoint, unreachable_broker_ctx> naBrokers;
-	strwlen8_t clientId{"c++"};
+        // topic to standalone broker
+        Switch::unordered_map<strwlen8_t, Switch::endpoint> leadersMap;
+        Switch::endpoint defaultLeader{};
+        Switch::unordered_map<Switch::endpoint, unreachable_broker_ctx> naBrokers;
+        strwlen8_t clientId{"c++"};
         switch_dlist connections;
         Switch::vector<std::pair<connection *, IOBuffer *>> connsBufs;
-	Switch::vector<IOBuffer *> usedBufs;
+        // TODO: https://github.com/phaistos-networks/TANK/issues/6
+        Switch::vector<IOBuffer *> usedBufs;
         simple_allocator resultsAllocator{4 * 1024 * 1024};
         Switch::vector<partition_content> consumedPartitionContent;
         Switch::vector<fault> capturedFaults;
@@ -270,7 +271,7 @@ class TankClient
         // maxWait: The maximum amount of time the server will block before answering a fetch request, if ther isn't sufficeint data to immediately satisfy the requirement set by minSize
         bool consume_from_leader(const uint32_t clientReqId, const Switch::endpoint leader, const consume_ctx *const from, const size_t total, const uint64_t maxWait, const uint32_t minSize);
 
-	void track_na_broker(const Switch::endpoint);
+        void track_na_broker(const Switch::endpoint);
 
         bool shutdown(connection *const c, const uint32_t ref, const bool fault = false);
 
@@ -311,7 +312,7 @@ class TankClient
                 return res;
         }
 
-	outgoing_payload *get_payload_for(connection *, const size_t);
+        outgoing_payload *get_payload_for(connection *, const size_t);
 
         void put_payload(outgoing_payload *const p)
         {
@@ -364,10 +365,10 @@ class TankClient
                                 return true;
                 }
                 else
-		{
-			put_payload(p);
+                {
+                        put_payload(p);
                         return false;
-		}
+                }
         }
 
       public:
@@ -378,17 +379,17 @@ class TankClient
 
         ~TankClient();
 
-        const auto &consumed() const
+        const auto &consumed() const noexcept
         {
                 return consumedPartitionContent;
         }
 
-        const auto &faults() const
+        const auto &faults() const noexcept
         {
                 return capturedFaults;
         }
 
-        const auto &produce_acks() const
+        const auto &produce_acks() const noexcept
         {
                 return produceAcks;
         }
@@ -401,20 +402,25 @@ class TankClient
 
         uint32_t consume(const std::vector<std::pair<topic_partition, std::pair<uint64_t, uint32_t>>> &req, const uint64_t maxWait, const uint32_t minSize);
 
-	void set_client_id(const char *const p, const uint32_t len)
-	{
-		clientId.Set(p, len);
-	}
-
-	void set_default_leader(const strwlen32_t e)
+        void set_client_id(const char *const p, const uint32_t len)
         {
-                defaultLeader = Switch::ParseSrvEndpoint(e, {_S("tank")}, 11011);
-
-                if (!defaultLeader)
-                        throw Switch::data_error("Unable to parse default leader endpoint");
+                clientId.Set(p, len);
         }
 
-	void set_topic_leader(const strwlen8_t topic, const strwlen32_t e);
+        void set_default_leader(const Switch::endpoint e)
+        {
+                if (!e)
+                        throw Switch::data_error("Unable to parse default leader endpoint");
+
+                defaultLeader = e;
+        }
+
+        void set_default_leader(const strwlen32_t e)
+        {
+                set_default_leader(Switch::ParseSrvEndpoint(e, {_S("tank")}, 11011));
+        }
+
+        void set_topic_leader(const strwlen8_t topic, const strwlen32_t e);
 };
 
 #ifdef LEAN_SWITCH

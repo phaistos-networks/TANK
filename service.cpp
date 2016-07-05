@@ -134,7 +134,9 @@ static uint32_t search_before_offset(const uint64_t baseSeqNum, const uint32_t m
                 const auto *p = buf;
                 const auto abs = baseSeqNum + *(uint32_t *)p;
 
-                (void)r;
+		if (unlikely(r == -1))
+			throw Switch::system_error("pread() failed:", strerror(errno));
+
                 if (trace)
                         SLog("abs = ", abs, "(", *(uint32_t *)p, ") VS ", maxAbsSeqNum, " at ", o, "\n");
 
@@ -1513,6 +1515,7 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes)
         uint8_t topicsCnt{0};
         auto c = wctx->c;
         auto q = c->outQ;
+	size_t sum{0};
 
         if (!q)
                 q = c->outQ = get_outgoing_queue();
@@ -1558,13 +1561,15 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes)
                         respHeader->Serialize(uint8_t(0));
                         if (it.fdh)
                         {
+
                                 if (trace)
-                                        SLog("HAVE data for ", topicName, ".", p->idx, ", seqNum = ", it.seqNum, ", range ", it.range, "\n");
+                                        SLog("HAVE data for ", topicName, ".", p->idx, ", seqNum = ", it.seqNum, ", range ", it.range, " (", it.range.len, ")\n");
 
                                 respHeader->Serialize(it.seqNum);
                                 respHeader->Serialize(p->highwater_mark());
                                 respHeader->Serialize(it.range.len);
 
+				sum += it.range.len;
                                 q->push_back({it.fdh, it.range});
                                 it.fdh->Release();
                                 it.fdh = nullptr;
@@ -1583,7 +1588,7 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes)
         }
 
         *(uint8_t *)respHeader->At(topicsCntOffset) = topicsCnt;
-        *(uint32_t *)respHeader->At(sizeOffset) = respHeader->length() - sizeOffset - sizeof(uint32_t);
+        *(uint32_t *)respHeader->At(sizeOffset) = respHeader->length() - sizeOffset - sizeof(uint32_t) + sum;
         *(uint32_t *)respHeader->At(headerSizeOffset) = respHeader->length() - headerSizeOffset - sizeof(uint32_t);
 
         destroy_wait_ctx(wctx);
@@ -1751,6 +1756,9 @@ bool Service::try_send(connection *const c)
 
                 if (q && !q->empty())
                 {
+			if (trace)
+				SLog("Enabling cork\n");
+
                         haveCork = true;
                         Switch::SetTCPCork(fd, 1);
                 }
@@ -1786,6 +1794,7 @@ bool Service::try_send(connection *const c)
                 {
                         if (trace)
                                 SLog("Buf = ", ptr_repr(it.buf), "\n");
+
                         if (!haveCork)
                         {
                                 if (trace)
@@ -1806,7 +1815,11 @@ bool Service::try_send(connection *const c)
                                         else if (errno == EAGAIN)
                                         {
                                                 if (haveCork)
+						{
+							if (trace)
+								SLog("Removing cork\n");
                                                         Switch::SetTCPCork(fd, 0);
+						}
 
                                                 if (!(c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))))
                                                 {
@@ -1842,7 +1855,7 @@ bool Service::try_send(connection *const c)
                                 auto r = sendfile(fd, it.file_range.fdh->fd, &offset, range.len);
 
                                 if (trace)
-                                        SLog("Sending contents ", range, "\n");
+                                        SLog("Sending contents ", range, " => ", r, "\n");
 
                                 if (r == -1)
                                 {
@@ -1850,26 +1863,42 @@ bool Service::try_send(connection *const c)
                                                 continue;
                                         else if (errno == EAGAIN)
                                         {
+						if (trace)
+							SLog("EAGAIN (haveCork = ", haveCork, ", needOutAvail = ", (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))), ")\n");
+
                                                 if (haveCork)
+						{
+							if (trace)
+								SLog("Unsetting cork\n");
+
                                                         Switch::SetTCPCork(fd, 0);
+						}
 
                                                 if (!(c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))))
                                                 {
+							if (trace)
+								SLog("Now NeedOutAvail\n");
+
                                                         c->state.flags |= (1u << uint8_t(connection::State::Flags::NeedOutAvail));
                                                         poller.SetDataAndEvents(fd, c, POLLIN | POLLOUT);
                                                 }
+
+						return true;
                                         }
                                         else
                                                 return shutdown(c, __LINE__);
                                 }
-
-                                range.len -= offset - range.offset;
-
-                                if (!range)
+				else
                                 {
-                                        it.file_range.fdh->Release();
-                                        q->pop_front();
-                                        break;
+                                        range.len -= r;
+					range.offset += r;
+
+                                        if (!range)
+                                        {
+                                                it.file_range.fdh->Release();
+                                                q->pop_front();
+                                                break;
+                                        }
                                 }
                         }
                 }
@@ -1879,13 +1908,19 @@ bool Service::try_send(connection *const c)
         c->outQ = nullptr;
 
         if (haveCork)
+	{
+		if (trace)
+			SLog("Removing cork\n");
+
                 Switch::SetTCPCork(fd, 0);
+	}
 
         if (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail)))
         {
                 c->state.flags &= ~(1u << uint8_t(connection::State::Flags::NeedOutAvail));
                 poller.SetDataAndEvents(fd, c, POLLIN);
         }
+
 
         return true;
 }
@@ -1904,6 +1939,7 @@ Service::~Service()
 #endif
 }
 
+// TODO: https://github.com/phaistos-networks/TANK/issues/7
 int Service::start(int argc, char **argv)
 {
         sockaddr_in sa;
@@ -2185,7 +2221,11 @@ int Service::start(int argc, char **argv)
 							goto nextEvent;
 						}
                                                 else if (p + msgLen > e)
+						{
+							if (trace)
+								SLog("Need more data for ", msg, "\n");
                                                         goto l1;
+						}
                                                 else if (!process_msg(c, msg, reinterpret_cast<const uint8_t *>(p), msgLen))
                                                         goto nextEvent;
 

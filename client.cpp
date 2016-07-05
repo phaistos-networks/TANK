@@ -1,5 +1,6 @@
 #include "tank_client.h"
 #include <switch_algorithms.h>
+#include <text.h>
 
 static constexpr bool trace{false};
 
@@ -78,6 +79,9 @@ TankClient::~TankClient()
 
         while (payloadsPool.size())
                 delete payloadsPool.Pop();
+	
+	while (usedBufs.size())
+		delete usedBufs.Pop();
 
         while (buffersPool.size())
                 delete buffersPool.Pop();
@@ -221,7 +225,11 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
                                 const auto o = cmpBuf.length();
 
                                 if (unlikely(!Compression::Compress(Compression::Algo::SNAPPY, b.At(msgSetOffset), msgSetLen, &cmpBuf)))
-                                        throw Switch::system_error("Failed to compress content");
+				{
+					put_payload(payload);
+                                        throw Switch::exception("Failed to compress content");
+				}
+
 
                                 if (trace)
                                         SLog(msgSetLen, " => ", cmpBuf.length(), "\n");
@@ -674,17 +682,17 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                         const auto bundlesForThisTopicPartition = bundles;
                         uint32_t lastPartialMsgMinFetchSize{128};
 
-                        bundles += len; // Skip bundles for this (topic, partition)
+                        bundles += len; // Skip bundles for this (topic, partition), i.e the chunk stream for that partition
                         consumptionList.clear();
 
                         // Process all bundles in the chunk
-                        for (const auto *p = bundlesForThisTopicPartition, *const end = p + len; p < end;)
+                        for (const auto *p = bundlesForThisTopicPartition, *const chunkEnd = p + len; p < chunkEnd;)
                         {
-                                // Try to parse the next bundle
+                                // Try to parse the next bundle from the chunk
                                 // We may have gotten a partial bundle, so we need to be defensive about it
 
                                 // length of the bundle
-                                if (!Compression::UnpackUInt32Check(p, end))
+                                if (!Compression::UnpackUInt32Check(p, chunkEnd))
                                 {
                                         if (trace)
                                                 SLog("boundaries\n");
@@ -694,7 +702,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 const auto bundleLen = Compression::UnpackUInt32(p);
                                 const auto *const bundleEnd = p + bundleLen;
 
-                                if (p >= end)
+                                if (p >= chunkEnd)
                                 {
                                         if (trace)
                                                 SLog("boundaries\n");
@@ -709,7 +717,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                 if (!msgsSetSize)
                                 {
-                                        if (!Compression::UnpackUInt32Check(p, end))
+                                        if (!Compression::UnpackUInt32Check(p, chunkEnd))
                                         {
                                                 if (trace)
                                                         SLog("boundaries\n");
@@ -736,11 +744,13 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         continue;
                                 }
 
+
+
                                 if (codec)
                                 {
                                         // we 'd need to decompress [p, bundleEnd)
 
-                                        if (bundleEnd > end)
+                                        if (bundleEnd > chunkEnd)
                                         {
                                                 lastPartialMsgMinFetchSize = bundleLen + 128;
                                                 if (trace)
@@ -749,7 +759,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         }
 
                                         if (trace)
-                                                SLog("compressed, need to decompress messages set\n");
+                                                SLog("compressed, need to decompress messages set ", bundleEnd - p, " (", size_repr(bundleEnd - p), ")\n");
 
 					auto rawData = get_buffer();
 
@@ -758,7 +768,16 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         {
                                                 case 1:
                                                         if (unlikely(!Compression::UnCompress(Compression::Algo::SNAPPY, p, bundleEnd - p, rawData)))
+							{
+								if (trace)
+									SLog("Failed ", chunkEnd - bundleEnd, "\n");
+
                                                                 throw Switch::data_error("Failed to decompress bundle message set");
+							}
+
+							if (trace)
+								SLog("Decompressed ", size_repr(bundleEnd - p), " => ", size_repr(rawData->length()), "\n");
+
                                                         break;
 
                                                 default:
@@ -770,7 +789,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 					usedBufs.push_back(rawData);
                                 }
                                 else
-                                        msgSetContent.Set(p, Min<size_t>(end - p, bundleEnd - p));
+                                        msgSetContent.Set(p, Min<size_t>(chunkEnd - p, bundleEnd - p));
 
                                 p = bundleEnd;
 
@@ -806,6 +825,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                         {
                                                                 if (trace)
                                                                         SLog("Boundaries\n");
+
                                                                 goto next;
                                                         }
                                                         else
@@ -852,7 +872,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         {
                                                 const strwlen32_t content((char *)p, len); // message content
 
-                                                if (trace)
+                                                if (trace && 0)
                                                         SLog("( flags = ", msgFlags, ", ts = ", ts, ", len = ", len, ", msgAbsSeqNum = ", msgAbsSeqNum, " [", content, ", requestedSeqNum = ", requestedSeqNum, "] )\n");
 
                                                 consumptionList.push_back({msgAbsSeqNum, ts, key, content});
@@ -939,6 +959,9 @@ bool TankClient::try_recv(connection *const c)
                 b->reserve(n);
                 r = read(fd, b->End(), b->Capacity());
 
+		if (trace)
+			SLog("Read ", r, "\n");
+
                 if (r == -1)
                 {
                         if (errno == EINTR)
@@ -967,10 +990,15 @@ bool TankClient::try_recv(connection *const c)
                         c->state.lastInputTS = nowMS;
 
                         b->AdvanceLength(r);
+
                         for (const auto *const e = (uint8_t *)b->End(); p != e;)
                         {
                                 if (p + sizeof(uint8_t) + sizeof(uint32_t) > e)
+				{
+					if (trace)
+						SLog("Need more for msg\n");
                                         return true;
+				}
 
                                 const auto msg = *p++;
                                 const auto len = *(uint32_t *)p;
@@ -984,6 +1012,9 @@ bool TankClient::try_recv(connection *const c)
                                         // no need to e.g b->reserve(len) here
                                         // because we already reserve()d FIONREAD result earlier and this could also
                                         // cause problems with references in e.g consumedPartitionContent that derefs buffer's data
+					if (trace)
+						SLog("Need more content (len = ", len, ") for msg(", msg, ")\n");
+
                                         return true;
                                 }
 
@@ -1028,7 +1059,7 @@ bool TankClient::try_send(connection *const c)
 				SLog("Nothing to send now\n");
 
                         break;
-		}
+                }
 
                 if (trace)
                         SLog("Will attempt to send ", out - iov, "\n");
@@ -1037,12 +1068,16 @@ bool TankClient::try_send(connection *const c)
                 {
                         auto r = writev(fd, iov, out - iov);
 
+			if (trace)
+                                SLog("writev()  = ", r, "\n");
+
                         if (r == -1)
                         {
                                 if (errno == EINTR)
                                         continue;
                                 else if (errno == EAGAIN)
                                 {
+unsetNeedAvail:
                                         if (!(c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))))
                                         {
                                                 c->state.flags |= 1u << uint8_t(connection::State::Flags::NeedOutAvail);
@@ -1248,6 +1283,7 @@ void TankClient::poll(uint32_t timeoutMS)
         }
         connsBufs.clear();
 
+	// TODO: https://github.com/phaistos-networks/TANK/issues/6
 	while (usedBufs.size())
 		put_buffer(usedBufs.Pop());
 
