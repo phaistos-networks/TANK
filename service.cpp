@@ -825,9 +825,7 @@ append_res topic_partition::append_bundle_to_leader(const uint8_t *const bundle,
         }
         catch (const std::exception &e)
         {
-                if (trace)
-                        SLog("Failed:", e.what(), "\n");
-
+		RFLog("Failed, cought exception:", e.what(), "\n");
                 return {nullptr, {}, {}};
         }
 }
