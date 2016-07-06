@@ -27,3 +27,5 @@ You should probably use Kafka (the Confluent folk are particularly great ), or G
 Tank's goal is highest performance and simplicity. If you need very high performance, operation simplicity and no reliance on other services (when running Tank in standalonemode), consider Tank.
 
 Please see the [wiki](https://github.com/phaistos-networks/TANK/wiki) for more information.
+
+We chose the name Tank because its a storage chamber, suitable for liquids and gas - which we think is analogous to a storage container for data for data that flow, from and to other containers and other systems via 'pipes' (connections).
