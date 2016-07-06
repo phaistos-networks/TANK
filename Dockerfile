@@ -6,6 +6,7 @@ RUN apt update \
 	&& apt -y install git clang++-3.8 make zlib1g-dev \
 	&& apt clean
 
+
 ENV CXX=/usr/bin/clang++-3.8
 
 RUN git clone https://github.com/phaistos-networks/TANK.git
@@ -17,4 +18,6 @@ RUN make all \
 RUN mkdir -p /data
 WORKDIR /data
 
+RUN apt install -y libjemalloc1
+COPY ./tank /usr/local/bin/
 CMD ["tank","-p",".","-l",":11011"]

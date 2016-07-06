@@ -448,7 +448,7 @@ struct topic
 		if (partitions_)
                 {
                         while (partitions_->size())
-                                delete partitions_->Pop();
+                                 partitions_->Pop()->Release();
 
                         delete partitions_;
                 }
