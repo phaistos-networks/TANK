@@ -14,8 +14,7 @@ RUN make all \
 	&& mv tank app /usr/local/bin \
 	&& rm -rf /TANK
 
-RUN useradd -d /data -k /dev/null -m phaistos
-USER phaistos
+RUN mkdir -p /data
 WORKDIR /data
 
-CMD ["tank","-p",".","-l",":1025"]
+CMD ["tank","-p",".","-l",":11011"]
