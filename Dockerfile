@@ -18,6 +18,4 @@ RUN make all \
 RUN mkdir -p /data
 WORKDIR /data
 
-RUN apt install -y libjemalloc1
-COPY ./tank /usr/local/bin/
 CMD ["tank","-p",".","-l",":11011"]
