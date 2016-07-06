@@ -1,43 +1,63 @@
 #include "service.h"
+#include <ansifmt.h>
+#include <compress.h>
+#include <date.h>
 #include <fs.h>
+#include <random>
+#include <signal.h>
 #include <sys/stat.h>
 #include <text.h>
-#include <unistd.h>
-#include <compress.h>
-#include <timings.h>
-#include <ansifmt.h>
 #include <text.h>
-#include <signal.h>
+#include <thread>
+#include <timings.h>
+#include <unistd.h>
 
 static constexpr bool trace{false};
 
-ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, const strwlen32_t base)
-    : baseSeqNum{absSeqNum}, lastAvailSeqNum{lastAbsSeqNum}
+static Switch::mutex mboxLock;
+static Switch::vector<std::pair<int, int>> mbox;
+
+ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, const strwlen32_t base, const uint32_t creationTS)
+    : baseSeqNum{absSeqNum}, lastAvailSeqNum{lastAbsSeqNum}, createdTS{creationTS}
 {
+        int fd;
+        struct stat64 st;
+
         index.data = nullptr;
-        int fd = open(Buffer::build(base, "/", absSeqNum, "-", lastAbsSeqNum, ".ilog").data(), O_RDONLY | O_LARGEFILE);
+        if (createdTS)
+                fd = open(Buffer::build(base, "/", absSeqNum, "-", lastAbsSeqNum, "_", createdTS, ".ilog").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
+        else
+                fd = open(Buffer::build(base, "/", absSeqNum, "-", lastAbsSeqNum, ".ilog").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
 
         if (fd == -1)
-                throw Switch::system_error("Failed to access log file");
+                throw Switch::system_error("Failed to access log file:", strerror(errno));
 
         fdh.reset(new fd_handle(fd));
         Drequire(fdh.use_count() == 2);
         fdh->Release();
 
-        auto size = lseek64(fd, 0, SEEK_END);
+        if (fstat64(fd, &st) == -1)
+                throw Switch::system_error("Failed to fstat():", strerror(errno));
+
+        auto size = st.st_size;
 
         if (unlikely(size == (off64_t)-1))
                 throw Switch::system_error("lseek64() failed: ", strerror(errno));
 
         Drequire(size < std::numeric_limits<std::remove_reference<decltype(fileSize)>::type>::max());
-        fileSize = size;
 
-        int indexFd = open(Buffer::build(base, "/", absSeqNum, ".index").data(), O_RDONLY | O_LARGEFILE);
+        fileSize = size;
+        lastModTS = st.st_mtime;
+
+        if (trace)
+                SLog(ansifmt::bold, "fileSize = ", fileSize, ", lastModTS = ", Date::ts_repr(lastModTS), ", createdTS = ", Date::ts_repr(creationTS), ansifmt::reset, "\n");
+
+        int indexFd = open(Buffer::build(base, "/", absSeqNum, ".index").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
 
         if (indexFd == -1)
         {
                 // TODO: rebuild it
-                throw Switch::system_error("Failed to access the index file");
+                throw Switch::system_error("Failed to access the index file:", Buffer::build(base, "/", absSeqNum, ".index"), ": ", strerror(errno));
         }
 
         Defer({ close(indexFd); });
@@ -57,7 +77,7 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
                 auto data = mmap(nullptr, index.fileSize, PROT_READ, MAP_SHARED, indexFd, 0);
 
                 if (unlikely(data == MAP_FAILED))
-                        throw Switch::system_error("Failed to access the index file");
+                        throw Switch::system_error("Failed to access the index file. mmap() failed:", strerror(errno));
 
                 index.data = static_cast<const uint8_t *>(data);
 
@@ -134,8 +154,8 @@ static uint32_t search_before_offset(const uint64_t baseSeqNum, const uint32_t m
                 const auto *p = buf;
                 const auto abs = baseSeqNum + *(uint32_t *)p;
 
-		if (unlikely(r == -1))
-			throw Switch::system_error("pread() failed:", strerror(errno));
+                if (unlikely(r == -1))
+                        throw Switch::system_error("pread() failed:", strerror(errno));
 
                 if (trace)
                         SLog("abs = ", abs, "(", *(uint32_t *)p, ") VS ", maxAbsSeqNum, " at ", o, "\n");
@@ -287,7 +307,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
 
         if (maxSize == 0)
         {
-                // Should be handled by the client
+// Should be handled by the client
 #ifdef TANK_SERIALIZE_OPS
                 lock.unlock_shared();
 #endif
@@ -299,7 +319,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         }
         else if (maxAbsSeqNum < absSeqNum)
         {
-                // Should be handled by the client
+// Should be handled by the client
 #ifdef TANK_SERIALIZE_OPS
                 lock.unlock_shared();
 #endif
@@ -311,12 +331,11 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         }
         else if (absSeqNum == lastAssignedSeqNum + 1)
         {
-                // return empty
-                // UPDATE: let's wait instead
+// return empty
+// UPDATE: let's wait instead
 #ifdef TANK_SERIALIZE_OPS
                 lock.unlock_shared();
 #endif
-
 
                 if (trace)
                         SLog("Empty\n");
@@ -325,8 +344,8 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         }
         else if (absSeqNum > lastAssignedSeqNum)
         {
-                // past last assigned sequence number? nope
-                // throw an error
+// past last assigned sequence number? nope
+// throw an error
 #ifdef TANK_SERIALIZE_OPS
                 lock.unlock_shared();
 #endif
@@ -356,13 +375,13 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
                 return read_cur(absSeqNum, maxSize, maxAbsSeqNum);
         }
 
-	auto prevSegments = roSegments;
+        auto prevSegments = roSegments;
 
 #ifdef TANK_SERIALIZE_OPS
         lock.unlock_shared();
 #endif
 
-	// TODO: https://github.com/phaistos-networks/TANK/issues/2
+        // TODO: https://github.com/phaistos-networks/TANK/issues/2
         const auto end = prevSegments->end();
         const auto it = std::upper_bound_or_match(prevSegments->begin(), end, absSeqNum, [](const auto s, const auto absSeqNum) {
                 return TrivialCmp(absSeqNum, s->baseSeqNum);
@@ -422,14 +441,15 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
 void topic_partition_log::consider_ro_segments()
 {
         size_t sum{0};
+        const uint32_t nowTS = Timings::Seconds::SysTime();
 
         for (auto it : *roSegments)
                 sum += it->fileSize;
 
         if (trace)
-                SLog(ansifmt::bold, "Considering segments sum=", sum, ", total = ", roSegments->size(), " limits { roSegmentsCnt ", limits.roSegmentsCnt, ", roSegmentsSize ", limits.roSegmentsSize, "}", ansifmt::reset, "\n");
+                SLog(ansifmt::bold, "Considering segments sum=", sum, ", total = ", roSegments->size(), " limits { roSegmentsCnt ", config.roSegmentsCnt, ", roSegmentsSize ", config.roSegmentsSize, "}", ansifmt::reset, "\n");
 
-        while (((limits.roSegmentsCnt && roSegments->size() > limits.roSegmentsCnt) || (limits.roSegmentsSize && sum > limits.roSegmentsSize)) && roSegments->size())
+        while (((config.roSegmentsCnt && roSegments->size() > config.roSegmentsCnt) || (config.roSegmentsSize && sum > config.roSegmentsSize) || (roSegments->front()->createdTS && config.lastSegmentMaxAge && roSegments->front()->createdTS + config.lastSegmentMaxAge < nowTS)) && roSegments->size())
         {
                 auto segment = roSegments->front();
                 const auto basePathLen = basePath.length();
@@ -455,29 +475,71 @@ void topic_partition_log::consider_ro_segments()
                 SLog("firstAvailableSeqNum now = ", firstAvailableSeqNum, "\n");
 }
 
+bool topic_partition_log::should_roll(const uint32_t now) const
+{
+        if (cur.fileSize)
+        {
+                if (trace)
+                        SLog(ansifmt::color_green, basePath, " Consider roll:cur.fileSize(", cur.fileSize, "), config.maxSegmentSize(", config.maxSegmentSize, "), skipList.size(", cur.index.skipList.size(), "), config.curSegmentMaxAge (", config.curSegmentMaxAge, "), ", Timings::Seconds::SysTime() - cur.createdTS, " old,  cur.rollJitterSecs = ", cur.rollJitterSecs, ansifmt::reset, "\n");
+
+                if (cur.fileSize > config.maxSegmentSize)
+                {
+                        if (trace)
+                                SLog(ansifmt::bold, "Should roll: cur.fileSize(", cur.fileSize, ") > config.maxSegmentSize(", config.maxSegmentSize, ")", ansifmt::reset, "\n");
+
+                        return true;
+                }
+
+                const size_t skipListCapacity = Min<size_t>(65536, config.maxIndexSize / (sizeof(uint32_t) + sizeof(uint32_t)));
+
+                if (cur.index.skipList.size() > skipListCapacity)
+                {
+                        // index is full
+                        if (trace)
+                                SLog(ansifmt::bold, "cur.index.skipList.size(", cur.index.skipList.size(), ") > skipListCapacity(", skipListCapacity, ")", ansifmt::reset, "\n");
+
+                        return true;
+                }
+
+                if (const auto v = config.curSegmentMaxAge)
+                {
+                        if (now - cur.createdTS > v - cur.rollJitterSecs)
+                        {
+                                // Soft limit
+                                if (trace)
+                                        SLog(ansifmt::bold, "now - cur.createdTS(", now - cur.createdTS, ") > (", v - cur.rollJitterSecs, ")", ansifmt::reset, "\n");
+
+                                return true;
+                        }
+                }
+        }
+
+        return false;
+}
+
 append_res topic_partition_log::append_bundle(const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt)
 {
 #ifdef TANK_SERIALIZE_OPS
         lock.lock();
 #endif
 
-	const auto savedLastAssignedSeqNum = lastAssignedSeqNum;
+        const auto savedLastAssignedSeqNum = lastAssignedSeqNum;
         const auto absSeqNum = lastAssignedSeqNum + 1;
-	const size_t skipListCapacity = Min<size_t>(65536, limits.maxIndexSize / (sizeof(uint32_t) + sizeof(uint32_t)));
+        const auto now = Timings::Seconds::SysTime();
 
         lastAssignedSeqNum += bundleMsgsCnt;
 
-        if (cur.fileSize > limits.maxSegmentSize || cur.index.skipList.size() > skipListCapacity)
+        if (should_roll(now))
         {
                 const auto basePathLen = basePath.length();
 
                 if (trace)
-                        SLog("Need to switch to another commit log (", cur.fileSize, "> ", limits.maxSegmentSize, ") ", cur.index.skipList.size(), "\n");
+                        SLog("Need to switch to another commit log (", cur.fileSize, "> ", config.maxSegmentSize, ") ", cur.index.skipList.size(), "\n");
 
                 if (cur.fileSize != UINT32_MAX)
                 {
                         auto newROFiles = std::make_unique<Switch::vector<ro_segment *>>();
-                        auto newROFile = std::make_unique<ro_segment>(cur.baseSeqNum, savedLastAssignedSeqNum);
+                        auto newROFile = std::make_unique<ro_segment>(cur.baseSeqNum, savedLastAssignedSeqNum, cur.createdTS);
 
                         const auto n = cur.fdh.use_count();
 
@@ -489,13 +551,21 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                         newROFile->index.fileSize = lseek64(cur.index.fd, 0, SEEK_END);
                         newROFile->index.lastRecorded.relSeqNum = newROFile->index.lastRecorded.absPhysical = 0;
 
-			// We now encode the [first,last] range into the filename for simplicity and future-proofing; we 'd like to
-			// support sparse sequence numbers space
-			if (rename(Buffer::build(basePath, "/", cur.baseSeqNum, ".log").data(), 
-				Buffer::build(basePath, "/", cur.baseSeqNum, "-", savedLastAssignedSeqNum, ".ilog").data()) == -1)
-			{
-				throw Switch::system_error("Failed to rename():", strerror(errno));
-			}
+                        // We now encode the [first,last] range into the filename for simplicity and future-proofing; we 'd like to
+                        // support sparse sequence numbers space
+                        if (cur.nameEncodesTS)
+                        {
+                                if (rename(Buffer::build(basePath, "/", cur.baseSeqNum, "_", cur.createdTS, ".log").data(),
+                                           Buffer::build(basePath, "/", cur.baseSeqNum, "-", savedLastAssignedSeqNum, "_", cur.createdTS, ".ilog").data()) == -1)
+                                {
+                                        throw Switch::system_error("Failed to rename():", strerror(errno));
+                                }
+                        }
+                        else if (rename(Buffer::build(basePath, "/", cur.baseSeqNum, ".log").data(),
+                                        Buffer::build(basePath, "/", cur.baseSeqNum, "-", savedLastAssignedSeqNum, "_", cur.createdTS, ".ilog").data()) == -1)
+                        {
+                                throw Switch::system_error("Failed to rename():", strerror(errno));
+                        }
 
                         if (newROFile->index.fileSize)
                         {
@@ -521,7 +591,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                         newROFiles->Append(roSegments->values(), roSegments->size());
                         newROFiles->push_back(newROFile.release());
 
-			roSegments.reset(newROFiles.release());
+                        roSegments.reset(newROFiles.release());
                         consider_ro_segments();
                 }
                 else
@@ -535,6 +605,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 // It is very important than the first bundle's recorded immediately in the index
                 // so we set cur.sinceLastUpdate = UINT32_MAX to force that
                 cur.sinceLastUpdate = UINT32_MAX;
+                cur.createdTS = Timings::Seconds::SysTime();
 
                 cur.index.skipList.clear();
                 close(cur.index.fd);
@@ -545,28 +616,42 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                         cur.index.ondisk.data = nullptr;
                 }
 
-                basePath.append(cur.baseSeqNum, ".log");
+                basePath.append(cur.baseSeqNum, "_", cur.createdTS, ".log");
 
-                cur.fdh.reset(new fd_handle(open(basePath.data(), O_RDWR | O_LARGEFILE | O_CREAT, 0775)));
+                cur.fdh.reset(new fd_handle(open(basePath.data(), O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME, 0775)));
                 require(cur.fdh->use_count() == 2);
                 cur.fdh->Release();
 
                 if (cur.fdh->fd == -1)
-                        throw Switch::system_error("open() failed:", strerror(errno));
+                        throw Switch::system_error("open(", basePath, ") failed:", strerror(errno));
 
                 basePath.SetLength(basePathLen);
                 basePath.append(cur.baseSeqNum, ".index");
-                cur.index.fd = open(basePath.data(), O_RDWR | O_LARGEFILE | O_CREAT, 0775);
+                cur.index.fd = open(basePath.data(), O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME, 0775);
                 basePath.SetLength(basePathLen);
 
                 if (cur.index.fd == -1)
-                        throw Switch::system_error("open() failed:", strerror(errno));
+                        throw Switch::system_error("open(", basePath, ") failed:", strerror(errno));
+
+                if (const uint32_t max = config.maxRollJitterSecs)
+                {
+                        std::random_device dev;
+                        std::mt19937 rng(dev());
+                        std::uniform_int_distribution<uint32_t> distr(0, max);
+
+                        cur.rollJitterSecs = distr(rng);
+                }
+                else
+                        cur.rollJitterSecs = 0;
+
+                cur.flush_state.pendingFlushMsgs = 0;
+                cur.flush_state.nextFlushTS = config.flushIntervalSecs ? now + config.flushIntervalSecs : UINT32_MAX;
 
                 if (trace)
                         SLog("Switched\n");
         }
 
-        if (cur.sinceLastUpdate > limits.indexInterval)
+        if (cur.sinceLastUpdate > config.indexInterval)
         {
                 const uint32_t out[] = {uint32_t(absSeqNum - cur.baseSeqNum), cur.fileSize};
 
@@ -616,8 +701,41 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 #ifdef TANK_SERIALIZE_OPS
                 lock.unlock();
 #endif
+
+                cur.flush_state.pendingFlushMsgs += bundleMsgsCnt;
+
+                if (trace)
+                        SLog("cur.flush_state.pendingFlushMsgs = ", cur.flush_state.pendingFlushMsgs, ", config.flushIntervalMsgs = ", config.flushIntervalMsgs, ", config.flushIntervalMsgs = ", config.flushIntervalMsgs, "\n");
+
+                if (config.flushIntervalMsgs && cur.flush_state.pendingFlushMsgs >= config.flushIntervalMsgs)
+                {
+                        if (trace)
+                                SLog("Scheduling flush\n");
+
+                        schedule_flush(now);
+                }
+                else if (now >= cur.flush_state.nextFlushTS)
+                {
+                        if (trace)
+                                SLog("Scheduling flush\n");
+
+                        schedule_flush(now);
+                }
+
                 return {fdh, fileRange, {absSeqNum, uint16_t(bundleMsgsCnt)}};
         }
+}
+
+void topic_partition_log::schedule_flush(const uint32_t now)
+{
+        cur.flush_state.pendingFlushMsgs = 0;
+        cur.flush_state.nextFlushTS = now + config.flushIntervalSecs;
+
+        // This is obviously not optimal; we should have used a bounded queue, or some lock/wait-free construct
+        // but given this is a rare event, it's not worth it yet
+        mboxLock.lock();
+        mbox.push_back({cur.fdh->fd, cur.index.fd});
+        mboxLock.unlock();
 }
 
 void topic_partition::consider_append_res(append_res &res, Switch::vector<wait_ctx *> &waitCtxWorkL)
@@ -688,7 +806,6 @@ void topic_partition::consider_append_res(append_res &res, Switch::vector<wait_c
 #ifdef TANK_SERIALIZE_OPS
         waitingListLock.unlock();
 #endif
-
 }
 
 append_res topic_partition::append_bundle_to_leader(const uint8_t *const bundle, const size_t bundleLen, const uint8_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL)
@@ -715,14 +832,14 @@ append_res topic_partition::append_bundle_to_leader(const uint8_t *const bundle,
 
 lookup_res topic_partition::read_from_local(const bool fetchOnlyFromLeader, const bool fetchOnlyComittted, const uint64_t absSeqNum, const uint32_t fetchSize)
 {
-	// TODO:
-	// For a multi-node configurations, maxAbsSeqNum should be set to the last committed absolute sequence number (i.e highwater mark)
-	// range_for() will make sure it won't return any data for messages with id >= maxAbsSeqNum
-	//
-	// search_before_offset() will need to access the segment log file though, and that may not be optimal; instead
-	// we may just want to rely on the client stopping processing chunk bundles if it reaches message id > maxAbsSeqNum(provided 
-	// in the fetch response), which it already takes into account
-	// reaches messages id >= maxAbsSeqNum
+        // TODO:
+        // For a multi-node configurations, maxAbsSeqNum should be set to the last committed absolute sequence number (i.e highwater mark)
+        // range_for() will make sure it won't return any data for messages with id >= maxAbsSeqNum
+        //
+        // search_before_offset() will need to access the segment log file though, and that may not be optimal; instead
+        // we may just want to rely on the client stopping processing chunk bundles if it reaches message id > maxAbsSeqNum(provided
+        // in the fetch response), which it already takes into account
+        // reaches messages id >= maxAbsSeqNum
         const uint64_t maxAbsSeqNum{UINT64_MAX};
 
         if (trace)
@@ -731,19 +848,22 @@ lookup_res topic_partition::read_from_local(const bool fetchOnlyFromLeader, cons
         return std::move(log_->range_for(absSeqNum, fetchSize, maxAbsSeqNum));
 }
 
-bool Service::parse_limits_config(const char *const path, partition_limits *const l)
+bool Service::parse_partition_config(const char *const path, partition_config *const l)
 {
-        int fd = open(path, O_RDONLY | O_LARGEFILE);
+        int fd = open(path, O_RDONLY | O_LARGEFILE | O_NOATIME);
 
         if (fd == -1)
-                throw Switch::system_error("Failed to access topic/partition config file:", strerror(errno));
+                throw Switch::system_error("Failed to access topic/partition config file(", path, "):", strerror(errno));
         else if (const auto fileSize = lseek64(fd, 0, SEEK_END))
         {
+                require(fileSize != off64_t(-1));
+
                 auto fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, fd, 0);
+                char normalized[128];
 
                 close(fd);
                 if (fileData == MAP_FAILED)
-                        throw Switch::system_error("Failed to access topic/partition config file:", strerror(errno));
+                        throw Switch::system_error("Failed to access topic/partition config file(", path, ") of size ", fileSize, ":", strerror(errno));
 
                 madvise(fileData, fileSize, MADV_SEQUENTIAL);
                 Defer({ munmap(fileData, fileSize); });
@@ -759,37 +879,84 @@ bool Service::parse_limits_config(const char *const path, partition_limits *cons
                         k.TrimWS();
                         v.TrimWS();
 
+                        if (!IsBetweenRange<size_t>(v.len, 1, 128))
+                                throw Switch::data_error("Unexpected value for ", k);
+
+                        {
+                                // Strip all ','
+                                uint32_t k{0};
+
+                                for (uint32_t i{0}; i != v.len; ++i)
+                                {
+                                        if (v.p[i] != ',')
+                                        {
+                                                if (!isdigit(v.p[i]))
+                                                        throw Switch::data_error("Unexpected value for ", k);
+                                                else
+                                                        normalized[k++] = v.p[i];
+                                        }
+                                }
+                                v.Set(normalized, k);
+
+                                if (!IsBetweenRange<size_t>(v.len, 1, 128))
+                                        throw Switch::data_error("Unexpected value for ", k);
+                        }
+
+                        // We are now using Kafka's configuration keys and semantics - for the most part - for simplicity
+                        // Keep it Simple.
                         if (k && v)
                         {
-                                if (k.EqNoCase(_S("limits.segments.count")))
+                                if (k.EqNoCase(_S("retention.segments.count")))
                                 {
                                         l->roSegmentsCnt = v.AsUint32();
                                         if (l->roSegmentsCnt < 2 && l->roSegmentsCnt)
-                                                throw Switch::range_error("Invalid limits.segments.count");
+                                                throw Switch::range_error("Invalid value for ", k);
                                 }
-                                else if (k.EqNoCase(_S("limits.segments.size")))
+                                else if (k.EqNoCase(_S("retention.secs")))
                                 {
-                                        l->roSegmentsSize = v.AsUint32();
-                                        if (l->roSegmentsSize < 128 && l->roSegmentsSize)
-                                                throw Switch::range_error("Invalid limits.segments.size");
+                                        l->lastSegmentMaxAge = v.AsUint32();
                                 }
-                                else if (k.EqNoCase(_S("limits.segment.size")))
+                                else if (k.EqNoCase(_S("retention.bytes")))
+                                {
+                                        l->roSegmentsSize = v.AsUint64();
+                                        if (l->roSegmentsSize < 128 && l->roSegmentsSize)
+                                                throw Switch::range_error("Invalid value for ", k);
+                                }
+                                else if (k.EqNoCase(_S("log.segment.bytes")))
                                 {
                                         l->maxSegmentSize = v.AsUint32();
                                         if (l->maxSegmentSize < 128)
-                                                throw Switch::range_error("Invalid limits.segment.size");
+                                                throw Switch::range_error("Invalid value for ", k);
                                 }
-                                else if (k.EqNoCase(_S("index.interval")))
+                                else if (k.EqNoCase(_S("log.index.interval.bytes")))
                                 {
                                         l->indexInterval = v.AsUint32();
                                         if (l->indexInterval < 128)
-                                                throw Switch::range_error("Invalid index.interval");
+                                                throw Switch::range_error("Invalid value for ", k);
                                 }
-				else if (k.EqNoCase(_S("limits.index.size")))
+                                else if (k.EqNoCase(_S("log.index.size.max.bytes")))
                                 {
                                         l->maxIndexSize = v.AsUint32();
                                         if (l->maxIndexSize < 128)
-                                                throw Switch::range_error("Invalid limits.index.size\n");
+                                                throw Switch::range_error("Invalid value for ", k);
+                                }
+                                else if (k.EqNoCase(_S("log.roll.jitter.secs")))
+                                {
+                                        l->maxRollJitterSecs = v.AsUint32();
+                                }
+                                else if (k.EqNoCase(_S("log.roll.secs")))
+                                {
+                                        l->curSegmentMaxAge = v.AsUint32();
+                                }
+                                else if (k.EqNoCase(_S("flush.messages")))
+                                {
+                                        // The number of messages accumulated on a log partition before messages are flushed on disk
+                                        l->flushIntervalMsgs = v.AsUint32();
+                                }
+                                else if (k.EqNoCase(_S("flush.secs")))
+                                {
+                                        // The amount of time the log can have dirty data before a flush is forced
+                                        l->flushIntervalSecs = v.AsUint32();
                                 }
                                 else
                                         Print("Unknown topic/partition configuration key '", k, "'\n");
@@ -797,10 +964,10 @@ bool Service::parse_limits_config(const char *const path, partition_limits *cons
                 }
         }
 
-	return true;
+        return true;
 }
 
-Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint16_t idx, const char *const bp, const partition_limits &partitionLogLimits)
+Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint16_t idx, const char *const bp, const partition_config &partitionConf)
 {
         char basePath[PATH_MAX];
         size_t basePathLen = strlen(bp);
@@ -820,14 +987,22 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
 
         try
         {
+                struct rosegment_ctx
+                {
+                        uint64_t firstAvailableSeqNum;
+                        uint64_t lastAvailSeqNum;
+                        uint32_t creationTS;
+                };
+
                 auto partition = Switch::make_sharedref(new topic_partition());
-		Switch::vector<std::pair<uint64_t, uint64_t>> roLogs;
-		uint64_t curLogSeqNum{0};
+                Switch::vector<rosegment_ctx> roLogs;
+                uint64_t curLogSeqNum{0};
+                uint32_t curLogCreateTS{0};
                 const strwlen32_t b(basePath, basePathLen);
                 int fd;
                 auto l = new topic_partition_log();
 
-		l->limits = partitionLogLimits;
+                l->config = partitionConf;
                 partition->distinctId = ++nextDistinctPartitionId;
 
                 partition->log_.reset(l);
@@ -847,8 +1022,8 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
 
                         if (name.Eq(_S("config")))
                         {
-				// override
-				parse_limits_config(Buffer::build(basePath, "/", name).data(), &l->limits);
+                                // override
+                                parse_partition_config(Buffer::build(basePath, "/", name).data(), &l->config);
                                 continue;
                         }
 
@@ -860,68 +1035,115 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         }
                         else if (r.second.Eq(_S("swap")))
                         {
-				// TODO:
+                                // TODO:
                         }
-			else if (r.second.Eq(_S("ilog")))
-			{
-				// Immutable log
-				const auto repr = r.first.Divided('-');
-				const auto baseSeqNum = repr.first.AsUint64(), lastAvailSeqNum = repr.second.AsUint64();
+                        else if (r.second.Eq(_S("ilog")))
+                        {
+                                // Immutable log
+                                auto s = r.first;
+                                uint32_t creationTS{0};
 
-				roLogs.push_back({baseSeqNum, lastAvailSeqNum});
-			}
+                                if (const auto *const p = s.Search('_'))
+                                {
+                                        // Creation TS is encoded in the name
+                                        creationTS = s.SuffixFrom(p + 1).AsUint32();
+                                        s = s.PrefixUpto(p);
+                                }
+
+                                const auto repr = s.Divided('-');
+                                const auto baseSeqNum = repr.first.AsUint64(), lastAvailSeqNum = repr.second.AsUint64();
+
+                                if (trace)
+                                        SLog("(	", baseSeqNum, ", ", lastAvailSeqNum, ", ", creationTS, ") ", r.first, "\n");
+
+                                roLogs.push_back({baseSeqNum, lastAvailSeqNum, creationTS});
+                        }
                         else if (r.second.Eq(_S("log")))
                         {
-				// current, mutable log(segment)
-				if (unlikely(!r.first.IsDigits()))
-					throw Switch::system_error("Unexpected name ", name);
-				else
+                                // current, mutable log(segment)
+                                // Either num.log or
+                                // num_ts.log
+                                // the later encodes the creation timestamp in the path, which is useful because
+                                // we 'd like to know when this was created, when we restart the service and get to continue using the selected log
+                                if (const auto *const p = r.first.Search('_'))
                                 {
-                                        const auto seq = r.first.AsUint64();
+                                        const auto seqRepr = r.first.PrefixUpto(p);
+                                        const auto tsRepr = r.first.SuffixFrom(p + 1);
 
-                                        require(seq);
-                                        require(!curLogSeqNum);
-                                        curLogSeqNum = seq;
+                                        if (!seqRepr.IsDigits() || !tsRepr.IsDigits())
+                                                throw Switch::system_error("Unexpected name ", name);
+                                        else
+                                        {
+                                                const auto seq = seqRepr.AsUint64();
+
+                                                require(seq);
+                                                require(!curLogSeqNum);
+                                                curLogSeqNum = seq;
+                                                curLogCreateTS = tsRepr.AsUint32();
+
+                                                if (trace)
+                                                        SLog("curLogSeqNum = ", curLogSeqNum, ", curLogCreateTS = ", curLogCreateTS, " from ", r.first, "\n");
+                                        }
+                                }
+                                else
+                                {
+                                        if (unlikely(!r.first.IsDigits()))
+                                                throw Switch::system_error("Unexpected name ", name);
+                                        else
+                                        {
+                                                const auto seq = r.first.AsUint64();
+
+                                                require(seq);
+                                                require(!curLogSeqNum);
+                                                curLogSeqNum = seq;
+                                        }
                                 }
                         }
                         else
-                                Print("Unexpected name ", name, "\n");
+                                Print("Unexpected name ", name, " in ", basePath, "\n");
                 }
 
-		if (trace)
-			SLog("roLogs.size() = ", roLogs.size(), ", curLogSeqNum = ", curLogSeqNum, "\n");
+                if (trace)
+                        SLog("roLogs.size() = ", roLogs.size(), ", curLogSeqNum = ", curLogSeqNum, ", curLogCreateTS = ", curLogCreateTS, "\n");
 
-		if (roLogs.size())
-		{
+                if (roLogs.size())
+                {
                         std::sort(roLogs.begin(), roLogs.end(), [](const auto &a, const auto &b) {
-                                return a.first < b.first;
+                                return a.firstAvailableSeqNum < b.firstAvailableSeqNum;
                         });
 
-			l->firstAvailableSeqNum = roLogs.front().first;
-			l->roSegments.reset(new Switch::vector<ro_segment *>());
+                        l->firstAvailableSeqNum = roLogs.front().firstAvailableSeqNum;
+                        l->roSegments.reset(new Switch::vector<ro_segment *>());
 
-			for (const auto &it : roLogs)
-			{
-				if (trace)
-					SLog("Initializing [", it.first, ",", it.second, "]\n");
+                        for (const auto &it : roLogs)
+                        {
+                                if (trace)
+                                        SLog("Initializing [", it.firstAvailableSeqNum, ",", it.lastAvailSeqNum, "]\n");
 
-				l->roSegments->push_back(new ro_segment(it.first, it.second, b));
-			}
+                                l->roSegments->push_back(new ro_segment(it.firstAvailableSeqNum, it.lastAvailSeqNum, b, it.creationTS));
+                        }
                 }
-		else
-		{
-			l->firstAvailableSeqNum = curLogSeqNum;
-			l->roSegments.reset(new Switch::vector<ro_segment *>());
-		}
+                else
+                {
+                        l->firstAvailableSeqNum = curLogSeqNum;
+                        l->roSegments.reset(new Switch::vector<ro_segment *>());
+                }
 
-		if (curLogSeqNum)
+                if (curLogSeqNum)
                 {
                         // Have a current segment
-                        Snprint(basePath, sizeof(basePath), b, curLogSeqNum, ".log");
-                        fd = open(basePath, O_RDWR | O_LARGEFILE | O_CREAT, 0775);
+                        if (curLogCreateTS)
+                                Snprint(basePath, sizeof(basePath), b, curLogSeqNum, "_", curLogCreateTS, ".log");
+                        else
+                                Snprint(basePath, sizeof(basePath), b, curLogSeqNum, ".log");
+
+                        fd = open(basePath, O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME, 0775);
+
+                        if (trace)
+                                SLog("Have current segment:", basePath, "\n");
 
                         if (fd == -1)
-                                throw Switch::system_error("open() failed:", strerror(errno));
+                                throw Switch::system_error("open(", basePath, ") failed:", strerror(errno));
 
                         l->cur.fdh.reset(new fd_handle(fd));
                         require(l->cur.fdh->use_count() == 2);
@@ -930,13 +1152,13 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         l->cur.fileSize = lseek64(fd, 0, SEEK_END);
 
                         Snprint(basePath, sizeof(basePath), b, curLogSeqNum, ".index");
-                        fd = open(basePath, O_RDWR | O_LARGEFILE | O_CREAT, 0775);
+                        fd = open(basePath, O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME, 0775);
 
                         if (fd == -1)
-			{
-				// TODO: rebuild it
-                                throw Switch::system_error("open() failed:", strerror(errno));
-			}
+                        {
+                                // TODO: rebuild it
+                                throw Switch::system_error("open(", basePath_, ") failed:", strerror(errno));
+                        }
 
                         l->cur.index.fd = fd;
                         // if this an empty commit log, need to update the index immediately
@@ -950,7 +1172,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                 l->cur.index.ondisk.data = static_cast<const uint8_t *>(mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0));
 
                                 if (unlikely(l->cur.index.ondisk.data == MAP_FAILED))
-                                        throw Switch::system_error("open() failed:", strerror(errno));
+                                        throw Switch::system_error("mmap() failed:", strerror(errno));
 
                                 const auto *const p = (uint32_t *)(l->cur.index.ondisk.data + l->cur.index.ondisk.span - sizeof(uint32_t) - sizeof(uint32_t));
 
@@ -986,7 +1208,14 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
 
                                 Defer({ free(data); });
 
-                                if (pread64(fd, data, span, o) != span)
+                                Drequire(fd != -1);
+
+                                const auto res = pread64(fd, data, span, o);
+
+                                if (trace)
+                                        SLog("Attempting to read ", span, " bytes at ", o, ": ", res, "\n");
+
+                                if (res != span)
                                         throw Switch::system_error("pread64() failed:", strerror(errno));
 
                                 for (const auto *p = data, *const e = p + span; p != e;)
@@ -1018,6 +1247,27 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         // Just in case
                         lseek64(l->cur.index.fd, 0, SEEK_END);
                         lseek64(l->cur.fdh->fd, 0, SEEK_END);
+
+                        if (const uint32_t max = l->config.maxRollJitterSecs)
+                        {
+                                std::random_device dev;
+                                std::mt19937 rng(dev());
+                                std::uniform_int_distribution<uint32_t> distr(0, max);
+
+                                l->cur.rollJitterSecs = distr(rng);
+                        }
+                        else
+                                l->cur.rollJitterSecs = 0;
+
+                        const auto now = Timings::Seconds::SysTime();
+
+                        l->cur.createdTS = curLogCreateTS ?: now;
+                        l->cur.nameEncodesTS = curLogCreateTS;
+                        l->cur.flush_state.pendingFlushMsgs = 0;
+                        l->cur.flush_state.nextFlushTS = config.flushIntervalSecs ? now + config.flushIntervalSecs : UINT32_MAX;
+
+                        if (trace)
+                                SLog("createdTS(", l->cur.createdTS, ") nameEncodesTS(", l->cur.nameEncodesTS, ")\n");
                 }
                 else
                 {
@@ -1029,12 +1279,12 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         l->cur.baseSeqNum = UINT64_MAX;
                         l->lastAssignedSeqNum = 0;
 
-			if (l->roSegments && l->roSegments->size())
-			{
-				// We can still use the last immutable segment
-				Print("Looks like someone deleted the active segment from ", bp, "\n");
-				l->lastAssignedSeqNum = l->roSegments->back()->lastAvailSeqNum;
-			}
+                        if (l->roSegments && l->roSegments->size())
+                        {
+                                // We can still use the last immutable segment
+                                Print("Looks like someone deleted the active segment from ", bp, "\n");
+                                l->lastAssignedSeqNum = l->roSegments->back()->lastAvailSeqNum;
+                        }
                 }
 
                 return partition;
@@ -1427,7 +1677,7 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                         if (trace)
                         {
                                 static thread_local IOBuffer decompressionBuf;
-				strwlen8_t key;
+                                strwlen8_t key;
 
                                 if (codec)
                                 {
@@ -1446,13 +1696,13 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                                         const auto msgTs = *(uint64_t *)p;
                                         p += sizeof(uint64_t);
 
-					if (flags&0x1)
-					{
-						key.Set((char *)p + 1, *p);
-						p+=key.len + sizeof(uint8_t);
-					}
-					else
-						key.Unset();
+                                        if (flags & 0x1)
+                                        {
+                                                key.Set((char *)p + 1, *p);
+                                                p += key.len + sizeof(uint8_t);
+                                        }
+                                        else
+                                                key.Unset();
 
                                         const auto msgLen = Compression::UnpackUInt32(p);
 
@@ -1478,7 +1728,7 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                                 SLog("Took ", duration_repr(Timings::Microseconds::Since(b)), " for ", msgSetSize, " msgs in bundle message set: ", expiredCtxList.size(), "\n");
 
 #ifdef LEAN_SWITCH
-			(void)b;
+                        (void)b;
 #endif
 
                         respHeader->Serialize(uint8_t(0));
@@ -1527,13 +1777,13 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes)
         uint8_t topicsCnt{0};
         auto c = wctx->c;
         auto q = c->outQ;
-	size_t sum{0};
+        size_t sum{0};
 
         if (!q)
                 q = c->outQ = get_outgoing_queue();
 
         if (trace)
-                SLog(ansifmt::bold, ansifmt::color_green, "Waking up wait ctx ", ptr_repr(wctx), ", ", wctx->requestId, ansifmt::reset, "\n");
+                SLog(ansifmt::bold, ansifmt::color_green, "Waking up wait ctx ", ptr_repr(wctx), ", ", wctx->requestId, ansifmt::reset, ansifmt::reset, "\n");
 
         q->push_back(respHeader);
 
@@ -1581,7 +1831,7 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes)
                                 respHeader->Serialize(p->highwater_mark());
                                 respHeader->Serialize(it.range.len);
 
-				sum += it.range.len;
+                                sum += it.range.len;
                                 q->push_back({it.fdh, it.range});
                                 it.fdh->Release();
                                 it.fdh = nullptr;
@@ -1712,7 +1962,6 @@ void Service::destroy_wait_ctx(wait_ctx *const wctx)
 #ifdef TANK_SERIALIZE_OPS
                 p->waitingListLock.unlock();
 #endif
-
         }
 
         if (switch_dlist_any(&wctx->expList))
@@ -1752,7 +2001,7 @@ bool Service::shutdown(connection *const c, const uint32_t ref)
                 SLog("SHUTDOWN at ", ref, " ", Timings::Microseconds::SysTime(), "\n");
 
         require(c->fd != -1);
-	cleanup_connection(c);
+        cleanup_connection(c);
 
         return false;
 }
@@ -1775,8 +2024,8 @@ bool Service::try_send(connection *const c)
 
                 if (q && !q->empty())
                 {
-			if (trace)
-				SLog("Enabling cork\n");
+                        if (trace)
+                                SLog("Enabling cork\n");
 
                         haveCork = true;
                         Switch::SetTCPCork(fd, 1);
@@ -1834,11 +2083,11 @@ bool Service::try_send(connection *const c)
                                         else if (errno == EAGAIN)
                                         {
                                                 if (haveCork)
-						{
-							if (trace)
-								SLog("Removing cork\n");
+                                                {
+                                                        if (trace)
+                                                                SLog("Removing cork\n");
                                                         Switch::SetTCPCork(fd, 0);
-						}
+                                                }
 
                                                 if (!(c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))))
                                                 {
@@ -1882,35 +2131,35 @@ bool Service::try_send(connection *const c)
                                                 continue;
                                         else if (errno == EAGAIN)
                                         {
-						if (trace)
-							SLog("EAGAIN (haveCork = ", haveCork, ", needOutAvail = ", (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))), ")\n");
+                                                if (trace)
+                                                        SLog("EAGAIN (haveCork = ", haveCork, ", needOutAvail = ", (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))), ")\n");
 
                                                 if (haveCork)
-						{
-							if (trace)
-								SLog("Unsetting cork\n");
+                                                {
+                                                        if (trace)
+                                                                SLog("Unsetting cork\n");
 
                                                         Switch::SetTCPCork(fd, 0);
-						}
+                                                }
 
                                                 if (!(c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))))
                                                 {
-							if (trace)
-								SLog("Now NeedOutAvail\n");
+                                                        if (trace)
+                                                                SLog("Now NeedOutAvail\n");
 
                                                         c->state.flags |= (1u << uint8_t(connection::State::Flags::NeedOutAvail));
                                                         poller.SetDataAndEvents(fd, c, POLLIN | POLLOUT);
                                                 }
 
-						return true;
+                                                return true;
                                         }
                                         else
                                                 return shutdown(c, __LINE__);
                                 }
-				else
+                                else
                                 {
                                         range.len -= r;
-					range.offset += r;
+                                        range.offset += r;
 
                                         if (!range)
                                         {
@@ -1927,12 +2176,12 @@ bool Service::try_send(connection *const c)
         c->outQ = nullptr;
 
         if (haveCork)
-	{
-		if (trace)
-			SLog("Removing cork\n");
+        {
+                if (trace)
+                        SLog("Removing cork\n");
 
                 Switch::SetTCPCork(fd, 0);
-	}
+        }
 
         if (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail)))
         {
@@ -1940,21 +2189,20 @@ bool Service::try_send(connection *const c)
                 poller.SetDataAndEvents(fd, c, POLLIN);
         }
 
-
         return true;
 }
 
 Service::~Service()
 {
-	while (switch_dlist_any(&allConnections))
-		cleanup_connection(switch_list_entry(connection, connectionsList, allConnections.next));
+        while (switch_dlist_any(&allConnections))
+                cleanup_connection(switch_list_entry(connection, connectionsList, allConnections.next));
 
-	while (bufs.size())
-		delete bufs.Pop();
+        while (bufs.size())
+                delete bufs.Pop();
 
 #ifdef LEAN_SWITCH
-	for (auto &it : topics)
-		it.second->Release();
+        for (auto &it : topics)
+                it.second->Release();
 #endif
 }
 
@@ -1968,8 +2216,8 @@ int Service::start(int argc, char **argv)
         size_t totalPartitions{0};
         Switch::endpoint listenAddr;
 
-	signal(SIGPIPE, SIG_IGN);
-	signal(SIGHUP, SIG_IGN);
+        signal(SIGPIPE, SIG_IGN);
+        signal(SIGHUP, SIG_IGN);
         while ((r = getopt(argc, argv, "p:l:")) != -1)
         {
                 switch (r)
@@ -2016,7 +2264,7 @@ int Service::start(int argc, char **argv)
         }
         else
         {
-		// TODO: only if running in standalone mode; otherwise interface with the etcd cluster for configuration
+                // TODO: only if running in standalone mode; otherwise interface with the etcd cluster for configuration
                 try
                 {
                         const auto basePathLen = basePath_.length();
@@ -2028,21 +2276,25 @@ int Service::start(int argc, char **argv)
 
                                 basePath_.SetLength(basePathLen);
                                 basePath_.append("/", name);
+
                                 if (stat64(basePath_.data(), &st) == -1)
                                         throw Switch::system_error("Failed to stat(", basePath_, "): ", strerror(errno));
                                 else if (st.st_mode & S_IFDIR)
                                 {
                                         const auto topicBasePathLen = basePath_.length();
                                         uint32_t partitionsCnt{0}, sum{0};
-					partition_limits partitionLimits;
+                                        partition_config partitionConfig;
 
                                         for (const auto &&name : DirectoryEntries(basePath_.data()))
                                         {
-						if (name.Eq(_S("config")))
-						{
-							// topic overrides defaults
-							parse_limits_config(basePath_.data(), &partitionLimits);
-						}
+                                                basePath_.SetLength(topicBasePathLen);
+                                                basePath_.append("/", name);
+
+                                                if (name.Eq(_S("config")))
+                                                {
+                                                        // topic overrides defaults
+                                                        parse_partition_config(basePath_.data(), &partitionConfig);
+                                                }
                                                 else if (name.IsDigits())
                                                 {
                                                         if (stat64(basePath_.data(), &st) == -1)
@@ -2064,8 +2316,9 @@ int Service::start(int argc, char **argv)
 
                                                 for (uint16_t i{0}; i != partitionsCnt; ++i)
                                                 {
+                                                        basePath_.SetLength(topicBasePathLen);
                                                         basePath_.append("/", i);
-                                                        auto partition = init_local_partition(i, basePath_.data(), partitionLimits);
+                                                        auto partition = init_local_partition(i, basePath_.data(), partitionConfig);
 
                                                         t->register_partition(partition.release());
                                                         basePath_.SetLength(topicBasePathLen);
@@ -2083,14 +2336,13 @@ int Service::start(int argc, char **argv)
                         Print("Failed to initialize topics and partitions:", e.what(), "\n");
                         return 1;
                 }
-
         }
 
         if (topics.empty())
         {
                 Print("No topics found in ", basePath_, ". You may want to create a few, like so:\n");
                 Print("mkdir -p ", basePath_, "/events/0 ", basePath_, "/orders/0 \n");
-		Print("This will create topics events and orders and define one partition with id 0 for each of them. Restart Tank after you have created a few topics/partitions\n");
+                Print("This will create topics events and orders and define one partition with id 0 for each of them. Restart Tank after you have created a few topics/partitions\n");
                 return 1;
         }
 
@@ -2106,10 +2358,10 @@ int Service::start(int argc, char **argv)
         sa.sin_family = AF_INET;
 
         if (Switch::SetReuseAddr(listenFd, 1) == -1)
-	{
-		Print("SO_REUSEADDR: ", strerror(errno), "\n");
-		return 1;
-	}
+        {
+                Print("SO_REUSEADDR: ", strerror(errno), "\n");
+                return 1;
+        }
         else if (bind(listenFd, (sockaddr *)&sa, sizeof(sa)))
         {
                 Print("bind() failed:", strerror(errno), "\n");
@@ -2120,6 +2372,30 @@ int Service::start(int argc, char **argv)
                 Print("listen() failed:", strerror(errno), "\n");
                 return 1;
         }
+
+        std::thread([] {
+                Switch::vector<std::pair<int, int>> local;
+
+                for (;;)
+                {
+                        Timings::Seconds::Sleep(1);
+
+                        mboxLock.lock();
+                        std::swap(local, mbox);
+                        require(mbox.empty());
+                        mboxLock.unlock();
+
+                        for (auto &it : local)
+                        {
+                                SLog(it.first, " ", it.second, "\n");
+                                fdatasync(it.first);
+                                fdatasync(it.second);
+                        }
+
+                        local.clear();
+                }
+
+        }).detach();
 
         poller.AddFd(listenFd, POLLIN, &listenFd);
 
@@ -2193,10 +2469,10 @@ int Service::start(int argc, char **argv)
                                         b = c->inB = get_buffer();
 
                                 if (unlikely(ioctl(fd, FIONREAD, &n) == -1))
-				{
-					Print("ioctl():", strerror(errno), "\n");
-					return 1;
-				}
+                                {
+                                        Print("ioctl():", strerror(errno), "\n");
+                                        return 1;
+                                }
                                 b->reserve(n);
                                 r = read(fd, b->End(), n);
 
@@ -2234,17 +2510,17 @@ int Service::start(int argc, char **argv)
                                                 p += sizeof(uint32_t);
 
                                                 if (unlikely(msgLen > 256 * 1024 * 1024))
-						{
-							Print("** TOO large incoming packet of length ", size_repr(msgLen), "\n");
+                                                {
+                                                        Print("** TOO large incoming packet of length ", size_repr(msgLen), "\n");
                                                         shutdown(c, __LINE__);
-							goto nextEvent;
-						}
+                                                        goto nextEvent;
+                                                }
                                                 else if (p + msgLen > e)
-						{
-							if (trace)
-								SLog("Need more data for ", msg, "\n");
+                                                {
+                                                        if (trace)
+                                                                SLog("Need more data for ", msg, "\n");
                                                         goto l1;
-						}
+                                                }
                                                 else if (!process_msg(c, msg, reinterpret_cast<const uint8_t *>(p), msgLen))
                                                         goto nextEvent;
 
@@ -2253,13 +2529,13 @@ int Service::start(int argc, char **argv)
                                                 if (p == e)
                                                 {
                                                         b->clear();
-							Drequire(b->Offset() == 0);
+                                                        Drequire(b->Offset() == 0);
                                                         c->inB = nullptr;
                                                         put_buffer(b);
                                                         break;
                                                 }
-						else
-							b->SetOffset((char *)p);
+                                                else
+                                                        b->SetOffset((char *)p);
                                         }
                                         else
                                                 break;
@@ -2281,7 +2557,6 @@ int Service::start(int argc, char **argv)
 
                 nextEvent:;
                 }
-
 
                 if (nowMS > nextIdleCheck)
                 {
@@ -2315,7 +2590,6 @@ int Service::start(int argc, char **argv)
                                 abort_wait_ctx(expiredCtxList.Pop());
                 }
         }
-
 }
 
 int main(int argc, char *argv[])

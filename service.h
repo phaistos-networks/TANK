@@ -98,6 +98,9 @@ struct ro_segment
 	// See: https://github.com/phaistos-networks/TANK/issues/2 for rationale
 	const uint64_t lastAvailSeqNum;
 
+	const uint32_t createdTS;
+	uint32_t lastModTS;
+
 
         Switch::shared_refptr<fd_handle> fdh;
         uint32_t fileSize;
@@ -112,12 +115,12 @@ struct ro_segment
                 index_record lastRecorded;
         } index;
 
-        ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum)
-            : baseSeqNum{absSeqNum}, lastAvailSeqNum{lastAbsSeqNum}
+        ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, const uint32_t creationTS)
+            : baseSeqNum{absSeqNum}, lastAvailSeqNum{lastAbsSeqNum}, createdTS{creationTS}, lastModTS{0}
         {
         }
 
-        ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, const strwlen32_t base);
+        ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, const strwlen32_t base, const uint32_t);
 
         ~ro_segment()
         {
@@ -193,15 +196,20 @@ struct lookup_res
         }
 };
 
-struct partition_limits
+struct partition_config
 {
 	// Kafka defaults
         size_t roSegmentsCnt{0};
-        size_t roSegmentsSize{0};
-        size_t maxSegmentSize{1 * 1024 * 1024 * 1024};
+        uint64_t roSegmentsSize{0};
+        uint64_t maxSegmentSize{1 * 1024 * 1024 * 1024};
         size_t indexInterval{4096};
 	size_t maxIndexSize{10 * 1024 * 1024};
-} limits;
+	size_t maxRollJitterSecs{0};
+	size_t lastSegmentMaxAge{24 * 86400 * 7}; // 1 week (soft limit)
+	size_t curSegmentMaxAge{24 * 86400 * 7}; // 1 week (soft limit)
+	size_t flushIntervalMsgs{0}; 		// never
+	size_t flushIntervalSecs{0}; 		// never
+} config;
 
 static void PrintImpl(Buffer &out, const lookup_res &res)
 {
@@ -240,6 +248,13 @@ struct topic_partition_log
                 // This is always initialized to UINT32_MAX, so that we always index the first bundle in the segment, for impl.simplicity
                 uint32_t sinceLastUpdate;
 
+		// Computed whenever we roll/create a new mutable segment
+		uint32_t rollJitterSecs;
+
+		// When this was created, in seconds
+		uint32_t createdTS;
+		bool nameEncodesTS;
+
                 struct
                 {
                         int fd;
@@ -266,9 +281,16 @@ struct topic_partition_log
 
                 } index;
 
+
+		struct
+		{
+			uint64_t pendingFlushMsgs{0};
+			uint32_t nextFlushTS;
+		} flush_state;
+
         } cur; // the _current_ (latest) segment
 
-	partition_limits limits;
+	partition_config config;
 
         // a topic partition is comprised of a set of segments(log file, index file) which
         // are immutable, and we don't need to serialize access to them, and a cur(rent) segment, which is not immutable.
@@ -291,6 +313,10 @@ struct topic_partition_log
         lookup_res range_for(uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum);
 
         append_res append_bundle(const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt);
+
+	bool should_roll(const uint32_t) const;
+
+	void schedule_flush(const uint32_t);
 
         void consider_ro_segments();
 };
@@ -698,7 +724,7 @@ class Service
         Switch::vector<topic_partition *> deferList;
 
       private:
-        static bool parse_limits_config(const char *, partition_limits *);
+        static bool parse_partition_config(const char *, partition_config *);
 
         auto get_outgoing_queue()
         {
@@ -746,7 +772,7 @@ class Service
                         throw Switch::exception("Topic ", t->name(), " already registered");
         }
 
-        Switch::shared_refptr<topic_partition> init_local_partition(const uint16_t idx, const char *const bp, const partition_limits&);
+        Switch::shared_refptr<topic_partition> init_local_partition(const uint16_t idx, const char *const bp, const partition_config&);
 
         bool isValidBrokerId(const uint16_t replicaId)
         {
