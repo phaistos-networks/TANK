@@ -2,9 +2,9 @@ Tank is a high performance distributed log, inspired in part by Kafka, and other
 
 You should begin by [reading about the core concepts](https://github.com/phaistos-networks/TANK/wiki/Core-Concepts) and the [client API](https://github.com/phaistos-networks/TANK/wiki/Client-API).
 
-It is a work in progress; it began a few days ago, and has been moved to github so that I will be motivated to work on it.
+It is a work in progress. The core functionality is implemented and tested, and new features will be implemented soon.  
 It depends on our Switch library, so a lean/stripped-down Switch is included in the repo. 
-Please see [building instructions](https://github.com/phaistos-networks/TANK/wiki/Building-Tank). 
+Please see [building instructions](https://github.com/phaistos-networks/TANK/wiki/Building-Tank). You may also want to [run Tank using its Docker image](https://github.com/phaistos-networks/TANK/wiki/Docker).
 
 This is our first major open source release as a company, and we plan to accelerate our OSS release efforts in the future.
 
