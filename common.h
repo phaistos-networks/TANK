@@ -2,5 +2,5 @@
 #include <switch.h>
 
 #ifdef LEAN_SWITCH
-#define RFLog(...) do { } while (0)
+#define RFLog(...) Print(__VA_ARGS__)
 #endif
