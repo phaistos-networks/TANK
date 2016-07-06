@@ -665,6 +665,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 #ifdef TANK_SERIALIZE_OPS
                         lock.unlock();
 #endif
+			RFLog("Failed to write():", strerror(errno), "\n");
                         return {nullptr, {}, {}};
                 }
 
@@ -691,6 +692,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 #ifdef TANK_SERIALIZE_OPS
                 lock.unlock();
 #endif
+		RFLog("Failed to writev():", strerror(errno), "\n");
                 return {nullptr, {}, {}};
         }
         else
