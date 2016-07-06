@@ -12,7 +12,7 @@ It will eventually support, among other features:
 - [clusters via leader/followers arrangement](https://github.com/phaistos-networks/TANK/wiki/Operation-Modes) using etcd, similar in semantics to Kafka (but no single controller, and simpler configuration and operation)
 - higher level clients, based on Kafka's current client design (depending on the needs of our developers, but PRs will be welcome)
 - hooks into other Phaistos infrastructure
-- a Kafka like streams topologies abstraction
+- a Kafka/DataFlow like streams topologies abstraction/framework
 - encryption (wire transfers and bundle serialization)
 - improved client and extended API
 - HTTP/1 and HTTP/2 REST APIs
