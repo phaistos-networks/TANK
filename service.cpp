@@ -2206,6 +2206,14 @@ Service::~Service()
 #endif
 }
 
+static bool running{true};
+
+static void sig_handler(int)
+{
+	running = false;
+}
+
+
 // TODO: https://github.com/phaistos-networks/TANK/issues/7
 int Service::start(int argc, char **argv)
 {
@@ -2218,6 +2226,7 @@ int Service::start(int argc, char **argv)
 
         signal(SIGPIPE, SIG_IGN);
         signal(SIGHUP, SIG_IGN);
+	signal(SIGINT, sig_handler);
         while ((r = getopt(argc, argv, "p:l:")) != -1)
         {
                 switch (r)
@@ -2399,7 +2408,7 @@ int Service::start(int argc, char **argv)
 
         poller.AddFd(listenFd, POLLIN, &listenFd);
 
-        for (;;)
+	while (likely(running))
         {
                 const auto r = poller.Poll(1000);
 
@@ -2590,6 +2599,9 @@ int Service::start(int argc, char **argv)
                                 abort_wait_ctx(expiredCtxList.Pop());
                 }
         }
+
+	Print("TANK terminated\n");
+	return true;
 }
 
 int main(int argc, char *argv[])
