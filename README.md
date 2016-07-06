@@ -23,7 +23,7 @@ Features include:
 - Very tight encoding of messages(into bundles)
 - Simple design (Simple is Beautiful; [Convenience is Key](https://medium.com/@markpapadakis/convenience-is-key-2aad97d531cd#.47eyjv6xt))
  
-You should probably use Kafka (the Confluent folk are particularly great ), or Google DataFlow, or any other open source broker/queue instead of Tank - they are all perfectly fine, some more than other. 
-Tank's goal is highest performance and simplicity. 
+You should probably use Kafka (the Confluent folk are particularly great ), or Google Pub/Sub, or any other open source broker/queue instead of Tank - they are all perfectly fine, some more than other. 
+Tank's goal is highest performance and simplicity. If you need very high performance, operation simplicity and no reliance on other services (when running Tank in standalonemode), consider Tank.
 
 Please see the [wiki](https://github.com/phaistos-networks/TANK/wiki) for more information.
