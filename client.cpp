@@ -1249,6 +1249,8 @@ int TankClient::init_connection_to(const Switch::endpoint e)
         if (trace)
                 SLog("Connecting to ", e, "\n");
 
+	Switch::SetNoDelay(fd, 1);
+
         if (connect(fd, (sockaddr *)&sa, sizeof(sa)) == -1 && errno != EINPROGRESS)
         {
                 close(fd);

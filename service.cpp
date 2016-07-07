@@ -201,18 +201,10 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
                 res.absBaseSeqNum = cur.baseSeqNum + it->first;
                 res.range.Set(it->second, cur.fileSize - it->second);
 
-#ifdef TANK_SERIALIZE_OPS
-                lock.unlock_shared();
-#endif
-
                 inSkiplist = true;
         }
         else
         {
-#ifdef TANK_SERIALIZE_OPS
-                lock.unlock_shared();
-#endif
-
                 require(cur.index.ondisk.span); // we checked if it's in this current segment
 
                 if (trace)
@@ -279,9 +271,6 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         if (trace)
                 SLog("Read for absSeqNum = ", absSeqNum, ", lastAssignedSeqNum = ", lastAssignedSeqNum, ", firstAvailableSeqNum = ", firstAvailableSeqNum, "\n");
 
-#ifdef TANK_SERIALIZE_OPS
-        lock.lock_shared();
-#endif
 
         // (UINT64_MAX) is reserved: fetch only newly produced bundles
         // see process_consume()
@@ -308,10 +297,6 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         if (maxSize == 0)
         {
 // Should be handled by the client
-#ifdef TANK_SERIALIZE_OPS
-                lock.unlock_shared();
-#endif
-
                 if (trace)
                         SLog("maxSize == 0\n");
 
@@ -320,10 +305,6 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         else if (maxAbsSeqNum < absSeqNum)
         {
 // Should be handled by the client
-#ifdef TANK_SERIALIZE_OPS
-                lock.unlock_shared();
-#endif
-
                 if (trace)
                         SLog("Past maxAbsSeqNum = ", maxAbsSeqNum, "\n");
 
@@ -333,10 +314,6 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         {
 // return empty
 // UPDATE: let's wait instead
-#ifdef TANK_SERIALIZE_OPS
-                lock.unlock_shared();
-#endif
-
                 if (trace)
                         SLog("Empty\n");
 
@@ -346,10 +323,6 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         {
 // past last assigned sequence number? nope
 // throw an error
-#ifdef TANK_SERIALIZE_OPS
-                lock.unlock_shared();
-#endif
-
                 if (trace)
                         SLog("PAST absSeqNum(", absSeqNum, ") > lastAssignedSeqNum(", lastAssignedSeqNum, ")\n");
 
@@ -357,10 +330,6 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         }
         else if (absSeqNum < firstAvailableSeqNum)
         {
-#ifdef TANK_SERIALIZE_OPS
-                lock.unlock_shared();
-#endif
-
                 if (trace)
                         SLog("< firstAvailableSeqNum\n");
 
@@ -376,10 +345,6 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         }
 
         auto prevSegments = roSegments;
-
-#ifdef TANK_SERIALIZE_OPS
-        lock.unlock_shared();
-#endif
 
         // TODO: https://github.com/phaistos-networks/TANK/issues/2
         const auto end = prevSegments->end();
@@ -519,10 +484,6 @@ bool topic_partition_log::should_roll(const uint32_t now) const
 
 append_res topic_partition_log::append_bundle(const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt)
 {
-#ifdef TANK_SERIALIZE_OPS
-        lock.lock();
-#endif
-
         const auto savedLastAssignedSeqNum = lastAssignedSeqNum;
         const auto absSeqNum = lastAssignedSeqNum + 1;
         const auto now = Timings::Seconds::SysTime();
@@ -662,9 +623,6 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 
                 if (unlikely(write(cur.index.fd, out, sizeof(out)) != sizeof(out)))
                 {
-#ifdef TANK_SERIALIZE_OPS
-                        lock.unlock();
-#endif
 			RFLog("Failed to write():", strerror(errno), "\n");
                         return {nullptr, {}, {}};
                 }
@@ -689,9 +647,6 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
         require(cur.fdh.use_count() == before + 1);
         if (writev(fd, iov, sizeof_array(iov)) != entryLen)
         {
-#ifdef TANK_SERIALIZE_OPS
-                lock.unlock();
-#endif
 		RFLog("Failed to writev():", strerror(errno), "\n");
                 return {nullptr, {}, {}};
         }
@@ -699,10 +654,6 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
         {
                 cur.fileSize += entryLen;
                 cur.sinceLastUpdate += entryLen;
-
-#ifdef TANK_SERIALIZE_OPS
-                lock.unlock();
-#endif
 
                 cur.flush_state.pendingFlushMsgs += bundleMsgsCnt;
 
@@ -747,9 +698,6 @@ void topic_partition::consider_append_res(append_res &res, Switch::vector<wait_c
         if (trace)
                 SLog(ansifmt::color_blue, " waitingList.size() = ", waitingList.size(), ansifmt::reset, "\n");
 
-#ifdef TANK_SERIALIZE_OPS
-        waitingListLock.lock();
-#endif
         for (uint32_t i{0}; i < waitingList.size();)
         {
                 auto it = waitingList[i];
@@ -804,10 +752,6 @@ void topic_partition::consider_append_res(append_res &res, Switch::vector<wait_c
                 else
                         ++i;
         }
-
-#ifdef TANK_SERIALIZE_OPS
-        waitingListLock.unlock();
-#endif
 }
 
 append_res topic_partition::append_bundle_to_leader(const uint8_t *const bundle, const size_t bundleLen, const uint8_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL)
@@ -1539,14 +1483,7 @@ bool Service::register_consumer_wait(connection *const c, const uint32_t request
                 if (trace)
                         SLog("Partition ", ptr_repr(p), "\n");
 
-#ifdef TANK_SERIALIZE_OPS
-                p->waitingListLock.lock();
-#endif
                 p->waitingList.push_back(ctx);
-
-#ifdef TANK_SERIALIZE_OPS
-                p->waitingListLock.unlock();
-#endif
 
                 out->partition = p;
                 out->fdh = nullptr;
@@ -1953,15 +1890,7 @@ void Service::destroy_wait_ctx(wait_ctx *const wctx)
                         it.fdh = nullptr;
                 }
 
-#ifdef TANK_SERIALIZE_OPS
-                p->waitingListLock.lock();
-#endif
-
                 p->waitingList.RemoveByValue(wctx);
-
-#ifdef TANK_SERIALIZE_OPS
-                p->waitingListLock.unlock();
-#endif
         }
 
         if (switch_dlist_any(&wctx->expList))
@@ -2454,6 +2383,8 @@ int Service::start(int argc, char **argv)
                                         switch_dlist_init(&c->connectionsList);
                                         switch_dlist_init(&c->waitCtxList);
                                         switch_dlist_insert_after(&allConnections, &c->connectionsList);
+
+					Switch::SetNoDelay(c->fd, 1);
 
                                         // We are going to ping as soon as we can so that the client will know we have been accepted
                                         // but we can't write(fd, ..) now; so we 'll need to wait for POLLOUT and then ping

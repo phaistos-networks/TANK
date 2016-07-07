@@ -69,6 +69,12 @@ namespace Switch
                 }
         };
 
+	inline int SetNoDelay(int fd, const int v)
+	{
+		// Nagle's algorithm
+		return setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &v, sizeof(int));
+	}
+
         inline int SetTCPCork(int fd, const int v)
         {
 #ifdef __linux__

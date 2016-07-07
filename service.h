@@ -11,16 +11,6 @@
 #include <sys/mman.h>
 #include <sys/sendfile.h>
 
-// https://github.com/phaistos-networks/TANK/issues/7
-// We are not going to use multiple threads anywyay for Service
-//#define TANK_SERIALIZE_OPS 
-
-#if !defined(LEAN_SWITCH) && defined(TANK_SERIALIZE_OPS)
-#include <switch_sharedmutex.h>
-#elif defined(TANK_SERIALIZE_OPS)
-#undef TANK_SERIALIZE_OPS
-#endif
-
 
 
 // The index is sparse, so we need to be able to locate the _last_ index entry for relative sequence number <= targetRelativeSeqNumber
@@ -222,11 +212,6 @@ static void PrintImpl(Buffer &out, const lookup_res &res)
 // An append-only log for storing bundles, divided into segments
 struct topic_partition_log
 {
-#ifdef TANK_SERIALIZE_OPS
-        // in practice, we 'll only need to acquire the lock when accessing the last/current commit log
-        // all other immutable frozen commit log files do not require serialization
-        Switch::SharedMutexReadPriority lock;
-#endif
 
         // The first available absolute sequence number across all segments
         uint64_t firstAvailableSeqNum;
@@ -391,9 +376,6 @@ struct topic_partition
         std::unique_ptr<topic_partition_log> log_;
 
 #ifndef LEAN_SWITCH
-#ifdef TANK_SERIALIZE_OPS
-        Switch::SharedMutexReadPriority replicasLock;
-#endif
         Switch::unordered_map<uint16_t, replica *, ReleaseRefDestructor> replicasMap;
 #else
 	Switch::unordered_map<uint16_t, replica *> replicasMap;
@@ -406,9 +388,6 @@ struct topic_partition
                 return log_->lastAssignedSeqNum;
         }
 
-#ifdef TANK_SERIALIZE_OPS
-        Switch::mutex waitingListLock;
-#endif
         Switch::vector<wait_ctx *> waitingList;
 
         Switch::shared_refptr<replica> replicaByBrokerId(const uint16_t brokerId)
