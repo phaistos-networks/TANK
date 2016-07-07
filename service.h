@@ -195,8 +195,8 @@ struct partition_config
         size_t indexInterval{4096};
 	size_t maxIndexSize{10 * 1024 * 1024};
 	size_t maxRollJitterSecs{0};
-	size_t lastSegmentMaxAge{24 * 86400 * 7}; // 1 week (soft limit)
-	size_t curSegmentMaxAge{24 * 86400 * 7}; // 1 week (soft limit)
+	size_t lastSegmentMaxAge{86400 * 7}; 	// 1 week (soft limit)
+	size_t curSegmentMaxAge{86400 * 7}; 	// 1 week (soft limit)
 	size_t flushIntervalMsgs{0}; 		// never
 	size_t flushIntervalSecs{0}; 		// never
 } config;

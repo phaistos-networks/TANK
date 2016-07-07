@@ -152,6 +152,9 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
                 const auto produceCtxPartitionsCntOffset = produceCtx.length();
                 produceCtx.MakeSpace(sizeof(uint8_t));
 
+		if (trace)
+			SLog("For topic [", topic, "]\n");
+
                 ++topicsCnt;
                 do
                 {
@@ -187,6 +190,10 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
 
                         const auto msgSetOffset = b.length();
 			uint64_t lastTS{0};
+
+			if (trace)
+				SLog("Packing ", it->msgsCnt, " for bundle msg set, for partition ", it->partitionId, "\n");
+
 
                         for (uint32_t i{0}; i != it->msgsCnt; ++i)
                         {
@@ -821,6 +828,9 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                         const auto msgFlags = *p++;     // msg.flags
 
+					if (trace)
+					SLog("msgFlags = ", msgFlags, "\n");
+
 					if (msgFlags & uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS))
 					{
 						// Using the timestamp of the last message that had a specified timestamp in this bundle
@@ -880,6 +890,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                         const auto len = Compression::UnpackUInt32(p); // message.length
 
+
                                         if (p + len > endOfMsgSet)
                                         {
                                                 if (codec)
@@ -893,6 +904,9 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         }
 
                                         const auto msgAbsSeqNum = logBaseSeqNum++; // This message's absolute sequence number
+
+					if (trace)
+						SLog("message length = ", len, ", ts = ", ts, " for (", msgAbsSeqNum, ")\n");
 
                                         if (msgAbsSeqNum > highWaterMark)
                                         {
@@ -1095,7 +1109,7 @@ bool TankClient::try_send(connection *const c)
                 }
 
                 if (trace)
-                        SLog("Will attempt to send ", out - iov, "\n");
+                        SLog("Will attempt to send ", out - iov, " iovecs\n");
 
                 for (;;)
                 {
@@ -1400,6 +1414,9 @@ uint32_t TankClient::produce(const std::vector<
         {
                 const auto ref = it.first;
                 const auto topic = ref.first;
+
+		if (trace)
+			SLog("For (", topic, ", ", ref.second, "): ", it.second.size(), "\n");
 
                 out.push_back(produce_ctx{{leader_for(topic, ref.second)}, topic, ref.second, it.second.data(), it.second.size()});
         }

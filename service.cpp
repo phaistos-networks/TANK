@@ -678,6 +678,8 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 return {fdh, fileRange, {absSeqNum, uint16_t(bundleMsgsCnt)}};
         }
 
+	// return here and not in (writev() ! entryLen) check because some older compilers warn about
+	// a path with no return from a non-void function. Sigh
         return {nullptr, {}, {}};
 }
 
@@ -2228,7 +2230,7 @@ int Service::start(int argc, char **argv)
                                 else if (st.st_mode & S_IFDIR)
                                 {
                                         const auto topicBasePathLen = basePath_.length();
-                                        uint32_t partitionsCnt{0}, sum{0};
+                                        uint32_t partitionsCnt{0}, min{UINT32_MAX}, max{0};
                                         partition_config partitionConfig;
 
                                         for (const auto &&name : DirectoryEntries(basePath_.data()))
@@ -2247,7 +2249,10 @@ int Service::start(int argc, char **argv)
                                                                 throw Switch::system_error("Failed to stat(", basePath_, "): ", strerror(errno));
                                                         else if (st.st_mode & S_IFDIR)
                                                         {
-                                                                sum += name.AsUint32();
+								const auto id = name.AsUint32();
+
+								min = std::min<uint32_t>(min, id);
+								max = std::max<uint32_t>(max, id);
                                                                 ++partitionsCnt;
                                                         }
                                                 }
@@ -2255,7 +2260,7 @@ int Service::start(int argc, char **argv)
 
                                         if (partitionsCnt)
                                         {
-                                                if (sum != partitionsCnt - 1)
+						if (min != 0 && max != partitionsCnt - 1)
                                                         throw Switch::system_error("Unexpected partitions list; expected [0, ", partitionsCnt - 1, "]");
 
                                                 auto t = Switch::make_sharedref(new topic(name));
