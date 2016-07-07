@@ -1,6 +1,7 @@
 #include "tank_client.h"
 #include <switch_algorithms.h>
 #include <text.h>
+#include <sys/uio.h>
 
 static constexpr bool trace{false};
 
