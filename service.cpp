@@ -1262,7 +1262,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                 p += clientId.len + sizeof(uint8_t);
                 const auto maxWait = *(uint64_t *)p; // if we don't get any data within `maxWait`ms, we 'll return nothing for the requested partitions
                 p += sizeof(uint64_t);
-                const auto minBytes = *(uint32_t *)p;
+                const auto minBytes = Min<uint32_t>(*(uint32_t *)p, 64 * 1024 * 1024);	 // keep it sane
                 p += sizeof(uint32_t);
                 const auto topicsCnt = *p++;
 
@@ -1932,6 +1932,8 @@ void Service::cleanup_connection(connection *const c)
 
         if (auto q = std::exchange(c->outQ, nullptr))
                 put_outgoing_queue(q);
+
+	put_connection(c);
 }
 
 bool Service::shutdown(connection *const c, const uint32_t ref)

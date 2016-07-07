@@ -1,6 +1,8 @@
 #pragma once
 #include <switch.h>
 
+// All kind of if (trace) SLog() calls here, for checks and for debugging. Will be stripped out later
+
 #ifdef LEAN_SWITCH
 #define RFLog(...) Print(__VA_ARGS__)
 #endif
