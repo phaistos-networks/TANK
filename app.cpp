@@ -63,7 +63,7 @@ int main(int argc, char *argv[])
                 const uint64_t base = argc > 1 ? !memcmp(argv[1], _S("EOF")) ? UINT64_MAX : strwlen32_t(argv[1]).AsUint64() : 0;
 
                 client.consume(
-                    {{{topic.AsS8(), partition}, {base, 1*1024*1024}}}, 10000, 0);
+                    {{{topic.AsS8(), partition}, {base, 8*1024*1024}}}, 1e5, 0);
         }
         else if (req.Eq(_S("set")))
         {
@@ -134,7 +134,7 @@ int main(int argc, char *argv[])
                         std::vector<TankClient::msg> msgs;
 
                         for (uint32_t i{1}; i != argc; ++i)
-                                msgs.push_back({argv[i], Timings::Milliseconds::Tick()});
+                                msgs.push_back({argv[i], Timings::Milliseconds::SysTime()});
 
                         const auto req = client.produce(
                             {{{topic.AsS8(), partition},
@@ -163,7 +163,7 @@ int main(int argc, char *argv[])
 
                                 for (const auto mit : it.msgs)
                                 {
-                                        Print("[", mit->key, "]:", mit->content, "(", mit->seqNum, ")\n");
+                                        Print("key[", mit->key, "], content[", mit->content, "] seq.num=", mit->seqNum, ", ts=", mit->ts, "\n");
                                 }
 				noEvents = false;
                         }

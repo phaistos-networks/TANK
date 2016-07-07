@@ -1626,14 +1626,20 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                                         msgSetContent.Set(p, e - p);
 
                                 // iterate bundle's message set
+				uint64_t msgTs{0};
+
                                 for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.len; p != e;)
                                 {
                                         // Next message set message
                                         const auto flags = *p++;
-                                        const auto msgTs = *(uint64_t *)p;
-                                        p += sizeof(uint64_t);
 
-                                        if (flags & 0x1)
+					if (!(flags & uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS)))
+                                        {
+                                                msgTs = *(uint64_t *)p;
+                                                p += sizeof(uint64_t);
+                                        }
+
+                                        if (flags & uint8_t(TankFlags::BundleMsgFlags::HaveKey))
                                         {
                                                 key.Set((char *)p + 1, *p);
                                                 p += key.len + sizeof(uint8_t);

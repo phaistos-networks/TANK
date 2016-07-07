@@ -3,6 +3,10 @@
 #include <malloc.h>
 #endif
 #include <stdarg.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <sys/time.h>
 
 class Buffer
 {

@@ -22,9 +22,17 @@ bundle
 	msg
 	{
 		flags:u8
-		creation ts in milliseconds:u64
 
-		if (flags&MSGFLAGS_HAVE_KEY)
+		if ((flags & TankFlags::BundleMsgFlags::UseLastSpecifiedTS) == 0)
+		{
+			creation ts in milliseconds:u64
+		}
+		else
+		{
+			use the timestamp for the last message that had a timestamp set in this bundle
+		}
+
+		if (flags & TankFlags::BundleMsgFlags::HaveKey)
 		{
 			keyLen:u8
 			key:...
@@ -35,7 +43,7 @@ bundle
 	}
 }
 
-A bundle with a single message in its message set of length 100 then, assuming it's not compressed, requires about 13 bytes of overhead, and 8 of those are for the timestamp
+A bundle with a single message in its message set of length 100 then, assuming it's not compressed, requires about 13 bytes of overhead, and 8 of those are for the timestamp.
 
 
 

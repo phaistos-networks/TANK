@@ -188,20 +188,33 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
                         produceCtx.Serialize<uint16_t>(it->partitionId);
 
                         const auto msgSetOffset = b.length();
+			uint64_t lastTS{0};
 
                         for (uint32_t i{0}; i != it->msgsCnt; ++i)
                         {
                                 const auto &m = it->msgs[i];
-                                const uint8_t flags = m.key ? 0x1 : 0;
+                                uint8_t flags = m.key ? uint8_t(TankFlags::BundleMsgFlags::HaveKey) : 0;
 
-                                b.Serialize(uint8_t(flags));
-                                b.Serialize(m.ts);
+				if (m.ts == lastTS && i)
+				{
+					// This message's timestamp == last message timestamp we serialized
+					flags|=uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS);
+                                	b.Serialize(flags);
+				}
+				else
+				{
+					lastTS = m.ts;
+                                	b.Serialize(flags);
+                                	b.Serialize<uint64_t>(m.ts);
+				}
+
 
                                 if (m.key)
                                 {
                                         b.Serialize(m.key.len);
                                         b.Serialize(m.key.p, m.key.len);
                                 }
+
 
                                 b.SerializeVarUInt32(m.content.len);
                                 b.Serialize(m.content.p, m.content.len);
@@ -793,28 +806,50 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                 p = bundleEnd;
 
+				uint64_t ts{0};
+
                                 // Parse the bundle's message set
                                 // if this a compressed messages set, the boundary checks are not necessary
                                 for (const auto *p = msgSetContent.offset, *const endOfMsgSet = p + msgSetContent.len; p != endOfMsgSet;)
                                 {
-                                        // next bundle message
-                                        if (p + sizeof(uint8_t) + sizeof(uint64_t) > endOfMsgSet)
+                                        // parse next bundle message
+                                        if (p + sizeof(uint8_t) > endOfMsgSet)
                                         {
                                                 if (trace)
                                                         SLog("Boundaries\n");
+
                                                 goto next;
                                         }
 
                                         const auto msgFlags = *p++;     // msg.flags
-                                        const auto ts = *(uint64_t *)p; // msg.timestamp
-                                        p += sizeof(uint64_t);
 
-                                        if (msgFlags & 0x1)
+					if (msgFlags & uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS))
+					{
+						// Using the timestamp of the last message that had a specified timestamp in this bundle
+						// This is very useful; if all messages in a bundle have the same timestamp, then
+						// we only need to encode the timestamp once
+					}
+					else
+					{
+						if (p + sizeof(uint64_t) > endOfMsgSet)
+						{
+							if (trace)
+								SLog("Boundaries\n");
+
+							goto next;
+						}
+
+                                        	ts = *(uint64_t *)p; // msg.timestamp
+                                        	p += sizeof(uint64_t);
+					}
+
+                                        if (msgFlags & uint8_t(TankFlags::BundleMsgFlags::HaveKey))
                                         {
                                                 if (p + sizeof(uint8_t) > endOfMsgSet || (p + (*p) + sizeof(uint8_t) > endOfMsgSet))
                                                 {
                                                         if (trace)
                                                                 SLog("Boundaries\n");
+
                                                         goto next;
                                                 }
                                                 else
