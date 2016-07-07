@@ -33,9 +33,6 @@ void TankClient::bind_fd(connection *const c, int fd)
 
 TankClient::~TankClient()
 {
-        if (trace)
-                SLog("~TankClient()\n");
-
         while (switch_dlist_any(&connections))
         {
                 auto c = switch_list_entry(connection, list, connections.next);
@@ -91,7 +88,7 @@ TankClient::~TankClient()
 uint8_t TankClient::choose_compression_codec(const msg *const msgs, const size_t msgsCnt)
 {
         // arbitrary selection heuristic
-        if (msgsCnt > 128)
+        if (msgsCnt > 64)
                 return 1;
         else
         {
@@ -100,7 +97,7 @@ uint8_t TankClient::choose_compression_codec(const msg *const msgs, const size_t
                 for (size_t i{0}; i != msgsCnt; ++i)
                 {
                         sum += msgs[i].content.len;
-                        if (sum > 4096)
+                        if (sum > 1024)
                                 return 1;
                 }
         }

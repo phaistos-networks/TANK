@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <cmath>
 #include <cstdlib>
+#include <limits.h>
 
 #define require(x) assert(x)
 #define Drequire(x) assert(x)
