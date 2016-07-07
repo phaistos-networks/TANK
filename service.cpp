@@ -11,6 +11,7 @@
 #include <thread>
 #include <timings.h>
 #include <unistd.h>
+#include <sys/uio.h>
 
 static constexpr bool trace{false};
 
@@ -648,7 +649,6 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
         if (writev(fd, iov, sizeof_array(iov)) != entryLen)
         {
 		RFLog("Failed to writev():", strerror(errno), "\n");
-                return {nullptr, {}, {}};
         }
         else
         {
@@ -677,6 +677,8 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 
                 return {fdh, fileRange, {absSeqNum, uint16_t(bundleMsgsCnt)}};
         }
+
+        return {nullptr, {}, {}};
 }
 
 void topic_partition_log::schedule_flush(const uint32_t now)
