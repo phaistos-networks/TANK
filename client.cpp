@@ -588,7 +588,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
 
 bool TankClient::process_consume(connection *const c, const uint8_t *const content, const size_t len)
 {
-        const auto *p = content;
+        const auto *p = content, *const base = p;
         // Response header length (i.e excluding actual batches content) is encoded in the response
         // so that we can quickly jump to the beginning of the bundles
         // the bundles content is streamed right after the response header
@@ -704,8 +704,9 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                         consumptionList.clear();
 
                         // Process all bundles in the chunk
-                        for (const auto *p = bundlesForThisTopicPartition, *const chunkEnd = p + len; p < chunkEnd;)
+                        for (const auto *p = bundlesForThisTopicPartition, *const chunkEnd = p + len; p < chunkEnd; )
                         {
+
                                 // Try to parse the next bundle from the chunk
                                 // We may have gotten a partial bundle, so we need to be defensive about it
 
@@ -720,8 +721,15 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 const auto bundleLen = Compression::UnpackUInt32(p);
                                 const auto *const bundleEnd = p + bundleLen;
 
+				// This is more particularly optimal, for if boundary checks fail, we 'll try to consume the whole thing later
+				// and maybe all we 'd need is one 1K message or so, but for now if boundaries check fail, we 'll advise client to
+				// set minSize to a value high enough that will consume the whole bundle at the very least
+				const auto *const boundaryCheckTarget = bundleEnd + 256;
+
                                 if (p >= chunkEnd)
                                 {
+                                        lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - base);
+
                                         if (trace)
                                                 SLog("boundaries\n");
                                         break;
@@ -739,6 +747,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         {
                                                 if (trace)
                                                         SLog("boundaries\n");
+
                                                 break;
                                         }
                                         else
@@ -757,12 +766,20 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         if (trace)
                                                 SLog("Skipping bundle:", requestedSeqNum, ">= ", logBaseSeqNum + msgsSetSize, "\n");
 
-                                        logBaseSeqNum += msgsSetSize;
                                         p = bundleEnd;
+
+                                        if (p > chunkEnd)
+                                        {
+                                                // past the chunk?
+						lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - base);
+
+                                                if (trace)
+                                                        SLog("Past the chunk, lastPartialMsgMinFetchSize now = ", lastPartialMsgMinFetchSize, " (requestedSeqNum = ", requestedSeqNum, ")\n");
+                                        }
+
+                                        logBaseSeqNum += msgsSetSize;
                                         continue;
                                 }
-
-
 
                                 if (codec)
                                 {
@@ -770,7 +787,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                         if (bundleEnd > chunkEnd)
                                         {
-                                                lastPartialMsgMinFetchSize = bundleLen + 128;
+                                        	lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - base);
+
                                                 if (trace)
                                                         SLog("compresssed, didn't get the whole messages set. Boundaries check\n");
                                                 break;
@@ -820,6 +838,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         // parse next bundle message
                                         if (p + sizeof(uint8_t) > endOfMsgSet)
                                         {
+                                        	lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - base);
+
                                                 if (trace)
                                                         SLog("Boundaries\n");
 
@@ -841,7 +861,9 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 					{
 						if (p + sizeof(uint64_t) > endOfMsgSet)
 						{
-							if (trace)
+                                        		lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - base);
+
+                                                        if (trace)
 								SLog("Boundaries\n");
 
 							goto next;
@@ -855,6 +877,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         {
                                                 if (p + sizeof(uint8_t) > endOfMsgSet || (p + (*p) + sizeof(uint8_t) > endOfMsgSet))
                                                 {
+                                        		lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - base);
+
                                                         if (trace)
                                                                 SLog("Boundaries\n");
 
@@ -866,6 +890,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                                         if (p + keyLen > endOfMsgSet)
                                                         {
+                                        			lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - base);
+
                                                                 if (trace)
                                                                         SLog("Boundaries\n");
 
@@ -883,8 +909,11 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                         if (!Compression::UnpackUInt32Check(p, endOfMsgSet))
                                         {
+                                                lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - base);
+
                                                 if (trace)
                                                         SLog("Boundaries\n");
+
                                                 goto next;
                                         }
 
@@ -893,13 +922,11 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                         if (p + len > endOfMsgSet)
                                         {
-                                                if (codec)
-                                                        lastPartialMsgMinFetchSize = (bundleEnd - bundlesForThisTopicPartition) + 64;
-                                                else
-                                                        lastPartialMsgMinFetchSize = (p + len) - bundlesForThisTopicPartition + 64;
+                                                lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - base);
 
                                                 if (trace)
                                                         SLog("Boundaries(", len, ")\n");
+
                                                 goto next;
                                         }
 
@@ -933,6 +960,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         p += len;
                                 }
                         }
+
 
                 next:
                         // It's possible that next is what we requested already, if
