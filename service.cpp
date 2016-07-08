@@ -6,12 +6,12 @@
 #include <random>
 #include <signal.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <text.h>
 #include <text.h>
 #include <thread>
 #include <timings.h>
 #include <unistd.h>
-#include <sys/uio.h>
 
 static constexpr bool trace{false};
 
@@ -178,7 +178,7 @@ static uint32_t search_before_offset(const uint64_t baseSeqNum, const uint32_t m
 }
 
 // We are operating on index boundaries, so our range `r` is aligned on an index boundary, which means
-// we may stream (0, partition_config::indexInterval] excess bytes. 
+// we may stream (0, partition_config::indexInterval] excess bytes.
 // This is probably fine, but we may as well
 // scan ahead from that range until we find an more appropriate file offset to begin streaming for, and adjust
 // our file range and the bundle at that file offset's base seq number.
@@ -189,31 +189,31 @@ static uint32_t search_before_offset(const uint64_t baseSeqNum, const uint32_t m
 // more data at the expense of network I/O and transfer costs
 static void adjust_range(lookup_res &res, const uint64_t absSeqNum)
 {
-	uint64_t baseSeqNum = res.absBaseSeqNum;
+        uint64_t baseSeqNum = res.absBaseSeqNum;
 
-	if (baseSeqNum == absSeqNum)
-	{
-		// No need for any ajustements
-		return;
-	}
+        if (baseSeqNum == absSeqNum)
+        {
+                // No need for any ajustements
+                return;
+        }
 
-	int fd = res.fdh->fd;
-	auto r = res.range;
+        int fd = res.fdh->fd;
+        auto r = res.range;
         uint8_t tinyBuf[sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint64_t)], midBuf[8192];
-	const auto baseOffset = r.offset;
+        const auto baseOffset = r.offset;
         auto o = baseOffset;
         const auto limit = r.End();
-	uint64_t before = trace ? Timings::Microseconds::Tick() : 0;
-	bool usingMidBuf;
+        uint64_t before = trace ? Timings::Microseconds::Tick() : 0;
+        bool usingMidBuf;
 
-	if (trace)
-		SLog(ansifmt::bold, ansifmt::color_brown, "About to adjust range ", r, ", absSeqNum(", baseSeqNum, "), absSeqNum(", absSeqNum, ")", ansifmt::reset, "\n");
+        if (trace)
+                SLog(ansifmt::bold, ansifmt::color_brown, "About to adjust range ", r, ", absSeqNum(", baseSeqNum, "), absSeqNum(", absSeqNum, ")", ansifmt::reset, "\n");
 
         if (r.len <= sizeof(midBuf))
         {
-		// If we are dealing with a small range anyway, use a mid-size buffer
-		// and read the whole thing here and use it, instead of reading one bundle header/time
-		// This should provide us with a few microseconds worth of improvement
+                // If we are dealing with a small range anyway, use a mid-size buffer
+                // and read the whole thing here and use it, instead of reading one bundle header/time
+                // This should provide us with a few microseconds worth of improvement
                 const auto v = pread64(fd, midBuf, r.len, baseOffset);
 
                 if (unlikely(v != r.len))
@@ -227,30 +227,30 @@ static void adjust_range(lookup_res &res, const uint64_t absSeqNum)
                 }
         }
         else
-	{
-		if (trace)
-			SLog("Using tinyBuf\n");
+        {
+                if (trace)
+                        SLog("Using tinyBuf\n");
 
                 usingMidBuf = false;
-	}
+        }
 
         while (o < limit)
         {
-		const uint8_t *baseBuf;
+                const uint8_t *baseBuf;
 
-		if (usingMidBuf)
-			baseBuf = midBuf + (o - baseOffset);
-		else
+                if (usingMidBuf)
+                        baseBuf = midBuf + (o - baseOffset);
+                else
                 {
                         const auto r = pread64(fd, tinyBuf, sizeof(tinyBuf), o);
 
                         if (unlikely(r == -1))
                                 throw Switch::system_error("pread64() failed:", strerror(errno));
 
-			baseBuf = tinyBuf;
+                        baseBuf = tinyBuf;
                 }
 
-		const uint8_t *p = baseBuf;
+                const uint8_t *p = baseBuf;
                 const auto bundleLen = Compression::UnpackUInt32(p);
                 const auto encodedBundleLenLen = p - baseBuf;
                 const auto bundleFlags = *p++;
@@ -259,34 +259,34 @@ static void adjust_range(lookup_res &res, const uint64_t absSeqNum)
                 if (!msgSetSize)
                         msgSetSize = Compression::UnpackUInt32(p);
 
-		if (trace)
-			SLog("Now at bundle(", baseSeqNum, "), msgSetSize(", msgSetSize, "), bundleFlags(", bundleFlags, ")\n");
+                if (trace)
+                        SLog("Now at bundle(", baseSeqNum, "), msgSetSize(", msgSetSize, "), bundleFlags(", bundleFlags, ")\n");
 
-		const auto nextBundleBaseSeqNum = baseSeqNum + msgSetSize;
+                const auto nextBundleBaseSeqNum = baseSeqNum + msgSetSize;
 
                 if (absSeqNum >= nextBundleBaseSeqNum)
                 {
                         // Our target is in later bundle
-			if (trace)
-				SLog("Target in later bundle\n");
+                        if (trace)
+                                SLog("Target in later bundle\n");
 
                         o += bundleLen + encodedBundleLenLen;
-			baseSeqNum = nextBundleBaseSeqNum;
+                        baseSeqNum = nextBundleBaseSeqNum;
                 }
                 else
                 {
-			// Our target is in this bundle
-			if (trace)
-				SLog("Target in this bundle\n");
+                        // Our target is in this bundle
+                        if (trace)
+                                SLog("Target in this bundle\n");
 
                         res.range.reset_offset(o);
-			res.absBaseSeqNum = baseSeqNum;
+                        res.absBaseSeqNum = baseSeqNum;
                         break;
                 }
         }
 
-	if (trace)
-		SLog(ansifmt::color_blue, "After adjustement, range ", r, ", absBaseSeqNum(", res.absBaseSeqNum, "), took  ", duration_repr(Timings::Microseconds::Since(before)), ansifmt::reset, "\n");
+        if (trace)
+                SLog(ansifmt::color_blue, "After adjustement, range ", r, ", absBaseSeqNum(", res.absBaseSeqNum, "), took  ", duration_repr(Timings::Microseconds::Since(before)), ansifmt::reset, "\n");
 }
 
 lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum)
@@ -384,7 +384,6 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         if (trace)
                 SLog("Read for absSeqNum = ", absSeqNum, ", lastAssignedSeqNum = ", lastAssignedSeqNum, ", firstAvailableSeqNum = ", firstAvailableSeqNum, "\n");
 
-
         // (UINT64_MAX) is reserved: fetch only newly produced bundles
         // see process_consume()
         // (0) is also reserved; start from the first available sequence
@@ -409,7 +408,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
 
         if (maxSize == 0)
         {
-// Should be handled by the client
+                // Should be handled by the client
                 if (trace)
                         SLog("maxSize == 0\n");
 
@@ -417,7 +416,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         }
         else if (maxAbsSeqNum < absSeqNum)
         {
-// Should be handled by the client
+                // Should be handled by the client
                 if (trace)
                         SLog("Past maxAbsSeqNum = ", maxAbsSeqNum, "\n");
 
@@ -425,8 +424,8 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         }
         else if (absSeqNum == lastAssignedSeqNum + 1)
         {
-// return empty
-// UPDATE: let's wait instead
+                // return empty
+                // UPDATE: let's wait instead
                 if (trace)
                         SLog("Empty\n");
 
@@ -434,8 +433,8 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         }
         else if (absSeqNum > lastAssignedSeqNum)
         {
-// past last assigned sequence number? nope
-// throw an error
+                // past last assigned sequence number? nope
+                // throw an error
                 if (trace)
                         SLog("PAST absSeqNum(", absSeqNum, ") > lastAssignedSeqNum(", lastAssignedSeqNum, ")\n");
 
@@ -501,7 +500,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         if (prevSegments->size())
         {
                 const auto f = prevSegments->front();
-		range32_t range(0, Min<uint32_t>(maxSize, f->fileSize));
+                range32_t range(0, Min<uint32_t>(maxSize, f->fileSize));
 
                 if (trace)
                         SLog("Will use first R/O segment\n");
@@ -510,7 +509,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         }
         else
         {
-		range32_t range(0, Min<uint32_t>(maxSize, cur.fileSize));
+                range32_t range(0, Min<uint32_t>(maxSize, cur.fileSize));
 
                 if (trace)
                         SLog("Will use current segment\n");
@@ -739,7 +738,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 
                 if (unlikely(write(cur.index.fd, out, sizeof(out)) != sizeof(out)))
                 {
-			RFLog("Failed to write():", strerror(errno), "\n");
+                        RFLog("Failed to write():", strerror(errno), "\n");
                         return {nullptr, {}, {}};
                 }
 
@@ -763,7 +762,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
         require(cur.fdh.use_count() == before + 1);
         if (writev(fd, iov, sizeof_array(iov)) != entryLen)
         {
-		RFLog("Failed to writev():", strerror(errno), "\n");
+                RFLog("Failed to writev():", strerror(errno), "\n");
         }
         else
         {
@@ -793,8 +792,8 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 return {fdh, fileRange, {absSeqNum, uint16_t(bundleMsgsCnt)}};
         }
 
-	// return here and not in (writev() ! entryLen) check because some older compilers warn about
-	// a path with no return from a non-void function. Sigh
+        // return here and not in (writev() ! entryLen) check because some older compilers warn about
+        // a path with no return from a non-void function. Sigh
         return {nullptr, {}, {}};
 }
 
@@ -888,7 +887,7 @@ append_res topic_partition::append_bundle_to_leader(const uint8_t *const bundle,
         }
         catch (const std::exception &e)
         {
-		RFLog("Failed, cought exception:", e.what(), "\n");
+                RFLog("Failed, cought exception:", e.what(), "\n");
                 return {nullptr, {}, {}};
         }
 }
@@ -911,6 +910,83 @@ lookup_res topic_partition::read_from_local(const bool fetchOnlyFromLeader, cons
         return std::move(log_->range_for(absSeqNum, fetchSize, maxAbsSeqNum));
 }
 
+static uint32_t parse_duration(strwlen32_t in)
+{
+        uint32_t sum{0};
+
+        do
+        {
+                uint32_t i{0}, n{0}, scale{1};
+
+                for (i = 0; i != in.len && isdigit(in.p[i]); ++i)
+                        n = n * 10 + (in.p[i] - '0');
+
+                if (!i)
+                        throw Switch::data_error("Unable to parse duration format");
+
+                in.StripPrefix(i);
+
+                if (in.StripPrefix(_S("weeks")) || in.StripPrefix(_S("week")) || in.StripPrefix(_S("w")))
+                        scale = 86400 * 7;
+                else if (in.StripPrefix(_S("years")) || in.StripPrefix(_S("year")) || in.StripPrefix(_S("y")))
+                        scale = 86400 * 365;
+                else if (in.StripPrefix(_S("months")) || in.StripPrefix(_S("month")) || in.StripPrefix(_S("mon")))
+                        scale = 86400 * 365;
+                else if (in.StripPrefix(_S("days")) || in.StripPrefix(_S("day")) || in.StripPrefix(_S("d")))
+                        scale = 86400;
+                else if (in.StripPrefix(_S("hours")) || in.StripPrefix(_S("hour")) || in.StripPrefix(_S("h")))
+                        scale = 3600;
+                else if (in.StripPrefix(_S("minutes")) || in.StripPrefix(_S("minute")) || in.StripPrefix(_S("mins")) || in.StripPrefix(_S("min")))
+                        scale = 60;
+                else if (in.StripPrefix(_S("seconds")) || in.StripPrefix(_S("second")) || in.StripPrefix(_S("secs")) || in.StripPrefix(_S("sec")) || in.StripPrefix(_S("s")))
+                        scale = 1;
+
+                // Optinally, separated by ',' or '+'
+                in.StripPrefix(_S(","));
+                in.StripPrefix(_S("+"));
+                sum += n * scale;
+        } while (in);
+
+        return sum;
+}
+
+static uint64_t parse_size(strwlen32_t in)
+{
+        uint64_t sum{0};
+
+        do
+        {
+                uint32_t i{0};
+                uint64_t n{0}, scale{1};
+
+                for (i = 0; i != in.len && isdigit(in.p[i]); ++i)
+                        n = n * 10 + (in.p[i] - '0');
+
+                if (!i)
+                        throw Switch::data_error("Unable to parse size format");
+
+                in.StripPrefix(i);
+
+                if (in.StripPrefix(_S("terabytes")) || in.StripPrefix(_S("terabyte")) || in.StripPrefix(_S("tbs")) || in.StripPrefix(_S("tb")) || in.StripPrefix(_S("t")))
+                        scale = 1024ul * 1024ul * 1024ul * 1024ul;
+                else if (in.StripPrefix(_S("gigabytes")) || in.StripPrefix(_S("gibabyte")) || in.StripPrefix(_S("gbs")) || in.StripPrefix(_S("gb")) || in.StripPrefix(_S("g")))
+                        scale = 1024u * 1024u * 1024ul;
+                else if (in.StripPrefix(_S("megabytes")) || in.StripPrefix(_S("megabyte")) || in.StripPrefix(_S("mbs")) || in.StripPrefix(_S("mb")) || in.StripPrefix(_S("m")))
+                        scale = 1024 * 1024;
+                else if (in.StripPrefix(_S("kilobytes")) || in.StripPrefix(_S("kilobyte")) || in.StripPrefix(_S("kbs")) || in.StripPrefix(_S("kb")) || in.StripPrefix(_S("k")))
+                        scale = 1024;
+                else if (in.StripPrefix(_S("bytes")) || in.StripPrefix(_S("byte")) || in.StripPrefix(_S("kbs")) || in.StripPrefix(_S("b")))
+                        scale = 1;
+
+                // Optinally, separated by ',' or '+'
+                in.StripPrefix(_S(","));
+                in.StripPrefix(_S("+"));
+                sum += n * scale;
+        } while (in);
+
+        return sum;
+}
+
 bool Service::parse_partition_config(const char *const path, partition_config *const l)
 {
         int fd = open(path, O_RDONLY | O_LARGEFILE | O_NOATIME);
@@ -922,7 +998,6 @@ bool Service::parse_partition_config(const char *const path, partition_config *c
                 require(fileSize != off64_t(-1));
 
                 auto fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, fd, 0);
-                char normalized[128];
 
                 close(fd);
                 if (fileData == MAP_FAILED)
@@ -945,26 +1020,6 @@ bool Service::parse_partition_config(const char *const path, partition_config *c
                         if (!IsBetweenRange<size_t>(v.len, 1, 128))
                                 throw Switch::data_error("Unexpected value for ", k);
 
-                        {
-                                // Strip all ','
-                                uint32_t k{0};
-
-                                for (uint32_t i{0}; i != v.len; ++i)
-                                {
-                                        if (v.p[i] != ',')
-                                        {
-                                                if (!isdigit(v.p[i]))
-                                                        throw Switch::data_error("Unexpected value for ", k);
-                                                else
-                                                        normalized[k++] = v.p[i];
-                                        }
-                                }
-                                v.Set(normalized, k);
-
-                                if (!IsBetweenRange<size_t>(v.len, 1, 128))
-                                        throw Switch::data_error("Unexpected value for ", k);
-                        }
-
                         // We are now using Kafka's configuration keys and semantics - for the most part - for simplicity
                         // Keep it Simple.
                         if (k && v)
@@ -975,41 +1030,41 @@ bool Service::parse_partition_config(const char *const path, partition_config *c
                                         if (l->roSegmentsCnt < 2 && l->roSegmentsCnt)
                                                 throw Switch::range_error("Invalid value for ", k);
                                 }
-                                else if (k.EqNoCase(_S("retention.secs")))
+                                else if (k.EqNoCase(_S("log.retention.secs")))
                                 {
-                                        l->lastSegmentMaxAge = v.AsUint32();
+                                        l->lastSegmentMaxAge = parse_duration(v);
                                 }
-                                else if (k.EqNoCase(_S("retention.bytes")))
+                                else if (k.EqNoCase(_S("log.retention.bytes")))
                                 {
-                                        l->roSegmentsSize = v.AsUint64();
+                                        l->roSegmentsSize = parse_size(v);
                                         if (l->roSegmentsSize < 128 && l->roSegmentsSize)
                                                 throw Switch::range_error("Invalid value for ", k);
                                 }
                                 else if (k.EqNoCase(_S("log.segment.bytes")))
                                 {
-                                        l->maxSegmentSize = v.AsUint32();
+                                        l->maxSegmentSize = parse_size(v);
                                         if (l->maxSegmentSize < 128)
                                                 throw Switch::range_error("Invalid value for ", k);
                                 }
                                 else if (k.EqNoCase(_S("log.index.interval.bytes")))
                                 {
-                                        l->indexInterval = v.AsUint32();
+                                        l->indexInterval = parse_size(v);
                                         if (l->indexInterval < 128)
                                                 throw Switch::range_error("Invalid value for ", k);
                                 }
                                 else if (k.EqNoCase(_S("log.index.size.max.bytes")))
                                 {
-                                        l->maxIndexSize = v.AsUint32();
+                                        l->maxIndexSize = parse_size(v);
                                         if (l->maxIndexSize < 128)
                                                 throw Switch::range_error("Invalid value for ", k);
                                 }
                                 else if (k.EqNoCase(_S("log.roll.jitter.secs")))
                                 {
-                                        l->maxRollJitterSecs = v.AsUint32();
+                                        l->maxRollJitterSecs = parse_duration(v);
                                 }
                                 else if (k.EqNoCase(_S("log.roll.secs")))
                                 {
-                                        l->curSegmentMaxAge = v.AsUint32();
+                                        l->curSegmentMaxAge = parse_duration(v);
                                 }
                                 else if (k.EqNoCase(_S("flush.messages")))
                                 {
@@ -1019,7 +1074,7 @@ bool Service::parse_partition_config(const char *const path, partition_config *c
                                 else if (k.EqNoCase(_S("flush.secs")))
                                 {
                                         // The amount of time the log can have dirty data before a flush is forced
-                                        l->flushIntervalSecs = v.AsUint32();
+                                        l->flushIntervalSecs = parse_duration(v);
                                 }
                                 else
                                         Print("Unknown topic/partition configuration key '", k, "'\n");
@@ -1377,7 +1432,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                 p += clientId.len + sizeof(uint8_t);
                 const auto maxWait = *(uint64_t *)p; // if we don't get any data within `maxWait`ms, we 'll return nothing for the requested partitions
                 p += sizeof(uint64_t);
-                const auto minBytes = Min<uint32_t>(*(uint32_t *)p, 64 * 1024 * 1024);	 // keep it sane
+                const auto minBytes = Min<uint32_t>(*(uint32_t *)p, 64 * 1024 * 1024); // keep it sane
                 p += sizeof(uint32_t);
                 const auto topicsCnt = *p++;
 
@@ -1477,7 +1532,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                         switch (res.fault)
                                         {
                                                 case lookup_res::Fault::NoFault:
-							adjust_range(res, absSeqNum);
+                                                        adjust_range(res, absSeqNum);
 
                                                         respHeader->Serialize(uint8_t(0));        // error
                                                         respHeader->Serialize(res.absBaseSeqNum); // absolute first seq.num of the first message of the first bundle in the streamed chunk
@@ -1747,14 +1802,14 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                                         msgSetContent.Set(p, e - p);
 
                                 // iterate bundle's message set
-				uint64_t msgTs{0};
+                                uint64_t msgTs{0};
 
                                 for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.len; p != e;)
                                 {
                                         // Next message set message
                                         const auto flags = *p++;
 
-					if (!(flags & uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS)))
+                                        if (!(flags & uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS)))
                                         {
                                                 msgTs = *(uint64_t *)p;
                                                 p += sizeof(uint64_t);
@@ -2050,7 +2105,7 @@ void Service::cleanup_connection(connection *const c)
         if (auto q = std::exchange(c->outQ, nullptr))
                 put_outgoing_queue(q);
 
-	put_connection(c);
+        put_connection(c);
 }
 
 bool Service::shutdown(connection *const c, const uint32_t ref)
@@ -2268,9 +2323,8 @@ static bool running{true};
 
 static void sig_handler(int)
 {
-	running = false;
+        running = false;
 }
-
 
 // TODO: https://github.com/phaistos-networks/TANK/issues/7
 int Service::start(int argc, char **argv)
@@ -2284,7 +2338,7 @@ int Service::start(int argc, char **argv)
 
         signal(SIGPIPE, SIG_IGN);
         signal(SIGHUP, SIG_IGN);
-	signal(SIGINT, sig_handler);
+        signal(SIGINT, sig_handler);
         while ((r = getopt(argc, argv, "p:l:")) != -1)
         {
                 switch (r)
@@ -2368,10 +2422,10 @@ int Service::start(int argc, char **argv)
                                                                 throw Switch::system_error("Failed to stat(", basePath_, "): ", strerror(errno));
                                                         else if (st.st_mode & S_IFDIR)
                                                         {
-								const auto id = name.AsUint32();
+                                                                const auto id = name.AsUint32();
 
-								min = std::min<uint32_t>(min, id);
-								max = std::max<uint32_t>(max, id);
+                                                                min = std::min<uint32_t>(min, id);
+                                                                max = std::max<uint32_t>(max, id);
                                                                 ++partitionsCnt;
                                                         }
                                                 }
@@ -2379,7 +2433,7 @@ int Service::start(int argc, char **argv)
 
                                         if (partitionsCnt)
                                         {
-						if (min != 0 && max != partitionsCnt - 1)
+                                                if (min != 0 && max != partitionsCnt - 1)
                                                         throw Switch::system_error("Unexpected partitions list; expected [0, ", partitionsCnt - 1, "]");
 
                                                 auto t = Switch::make_sharedref(new topic(name));
@@ -2416,8 +2470,8 @@ int Service::start(int argc, char **argv)
                 return 1;
         }
 
-        Print(ansifmt::bold, "<=TANK=>", ansifmt::reset, " v", TANK_VERSION / 100, ".", TANK_VERSION % 100, " ",  dotnotation_repr(topics.size()), " topics registered, ", dotnotation_repr(totalPartitions), " partitions; will listen for new connections at ", listenAddr, "\n");
-	Print("(C) Phaistos Networks, S.A. - ", ansifmt::color_green, "http://phaistosnetworks.gr/", ansifmt::reset, ". Licensed under the Apache License\n");
+        Print(ansifmt::bold, "<=TANK=>", ansifmt::reset, " v", TANK_VERSION / 100, ".", TANK_VERSION % 100, " ", dotnotation_repr(topics.size()), " topics registered, ", dotnotation_repr(totalPartitions), " partitions; will listen for new connections at ", listenAddr, "\n");
+        Print("(C) Phaistos Networks, S.A. - ", ansifmt::color_green, "http://phaistosnetworks.gr/", ansifmt::reset, ". Licensed under the Apache License\n");
 
         listenFd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 
@@ -2470,7 +2524,7 @@ int Service::start(int argc, char **argv)
 
         poller.AddFd(listenFd, POLLIN, &listenFd);
 
-	while (likely(running))
+        while (likely(running))
         {
                 const auto r = poller.Poll(1000);
 
@@ -2516,7 +2570,7 @@ int Service::start(int argc, char **argv)
                                         switch_dlist_init(&c->waitCtxList);
                                         switch_dlist_insert_after(&allConnections, &c->connectionsList);
 
-					Switch::SetNoDelay(c->fd, 1);
+                                        Switch::SetNoDelay(c->fd, 1);
 
                                         // We are going to ping as soon as we can so that the client will know we have been accepted
                                         // but we can't write(fd, ..) now; so we 'll need to wait for POLLOUT and then ping
@@ -2664,8 +2718,8 @@ int Service::start(int argc, char **argv)
                 }
         }
 
-	Print("TANK terminated\n");
-	return true;
+        Print("TANK terminated\n");
+        return true;
 }
 
 int main(int argc, char *argv[])
