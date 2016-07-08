@@ -670,7 +670,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                         const auto requestedSeqNum = reqSeqNums[reqOffsetIdx++];
 
                         if (trace)
-                                SLog("logBaseSeqNum = ", logBaseSeqNum, ", highWaterMark = ", highWaterMark, ", len = ", len, ", requestedSeqNum(", requestedSeqNum, ") for ", reqOffsetIdx - 1, "\n");
+                                SLog("logBaseSeqNum = ", logBaseSeqNum, ", highWaterMark = ", highWaterMark, ", len = ", len, ", requestedSeqNum(", requestedSeqNum, ") for ", reqOffsetIdx - 1, ", for partition ", partitionId, "\n");
 
                         if (error)
                         {

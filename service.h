@@ -149,7 +149,10 @@ struct lookup_res
                 AtEOF
         } fault;
 
-	uint32_t fileSize;
+	// This is set to either fileSize of the segment log file or lower if
+	// we are are setting a boundary based on last assigned committed sequence number phys.offset
+	// adjust_range() cannot exceed that offset
+	uint32_t fileOffsetCeiling;
         Switch::shared_refptr<fd_handle> fdh;
 
         // Absolute base sequence number of the first message in the first bundle
@@ -165,7 +168,7 @@ struct lookup_res
         uint64_t highWatermark;
 
         lookup_res(lookup_res &&o)
-            : fault{o.fault}, fdh(std::move(o.fdh)), absBaseSeqNum{o.absBaseSeqNum}, range{o.range}, highWatermark{o.highWatermark}
+            : fault{o.fault}, fileOffsetCeiling{o.fileOffsetCeiling}, fdh(std::move(o.fdh)), absBaseSeqNum{o.absBaseSeqNum}, range{o.range}, highWatermark{o.highWatermark}
         {
         }
 
@@ -176,8 +179,8 @@ struct lookup_res
         {
         }
 
-        lookup_res(fd_handle *const f, const uint32_t fsize, const uint64_t seqNum, const range32_t r, const uint64_t h)
-            : fault{Fault::NoFault}, fdh{f}, fileSize{fsize}, absBaseSeqNum{seqNum}, range{r}, highWatermark{h}
+        lookup_res(fd_handle *const f, const uint32_t c, const uint64_t seqNum, const range32_t r, const uint64_t h)
+            : fault{Fault::NoFault}, fdh{f}, fileOffsetCeiling{c}, absBaseSeqNum{seqNum}, range{r}, highWatermark{h}
         {
         }
 
@@ -294,9 +297,9 @@ struct topic_partition_log
                 }
         }
 
-        lookup_res read_cur(const uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum);
+	lookup_res read_cur(const uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum);
 
-        lookup_res range_for(uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum);
+	lookup_res range_for(uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum);
 
         append_res append_bundle(const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt);
 
@@ -400,7 +403,7 @@ struct topic_partition
 
         append_res append_bundle_to_leader(const uint8_t *const bundle, const size_t bundleLen, const uint8_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL);
 
-        lookup_res read_from_local(const bool fetchOnlyFromLeader, const bool fetchOnlyComittted, const uint64_t absSeqNum, const uint32_t fetchSize);
+	lookup_res read_from_local(const bool fetchOnlyFromLeader, const bool fetchOnlyComittted, const uint64_t absSeqNum, const uint32_t fetchSize);
 };
 
 struct topic
