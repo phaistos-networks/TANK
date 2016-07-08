@@ -214,19 +214,19 @@ static void adjust_range(lookup_res &res, const uint64_t absSeqNum)
         if (trace)
                 SLog(ansifmt::bold, ansifmt::color_brown, "About to adjust range ", r, ", absBaseSeqNum(", baseSeqNum, "), absSeqNum(", absSeqNum, ")", ansifmt::reset, "\n");
 
-        if (r.len <= sizeof(midBuf))
+        if (span <= sizeof(midBuf))
         {
                 // If we are dealing with a small range anyway, use a mid-size buffer
                 // and read the whole thing here and use it, instead of reading one bundle header/time
                 // This should provide us with a few microseconds worth of improvement
-                const auto v = pread64(fd, midBuf, r.len, baseOffset);
+                const auto v = pread64(fd, midBuf, span, baseOffset);
 
-                if (unlikely(v != r.len))
+                if (unlikely(v != span))
                         throw Switch::system_error("pread64() failed:", strerror(errno));
                 else
                 {
                         if (trace)
-                                SLog("Using midBuf, because r.len(", r.len, ") <= ", sizeof(midBuf), "\n");
+                                SLog("Using midBuf, because r.len(", span, ") <= ", sizeof(midBuf), "\n");
 
                         usingMidBuf = true;
                 }
@@ -257,6 +257,9 @@ static void adjust_range(lookup_res &res, const uint64_t absSeqNum)
 
                 const uint8_t *p = baseBuf;
                 const auto bundleLen = Compression::UnpackUInt32(p);
+
+		require(bundleLen);
+
                 const auto encodedBundleLenLen = p - baseBuf;
                 const auto bundleFlags = *p++;
                 uint32_t msgSetSize = (bundleFlags >> 2) & 0xf;
@@ -2324,6 +2327,12 @@ Service::~Service()
 
         while (bufs.size())
                 delete bufs.Pop();
+	
+	while (outgoingQueuesPool.size())
+		delete outgoingQueuesPool.Pop();
+
+	while (connsPool.size())
+		delete connsPool.Pop();
 
 #ifdef LEAN_SWITCH
         for (auto &it : topics)
