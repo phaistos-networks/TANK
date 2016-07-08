@@ -7,14 +7,19 @@ int main(int argc, char *argv[])
 	Buffer endpoint, topic;
 	uint16_t partition{0};
 	int r;
+	size_t minFetchSize{8 * 1024};
 	
 	srand(time(nullptr));
 	topic.Append(_S("events"));
 	endpoint.Append(_S("127.0.0.1:1025"));
-	while ((r = getopt(argc, argv, "b:t:p:")) != -1)
+	while ((r = getopt(argc, argv, "b:t:p:s:")) != -1)
         {
                 switch (r)
                 {
+			case 's':
+				minFetchSize = strwlen32_t(optarg).AsUint32();
+				break;
+
                         case 'b':
                                 endpoint.clear();
                                 endpoint.Append(optarg);
@@ -63,7 +68,7 @@ int main(int argc, char *argv[])
                 const uint64_t base = argc > 1 ? !memcmp(argv[1], _S("EOF")) ? UINT64_MAX : strwlen32_t(argv[1]).AsUint64() : 0;
 
                 client.consume(
-                    {{{topic.AsS8(), partition}, {base, 8*1024*1024}}}, 1e5, 0);
+                    {{{topic.AsS8(), partition}, {base, minFetchSize}}}, 1e5, 0);
         }
         else if (req.Eq(_S("set")))
         {

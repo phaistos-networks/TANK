@@ -123,6 +123,13 @@ struct range_base
 		len = e - offset;
 	}
 
+	// Matching SetEnd(); adjusts offset of a valid range
+	void reset_offset(const VT start)
+	{
+		len = End() - start;
+		offset = start;
+	}
+
 	[[gnu::always_inline]] inline VT constexpr Mid() const 	// (left + right) / 2
 	{
 		return offset + (len >> 1);

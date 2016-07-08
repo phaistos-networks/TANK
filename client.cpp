@@ -953,6 +953,19 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         }
                                         else
                                         {
+						// The Tank broker can and currently is streaming based on index boundaries, so
+						// it may stream bundles that contain messages with seq.num < requested sequence number, so we
+						// are just going to ignore those here - wether that is the case or not.
+						// 
+						// The broker does this for performance, so that it won't need to scan ahead from the index boundary in order
+						// to locate the bundle that contains the message with requestedSeqNum
+						//
+						// Kafka will search forward(scn) for the segment absolute file offset of the last offset that is >= target offset
+						// all the time via its FileMessageSet#searchFor()
+						//
+						// The broker strategy doesn't really matter much all things considered, as long as we are able to properly filter
+						// bundles and messages here, which we should always do
+
                                                 if (trace)
                                                         SLog("Skipping, msgAbsSeqNum(", msgAbsSeqNum, ") < requestedSeqNum(", requestedSeqNum, ")\n");
                                         }

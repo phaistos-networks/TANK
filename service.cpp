@@ -177,6 +177,84 @@ static uint32_t search_before_offset(const uint64_t baseSeqNum, const uint32_t m
         return fileOffset;
 }
 
+// We are operating on index boundaries, so our range `r` is aligned on an index boundary, which means
+// we may stream (0, partition_config::indexInterval] excess bytes. 
+// This is probably fine, but we may as well
+// scan ahead from that range until we find an more appropriate file offset to begin streaming for, and adjust
+// our file range and the bundle at that file offset's base seq number.
+//
+// Kafka does something similar(see it's FileMessageSet.scala#searchFor() impl.)
+//
+// If we don't adjust_range(), we 'll avoid the scanning I/O cost, which should be minimal anyway, but we can potentially send
+// more data at the expense of network I/O and transfer costs
+//
+// TODO: consider a more efficient scan method(maybe read chunks in order to reduce pread64() syscalls)
+static void adjust_range(lookup_res &res, const uint64_t absSeqNum)
+{
+	uint64_t baseSeqNum = res.absBaseSeqNum;
+
+	if (baseSeqNum == absSeqNum)
+	{
+		// No need for any ajustements
+		return;
+	}
+
+	int fd = res.fdh->fd;
+	auto r = res.range;
+        uint8_t buf[sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint64_t)];
+        auto o = r.offset;
+        const auto limit = r.End();
+	uint64_t before = trace ? Timings::Microseconds::Tick() : 0;
+
+	if (trace)
+		SLog(ansifmt::bold, ansifmt::color_brown, "About to adjust range ", r, ", absSeqNum(", baseSeqNum, "), absSeqNum(", absSeqNum, ")", ansifmt::reset, "\n");
+
+        while (o < limit)
+        {
+                const auto r = pread64(fd, buf, sizeof(buf), o);
+
+                if (unlikely(r == -1))
+                        throw Switch::system_error("pread64() failed:", strerror(errno));
+
+                const auto *p = buf;
+                const auto bundleLen = Compression::UnpackUInt32(p);
+                const auto encodedBundleLenLen = p - buf;
+                const auto bundleFlags = *p++;
+                uint32_t msgSetSize = (bundleFlags >> 2) & 0xf;
+
+                if (!msgSetSize)
+                        msgSetSize = Compression::UnpackUInt32(p);
+
+		if (trace)
+			SLog("Now at bundle(", baseSeqNum, "), msgSetSize(", msgSetSize, "), bundleFlags(", bundleFlags, ")\n");
+
+		const auto nextBundleBaseSeqNum = baseSeqNum + msgSetSize;
+
+                if (absSeqNum >= nextBundleBaseSeqNum)
+                {
+                        // Our target is in later bundle
+			if (trace)
+				SLog("Target in later bundle\n");
+
+                        o += bundleLen + encodedBundleLenLen;
+			baseSeqNum = nextBundleBaseSeqNum;
+                }
+                else
+                {
+			// Our target is in this bundle
+			if (trace)
+				SLog("Target in this bundle\n");
+
+                        res.range.reset_offset(o);
+			res.absBaseSeqNum = baseSeqNum;
+                        break;
+                }
+        }
+
+	if (trace)
+		SLog(ansifmt::color_blue, "After adjustement, range ", r, ", absBaseSeqNum(", res.absBaseSeqNum, "), took  ", duration_repr(Timings::Microseconds::Since(before)), ansifmt::reset, "\n");
+}
+
 lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum)
 {
         // lock is expected to be locked
@@ -389,18 +467,21 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         if (prevSegments->size())
         {
                 const auto f = prevSegments->front();
+		range32_t range(0, Min<uint32_t>(maxSize, f->fileSize));
 
                 if (trace)
                         SLog("Will use first R/O segment\n");
 
-                return {f->fdh, f->baseSeqNum, {0, Min<uint32_t>(maxSize, f->fileSize)}, highWatermark};
+                return {f->fdh, f->baseSeqNum, range, highWatermark};
         }
         else
         {
+		range32_t range(0, Min<uint32_t>(maxSize, cur.fileSize));
+
                 if (trace)
                         SLog("Will use current segment\n");
 
-                return {cur.fdh, cur.baseSeqNum, {0, Min<uint32_t>(maxSize, cur.fileSize)}, highWatermark};
+                return {cur.fdh, cur.baseSeqNum, range, highWatermark};
         }
 }
 
@@ -1362,6 +1443,8 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                         switch (res.fault)
                                         {
                                                 case lookup_res::Fault::NoFault:
+							adjust_range(res, absSeqNum);
+
                                                         respHeader->Serialize(uint8_t(0));        // error
                                                         respHeader->Serialize(res.absBaseSeqNum); // absolute first seq.num of the first message of the first bundle in the streamed chunk
                                                         respHeader->Serialize(hwMark);
