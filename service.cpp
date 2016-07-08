@@ -187,8 +187,6 @@ static uint32_t search_before_offset(const uint64_t baseSeqNum, const uint32_t m
 //
 // If we don't adjust_range(), we 'll avoid the scanning I/O cost, which should be minimal anyway, but we can potentially send
 // more data at the expense of network I/O and transfer costs
-//
-// TODO: consider a more efficient scan method(maybe read chunks in order to reduce pread64() syscalls)
 static void adjust_range(lookup_res &res, const uint64_t absSeqNum)
 {
 	uint64_t baseSeqNum = res.absBaseSeqNum;
@@ -201,24 +199,60 @@ static void adjust_range(lookup_res &res, const uint64_t absSeqNum)
 
 	int fd = res.fdh->fd;
 	auto r = res.range;
-        uint8_t buf[sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint64_t)];
-        auto o = r.offset;
+        uint8_t tinyBuf[sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint64_t)], midBuf[8192];
+	const auto baseOffset = r.offset;
+        auto o = baseOffset;
         const auto limit = r.End();
 	uint64_t before = trace ? Timings::Microseconds::Tick() : 0;
+	bool usingMidBuf;
 
 	if (trace)
 		SLog(ansifmt::bold, ansifmt::color_brown, "About to adjust range ", r, ", absSeqNum(", baseSeqNum, "), absSeqNum(", absSeqNum, ")", ansifmt::reset, "\n");
 
+        if (r.len <= sizeof(midBuf))
+        {
+		// If we are dealing with a small range anyway, use a mid-size buffer
+		// and read the whole thing here and use it, instead of reading one bundle header/time
+		// This should provide us with a few microseconds worth of improvement
+                const auto v = pread64(fd, midBuf, r.len, baseOffset);
+
+                if (unlikely(v != r.len))
+                        throw Switch::system_error("pread64() failed:", strerror(errno));
+                else
+                {
+                        if (trace)
+                                SLog("Using midBuf, because r.len(", r.len, ") <= ", sizeof(midBuf), "\n");
+
+                        usingMidBuf = true;
+                }
+        }
+        else
+	{
+		if (trace)
+			SLog("Using tinyBuf\n");
+
+                usingMidBuf = false;
+	}
+
         while (o < limit)
         {
-                const auto r = pread64(fd, buf, sizeof(buf), o);
+		const uint8_t *baseBuf;
 
-                if (unlikely(r == -1))
-                        throw Switch::system_error("pread64() failed:", strerror(errno));
+		if (usingMidBuf)
+			baseBuf = midBuf + (o - baseOffset);
+		else
+                {
+                        const auto r = pread64(fd, tinyBuf, sizeof(tinyBuf), o);
 
-                const auto *p = buf;
+                        if (unlikely(r == -1))
+                                throw Switch::system_error("pread64() failed:", strerror(errno));
+
+			baseBuf = tinyBuf;
+                }
+
+		const uint8_t *p = baseBuf;
                 const auto bundleLen = Compression::UnpackUInt32(p);
-                const auto encodedBundleLenLen = p - buf;
+                const auto encodedBundleLenLen = p - baseBuf;
                 const auto bundleFlags = *p++;
                 uint32_t msgSetSize = (bundleFlags >> 2) & 0xf;
 
