@@ -187,6 +187,8 @@ static uint32_t search_before_offset(const uint64_t baseSeqNum, const uint32_t m
 //
 // If we don't adjust_range(), we 'll avoid the scanning I/O cost, which should be minimal anyway, but we can potentially send
 // more data at the expense of network I/O and transfer costs
+//
+// This will require some effort once we support sparse logs (e.g due to compaction), but we 'll figure out the appropriate impl. then
 static void adjust_range(lookup_res &res, const uint64_t absSeqNum)
 {
         uint64_t baseSeqNum = res.absBaseSeqNum;
@@ -194,6 +196,8 @@ static void adjust_range(lookup_res &res, const uint64_t absSeqNum)
         if (baseSeqNum == absSeqNum)
         {
                 // No need for any ajustements
+		if (trace)
+			SLog("No need for any adjustments\n");
                 return;
         }
 
@@ -201,13 +205,14 @@ static void adjust_range(lookup_res &res, const uint64_t absSeqNum)
         auto r = res.range;
         uint8_t tinyBuf[sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint64_t)], midBuf[8192];
         const auto baseOffset = r.offset;
+	const auto span = r.len;
         auto o = baseOffset;
-        const auto limit = r.End();
+        const auto fileSize = res.fileSize;
         uint64_t before = trace ? Timings::Microseconds::Tick() : 0;
         bool usingMidBuf;
 
         if (trace)
-                SLog(ansifmt::bold, ansifmt::color_brown, "About to adjust range ", r, ", absSeqNum(", baseSeqNum, "), absSeqNum(", absSeqNum, ")", ansifmt::reset, "\n");
+                SLog(ansifmt::bold, ansifmt::color_brown, "About to adjust range ", r, ", absBaseSeqNum(", baseSeqNum, "), absSeqNum(", absSeqNum, ")", ansifmt::reset, "\n");
 
         if (r.len <= sizeof(midBuf))
         {
@@ -234,7 +239,7 @@ static void adjust_range(lookup_res &res, const uint64_t absSeqNum)
                 usingMidBuf = false;
         }
 
-        while (o < limit)
+        while (o < fileSize)
         {
                 const uint8_t *baseBuf;
 
@@ -279,7 +284,10 @@ static void adjust_range(lookup_res &res, const uint64_t absSeqNum)
                         if (trace)
                                 SLog("Target in this bundle\n");
 
-                        res.range.reset_offset(o);
+                        res.range.Set(o, span);
+			if (res.range.End() > fileSize)
+				res.range.SetEnd(fileSize);
+
                         res.absBaseSeqNum = baseSeqNum;
                         break;
                 }
@@ -304,6 +312,7 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
                 return TrivialCmp(seqNum, a.first);
         });
 
+	res.fileSize = cur.fileSize;
         res.fdh = cur.fdh;
 
         if (it != end)
@@ -487,7 +496,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
                 if (range.len > maxSize)
                         range.len = maxSize;
 
-                return {f->fdh, f->baseSeqNum + res.record.relSeqNum, range, highWatermark};
+                return {f->fdh, f->fileSize, f->baseSeqNum + res.record.relSeqNum, range, highWatermark};
         }
 
         if (trace)
@@ -505,7 +514,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
                 if (trace)
                         SLog("Will use first R/O segment\n");
 
-                return {f->fdh, f->baseSeqNum, range, highWatermark};
+                return {f->fdh, f->fileSize, f->baseSeqNum, range, highWatermark};
         }
         else
         {
@@ -514,7 +523,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
                 if (trace)
                         SLog("Will use current segment\n");
 
-                return {cur.fdh, cur.baseSeqNum, range, highWatermark};
+                return {cur.fdh, cur.fileSize, cur.baseSeqNum, range, highWatermark};
         }
 }
 
@@ -1533,6 +1542,9 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                         {
                                                 case lookup_res::Fault::NoFault:
                                                         adjust_range(res, absSeqNum);
+
+							if (trace)
+								SLog(ansifmt::bold, "Response:(baseSeqNum = ", res.absBaseSeqNum, ", range ", res.range, ")", ansifmt::reset, "\n");
 
                                                         respHeader->Serialize(uint8_t(0));        // error
                                                         respHeader->Serialize(res.absBaseSeqNum); // absolute first seq.num of the first message of the first bundle in the streamed chunk

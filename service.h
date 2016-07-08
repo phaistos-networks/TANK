@@ -149,6 +149,7 @@ struct lookup_res
                 AtEOF
         } fault;
 
+	uint32_t fileSize;
         Switch::shared_refptr<fd_handle> fdh;
 
         // Absolute base sequence number of the first message in the first bundle
@@ -175,8 +176,8 @@ struct lookup_res
         {
         }
 
-        lookup_res(fd_handle *const f, const uint64_t seqNum, const range32_t r, const uint64_t h)
-            : fault{Fault::NoFault}, fdh{f}, absBaseSeqNum{seqNum}, range{r}, highWatermark{h}
+        lookup_res(fd_handle *const f, const uint32_t fsize, const uint64_t seqNum, const range32_t r, const uint64_t h)
+            : fault{Fault::NoFault}, fdh{f}, fileSize{fsize}, absBaseSeqNum{seqNum}, range{r}, highWatermark{h}
         {
         }
 
