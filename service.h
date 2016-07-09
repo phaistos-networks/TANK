@@ -95,6 +95,15 @@ struct ro_segment
         Switch::shared_refptr<fd_handle> fdh;
         uint32_t fileSize;
 
+	// In order to support compactions (in the future), in the very improbable and unlikely case compaction leads
+	// to situations where because of deduplication we will end up having to store messages in a segment where any of those
+	// message.absSeqNum - segment.baseSeqNum > UINT32_MAX, and we don't want to just create a new immutable segment to deal with it(maybe because
+	// that'd lead to creating very small segments), then we encode {absSeqNum:u64, fileOffet:u32} instead in the immutable segment's index and
+	// to set that that, we 'll use a different name for those .index files.
+	// 
+	// For now, the implementation is missing, but we 'll implement what's required if and when we need to do so.
+	const bool haveWideEntries;
+
         // Every log file is associated with this skip-list index
         struct
         {
@@ -106,11 +115,11 @@ struct ro_segment
         } index;
 
         ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, const uint32_t creationTS)
-            : baseSeqNum{absSeqNum}, lastAvailSeqNum{lastAbsSeqNum}, createdTS{creationTS}, lastModTS{0}
+            : baseSeqNum{absSeqNum}, lastAvailSeqNum{lastAbsSeqNum}, createdTS{creationTS}, lastModTS{0}, haveWideEntries{false}
         {
         }
 
-        ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, const strwlen32_t base, const uint32_t);
+        ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, const strwlen32_t base, const uint32_t, const bool haveWideEntries);
 
         ~ro_segment()
         {

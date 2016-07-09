@@ -12,16 +12,17 @@
 #include <thread>
 #include <timings.h>
 #include <unistd.h>
+#include <set>
 
 static constexpr bool trace{false};
 
 static Switch::mutex mboxLock;
 static Switch::vector<std::pair<int, int>> mbox;
 
-ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, const strwlen32_t base, const uint32_t creationTS)
-    : baseSeqNum{absSeqNum}, lastAvailSeqNum{lastAbsSeqNum}, createdTS{creationTS}
+ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, const strwlen32_t base, const uint32_t creationTS, const bool wideEntries)
+    : baseSeqNum{absSeqNum}, lastAvailSeqNum{lastAbsSeqNum}, createdTS{creationTS}, haveWideEntries{wideEntries}
 {
-        int fd;
+        int fd, indexFd;
         struct stat64 st;
 
         index.data = nullptr;
@@ -53,7 +54,10 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
         if (trace)
                 SLog(ansifmt::bold, "fileSize = ", fileSize, ", lastModTS = ", Date::ts_repr(lastModTS), ", createdTS = ", Date::ts_repr(creationTS), ansifmt::reset, "\n");
 
-        int indexFd = open(Buffer::build(base, "/", absSeqNum, ".index").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
+        if (haveWideEntries)
+                indexFd = open(Buffer::build(base, "/", absSeqNum, "_64.index").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
+        else
+                indexFd = open(Buffer::build(base, "/", absSeqNum, ".index").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
 
         if (indexFd == -1)
         {
@@ -69,6 +73,10 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
                 throw Switch::system_error("lseek64() failed: ", strerror(errno));
 
         Drequire(size < std::numeric_limits<std::remove_reference<decltype(index.fileSize)>::type>::max());
+
+	// TODO: if (haveWideEntries), index.lastRecorded.relSeqNum should be a union, and we should
+	// properly set index.lastRecorded here
+	require(haveWideEntries == false); // not implemented yet
 
         index.fileSize = size;
         index.lastRecorded.relSeqNum = index.lastRecorded.absPhysical = 0;
@@ -100,6 +108,7 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
 
 std::pair<uint32_t, uint32_t> ro_segment::snapDown(const uint64_t absSeqNum) const
 {
+	require(haveWideEntries == false);// not implemented yet
         const auto relSeqNum = uint32_t(absSeqNum - baseSeqNum);
         const auto *const all = reinterpret_cast<const index_record *>(index.data);
         const auto *const end = all + index.fileSize / sizeof(index_record);
@@ -119,6 +128,7 @@ std::pair<uint32_t, uint32_t> ro_segment::snapDown(const uint64_t absSeqNum) con
 
 std::pair<uint32_t, uint32_t> ro_segment::snapUp(const uint64_t absSeqNum) const
 {
+	require(haveWideEntries == false);// not implemented yet
         const auto relSeqNum = uint32_t(absSeqNum - baseSeqNum);
         const auto *const all = reinterpret_cast<const index_record *>(index.data);
         const auto *const end = all + index.fileSize / sizeof(index_record);
@@ -922,8 +932,8 @@ lookup_res topic_partition::read_from_local(const bool fetchOnlyFromLeader, cons
         //
         // search_before_offset() will need to access the segment log file though, and that may not be optimal; instead
         // we may just want to rely on the client stopping processing chunk bundles if it reaches message id > maxAbsSeqNum(provided
-        // in the fetch response), which it already takes into account
-        // reaches messages id >= maxAbsSeqNum
+        // in the fetch response), which it already takes into account. This makes sense because we use the index to quickly identify
+	// a ceiling close to the last confirmed sequence anyway, and this is aligned on index interval, which is usually 4k
         const uint64_t maxAbsSeqNum{UINT64_MAX};
 
         if (trace)
@@ -1134,8 +1144,10 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         uint32_t creationTS;
                 };
 
-                auto partition = Switch::make_sharedref(new topic_partition());
+		// TODO: reuse roLogs and wideEntyRoLogIndices
                 Switch::vector<rosegment_ctx> roLogs;
+		std::set<uint64_t> wideEntyRoLogIndices;
+                auto partition = Switch::make_sharedref(new topic_partition());
                 uint64_t curLogSeqNum{0};
                 uint32_t curLogCreateTS{0};
                 const strwlen32_t b(basePath, basePathLen);
@@ -1172,6 +1184,13 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         if (r.second.Eq(_S("index")))
                         {
                                 // accept
+				const auto v = r.first.Divided('_');
+
+				if (v.second.Eq(_S("64")))
+				{
+					// Just so ro_segment::ro_segment() won't have to try different names until it gets it right
+					wideEntyRoLogIndices.insert(v.first.AsUint64());
+				}
                         }
                         else if (r.second.Eq(_S("swap")))
                         {
@@ -1260,7 +1279,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                 if (trace)
                                         SLog("Initializing [", it.firstAvailableSeqNum, ",", it.lastAvailSeqNum, "]\n");
 
-                                l->roSegments->push_back(new ro_segment(it.firstAvailableSeqNum, it.lastAvailSeqNum, b, it.creationTS));
+                                l->roSegments->push_back(new ro_segment(it.firstAvailableSeqNum, it.lastAvailSeqNum, b, it.creationTS, wideEntyRoLogIndices.count(it.firstAvailableSeqNum)));
                         }
                 }
                 else
