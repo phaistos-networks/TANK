@@ -193,11 +193,11 @@ static uint32_t search_before_offset(uint64_t baseSeqNum, const uint32_t maxSize
         return fileOffset;
 }
 
-// We are operating on index boundaries, so our range `r` is aligned on an index boundary, which means
+// We are operating on index boundaries, so our res.fileOffset is aligned on an index boundary, which means
 // we may stream (0, partition_config::indexInterval] excess bytes.
 // This is probably fine, but we may as well
-// scan ahead from that range until we find an more appropriate file offset to begin streaming for, and adjust
-// our file range and the bundle at that file offset's base seq number.
+// scan ahead from that fileOffset until we find an more appropriate file offset to begin streaming for, and adjust
+// res.fileOffset and res.baseSeqNum accordidly if we can.
 //
 // Kafka does something similar(see it's FileMessageSet.scala#searchFor() impl.)
 //
@@ -218,59 +218,23 @@ static void adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
         }
 
         int fd = res.fdh->fd;
-        auto r = res.range;
-        uint8_t tinyBuf[sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint64_t)], midBuf[8192];
-        const auto baseOffset = r.offset;
-	const auto span = r.len;
+        uint8_t tinyBuf[sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint64_t)];
+        const auto baseOffset = res.fileOffset;
         auto o = baseOffset;
         const auto fileOffsetCeiling = res.fileOffsetCeiling;
         uint64_t before = trace ? Timings::Microseconds::Tick() : 0;
-        bool usingMidBuf;
 
         if (trace)
-                SLog(ansifmt::bold, ansifmt::color_brown, "About to adjust range ", r, ", absBaseSeqNum(", baseSeqNum, "), absSeqNum(", absSeqNum, ")", ansifmt::reset, "\n");
-
-        if (span <= sizeof(midBuf))
-        {
-                // If we are dealing with a small range anyway, use a mid-size buffer
-                // and read the whole thing here and use it, instead of reading one bundle header/time
-                // This should provide us with a few microseconds worth of improvement
-                const auto v = pread64(fd, midBuf, span, baseOffset);
-
-                if (unlikely(v != span))
-                        throw Switch::system_error("pread64() failed:", strerror(errno));
-                else
-                {
-                        if (trace)
-                                SLog("Using midBuf, because r.len(", span, ") <= ", sizeof(midBuf), "\n");
-
-                        usingMidBuf = true;
-                }
-        }
-        else
-        {
-                if (trace)
-                        SLog("Using tinyBuf\n");
-
-                usingMidBuf = false;
-        }
+                SLog(ansifmt::bold, ansifmt::color_brown, "About to adjust range fileOffset ", baseOffset, ", absBaseSeqNum(", baseSeqNum, "), absSeqNum(", absSeqNum, ")", ansifmt::reset, "\n");
 
         while (o < fileOffsetCeiling)
         {
-                const uint8_t *baseBuf;
+                const auto r = pread64(fd, tinyBuf, sizeof(tinyBuf), o);
 
-                if (usingMidBuf)
-                        baseBuf = midBuf + (o - baseOffset);
-                else
-                {
-                        const auto r = pread64(fd, tinyBuf, sizeof(tinyBuf), o);
+                if (unlikely(r == -1))
+                        throw Switch::system_error("pread64() failed:", strerror(errno));
 
-                        if (unlikely(r == -1))
-                                throw Switch::system_error("pread64() failed:", strerror(errno));
-
-                        baseBuf = tinyBuf;
-                }
-
+                const auto *const baseBuf = tinyBuf;
                 const uint8_t *p = baseBuf;
                 const auto bundleLen = Compression::UnpackUInt32(p);
 
@@ -303,15 +267,14 @@ static void adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
                         if (trace)
                                 SLog("Target in this bundle(", o, ")\n");
 
-                        res.range.offset = o;
-			res.range.len = 0;
+			res.fileOffset = o;
                         res.absBaseSeqNum = baseSeqNum;
                         break;
                 }
         }
 
         if (trace)
-                SLog(ansifmt::color_blue, "After adjustement, range ", res.range, ", absBaseSeqNum(", res.absBaseSeqNum, "), took  ", duration_repr(Timings::Microseconds::Since(before)), ansifmt::reset, "\n");
+                SLog(ansifmt::color_blue, "After adjustement, fileOffset ", res.fileOffset, ", absBaseSeqNum(", res.absBaseSeqNum, "), took  ", duration_repr(Timings::Microseconds::Since(before)), ansifmt::reset, "\n");
 }
 
 lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum)
@@ -337,7 +300,7 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
                         SLog("Found in skiplist\n");
 
                 res.absBaseSeqNum = cur.baseSeqNum + it->first;
-                res.range.offset = it->second;
+                res.fileOffset = it->second;
 
                 inSkiplist = true;
         }
@@ -361,12 +324,12 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
 				SLog("In ondisk index (", i->relSeqNum, ", ", i->absPhysical, ")\n");
 
                         res.absBaseSeqNum = cur.baseSeqNum + i->relSeqNum;
-                        res.range.offset = i->absPhysical;
+                        res.fileOffset = i->absPhysical;
                 }
                 else
                 {
                         res.absBaseSeqNum = cur.baseSeqNum;
-			res.range.offset = 0;
+			res.fileOffset = 0;
                 }
 
                 inSkiplist = false;
@@ -522,7 +485,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
 		else
 			offsetCeil = f->fileSize;
 
-                return {f->fdh, offsetCeil, f->baseSeqNum + res.record.relSeqNum, {res.record.absPhysical, 0}, highWatermark};
+                return {f->fdh, offsetCeil, f->baseSeqNum + res.record.relSeqNum, res.record.absPhysical, highWatermark};
         }
 
         if (trace)
@@ -539,14 +502,14 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
                 if (trace)
                         SLog("Will use first R/O segment\n");
 
-                return {f->fdh, f->fileSize, f->baseSeqNum, {0, 0}, highWatermark};
+                return {f->fdh, f->fileSize, f->baseSeqNum, 0, highWatermark};
         }
         else
         {
                 if (trace)
                         SLog("Will use current segment\n");
 
-                return {cur.fdh, cur.fileSize, cur.baseSeqNum, {0, 0}, highWatermark};
+                return {cur.fdh, cur.fileSize, cur.baseSeqNum, 0, highWatermark};
         }
 }
 
@@ -1569,35 +1532,26 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                         auto res = partition->read_from_local(fetchOnlyFromLeader, fetchOnlyCommitted,
                                                                               absSeqNum, fetchSize);
                                         const auto hwMark = res.highWatermark;
+					range32_t range;
 
                                         switch (res.fault)
                                         {
                                                 case lookup_res::Fault::NoFault:
-							// res.range.len is not set in read_from_local()
-							// read_from_local() and adjust_range_start() set and adjust the res.range.offset only, not the length
-							// adjust_range_start() will use range.len so we need to see to it here
-							res.range.len = fetchSize;
-							if (res.range.End() > res.fileOffsetCeiling)	
-								res.range.SetEnd(res.fileOffsetCeiling);
-
                                                         adjust_range_start(res, absSeqNum);
-
-							// Reset again, and adjust
-							res.range.len = fetchSize;
-							if (res.range.End() > res.fileOffsetCeiling)	
-								res.range.SetEnd(res.fileOffsetCeiling);
-
+							range.Set(res.fileOffset, fetchSize);
+							if (range.End() > res.fileOffsetCeiling)	
+								range.SetEnd(res.fileOffsetCeiling);
 
 							if (trace)
-								SLog(ansifmt::bold, "Response:(baseSeqNum = ", res.absBaseSeqNum, ", range ", res.range, ")", ansifmt::reset, "\n");
+								SLog(ansifmt::bold, "Response:(baseSeqNum = ", res.absBaseSeqNum, ", range ", range, ")", ansifmt::reset, "\n");
 
                                                         respHeader->Serialize(uint8_t(0));        // error
                                                         respHeader->Serialize(res.absBaseSeqNum); // absolute first seq.num of the first message of the first bundle in the streamed chunk
                                                         respHeader->Serialize(hwMark);
-                                                        respHeader->Serialize(res.range.len);
+                                                        respHeader->Serialize(range.len);
 
-                                                        sum += res.range.len;
-                                                        q->push_back({res.fdh.get(), res.range});
+                                                        sum += range.len;
+                                                        q->push_back({res.fdh.get(), range});
 
                                                         // TODO:
                                                         // if (replicaId) { updateFollowerLogEndOffset(topic, partition, absSeqNum) }

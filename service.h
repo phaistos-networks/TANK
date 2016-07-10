@@ -170,14 +170,14 @@ struct lookup_res
         // of each bundle message (use post-increment!)
         uint64_t absBaseSeqNum;
 
-        // chunk file range; we can start streaming from there
-        range32_t range;
+        // file offset for the bundle with the first message == absBaseSeqNum
+	uint32_t fileOffset;
 
         // The last committed absolute sequence number
         uint64_t highWatermark;
 
         lookup_res(lookup_res &&o)
-            : fault{o.fault}, fileOffsetCeiling{o.fileOffsetCeiling}, fdh(std::move(o.fdh)), absBaseSeqNum{o.absBaseSeqNum}, range{o.range}, highWatermark{o.highWatermark}
+            : fault{o.fault}, fileOffsetCeiling{o.fileOffsetCeiling}, fdh(std::move(o.fdh)), absBaseSeqNum{o.absBaseSeqNum}, fileOffset{o.fileOffset}, highWatermark{o.highWatermark}
         {
         }
 
@@ -188,8 +188,8 @@ struct lookup_res
         {
         }
 
-        lookup_res(fd_handle *const f, const uint32_t c, const uint64_t seqNum, const range32_t r, const uint64_t h)
-            : fault{Fault::NoFault}, fdh{f}, fileOffsetCeiling{c}, absBaseSeqNum{seqNum}, range{r}, highWatermark{h}
+        lookup_res(fd_handle *const f, const uint32_t c, const uint64_t seqNum, const uint32_t o, const uint64_t h)
+            : fault{Fault::NoFault}, fdh{f}, fileOffsetCeiling{c}, absBaseSeqNum{seqNum}, fileOffset{o}, highWatermark{h}
         {
         }
 
@@ -217,7 +217,7 @@ struct partition_config
 static void PrintImpl(Buffer &out, const lookup_res &res)
 {
         if (res.fault != lookup_res::Fault::NoFault)
-                out.append("{fd = ", res.fdh ? res.fdh->fd : -1, ", absBaseSeqNum = ", res.absBaseSeqNum, ", range = ", res.range, "}");
+                out.append("{fd = ", res.fdh ? res.fdh->fd : -1, ", absBaseSeqNum = ", res.absBaseSeqNum, ", fileOffset = ", res.fileOffset, "}");
         else
                 out.append("{fault = ", unsigned(res.fault), "}");
 }
