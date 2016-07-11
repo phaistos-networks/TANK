@@ -361,7 +361,12 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
                         ref = *it;
                 }
 
+#if 0
+		res.fileOffsetCeiling = ref.absPhysical;
+#else
+		// Yes, incur some tiny I/O overhead so that we 'll properly cut-off the content
                 res.fileOffsetCeiling = search_before_offset(cur.baseSeqNum, maxSize, maxAbsSeqNum, cur.fdh->fd, cur.fileSize, ref.absPhysical);
+#endif
 
                 if (trace)
                         SLog("maxAbsSeqNum = ", maxAbsSeqNum, " ", res.fileOffsetCeiling, "\n");
@@ -471,7 +476,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
                 uint32_t offsetCeil;
 
                 if (trace)
-                        SLog("Found in RO segment\n");
+                        SLog("Found in RO segment (", f->baseSeqNum, ", ", f->lastAvailSeqNum, ")\n");
 
                 if (maxAbsSeqNum != UINT64_MAX)
                 {
@@ -481,7 +486,12 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
                         if (trace)
                                 SLog("maxAbsSeqNum = ", maxAbsSeqNum, " => ", r, "\n");
 
+#if 0
+			offsetCeil = r.second;
+#else
+                        // Yes, incur some tiny I/O overhead so that we 'll properly cut-off the content
                         offsetCeil = search_before_offset(f->baseSeqNum, maxSize, maxAbsSeqNum, f->fdh->fd, f->fileSize, r.second);
+#endif
                 }
                 else
                         offsetCeil = f->fileSize;
@@ -678,6 +688,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 // so we set cur.sinceLastUpdate = UINT32_MAX to force that
                 cur.sinceLastUpdate = UINT32_MAX;
                 cur.createdTS = Timings::Seconds::SysTime();
+		cur.nameEncodesTS = true;
 
                 cur.index.skipList.clear();
                 close(cur.index.fd);
@@ -1388,7 +1399,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         l->cur.nameEncodesTS = curLogCreateTS;
                         l->cur.flush_state.pendingFlushMsgs = 0;
                         l->cur.flush_state.nextFlushTS = config.flushIntervalSecs ? now + config.flushIntervalSecs : UINT32_MAX;
-
+ 
                         if (trace)
                                 SLog("createdTS(", l->cur.createdTS, ") nameEncodesTS(", l->cur.nameEncodesTS, ")\n");
                 }
@@ -2330,6 +2341,12 @@ Service::~Service()
 
         while (connsPool.size())
                 delete connsPool.Pop();
+	
+	for (auto &it : waitCtxPool)
+	{
+		while (it.size())
+			free(it.Pop());
+	}
 
 #ifdef LEAN_SWITCH
         for (auto &it : topics)

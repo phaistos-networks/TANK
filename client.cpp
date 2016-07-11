@@ -833,7 +833,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                 // Parse the bundle's message set
                                 // if this a compressed messages set, the boundary checks are not necessary
-                                for (const auto *p = msgSetContent.offset, *const endOfMsgSet = p + msgSetContent.len; p != endOfMsgSet;)
+                                for (const auto *p = msgSetContent.offset, *const endOfMsgSet = p + msgSetContent.len; ;)
                                 {
                                         // parse next bundle message
                                         if (p + sizeof(uint8_t) > endOfMsgSet)
@@ -970,6 +970,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         }
 
                                         p += len;
+
                                 }
                         }
 
