@@ -585,6 +585,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
         return true;
 }
 
+// XXX: make sure this reflects the latest encoding scheme
 bool TankClient::process_consume(connection *const c, const uint8_t *const content, const size_t len)
 {
         const auto *p = content;

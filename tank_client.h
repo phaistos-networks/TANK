@@ -1,14 +1,14 @@
 #pragma once
 #include "common.h"
-#include <set>
-#include <vector>
 #include <compress.h>
 #include <network.h>
+#include <set>
 #include <switch.h>
 #include <switch_dictionary.h>
 #include <switch_ll.h>
 #include <switch_mallocators.h>
 #include <switch_vector.h>
+#include <vector>
 
 // Tank, because its a large container of liquid or gas
 // and data flow (as in, liquid), and also, this is a Trinity character name
@@ -429,15 +429,15 @@ namespace std
         template <>
         struct hash<TankClient::topic_partition>
         {
-		using argument_type = TankClient::topic_partition;
-		using result_type = std::size_t;
+                using argument_type = TankClient::topic_partition;
+                using result_type = std::size_t;
 
                 inline result_type operator()(const argument_type &v) const
                 {
-			size_t hash{2166136261U};
+                        size_t hash{2166136261U};
 
-			for (uint32_t i{0}; i != v.first.len; ++i)
-				 hash = (hash * 16777619) ^ v.first.p[i];
+                        for (uint32_t i{0}; i != v.first.len; ++i)
+                                hash = (hash * 16777619) ^ v.first.p[i];
 
                         hash ^= std::hash<uint16_t>{}(v.second) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
                         return hash;
@@ -450,8 +450,8 @@ namespace Switch
         template <>
         struct hash<TankClient::topic_partition>
         {
-		using argument_type = TankClient::topic_partition;
-		using result_type = uint32_t;
+                using argument_type = TankClient::topic_partition;
+                using result_type = uint32_t;
 
                 inline result_type operator()(const argument_type &v) const
                 {

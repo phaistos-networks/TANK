@@ -4,6 +4,7 @@
 #include <date.h>
 #include <fs.h>
 #include <random>
+#include <set>
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
@@ -12,7 +13,6 @@
 #include <thread>
 #include <timings.h>
 #include <unistd.h>
-#include <set>
 
 static constexpr bool trace{false};
 
@@ -74,9 +74,9 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
 
         Drequire(size < std::numeric_limits<std::remove_reference<decltype(index.fileSize)>::type>::max());
 
-	// TODO: if (haveWideEntries), index.lastRecorded.relSeqNum should be a union, and we should
-	// properly set index.lastRecorded here
-	require(haveWideEntries == false); // not implemented yet
+        // TODO: if (haveWideEntries), index.lastRecorded.relSeqNum should be a union, and we should
+        // properly set index.lastRecorded here
+        require(haveWideEntries == false); // not implemented yet
 
         index.fileSize = size;
         index.lastRecorded.relSeqNum = index.lastRecorded.absPhysical = 0;
@@ -108,7 +108,7 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
 
 std::pair<uint32_t, uint32_t> ro_segment::snapDown(const uint64_t absSeqNum) const
 {
-	require(haveWideEntries == false);// not implemented yet
+        require(haveWideEntries == false); // not implemented yet
         const auto relSeqNum = uint32_t(absSeqNum - baseSeqNum);
         const auto *const all = reinterpret_cast<const index_record *>(index.data);
         const auto *const end = all + index.fileSize / sizeof(index_record);
@@ -128,7 +128,7 @@ std::pair<uint32_t, uint32_t> ro_segment::snapDown(const uint64_t absSeqNum) con
 
 std::pair<uint32_t, uint32_t> ro_segment::snapUp(const uint64_t absSeqNum) const
 {
-	require(haveWideEntries == false);// not implemented yet
+        require(haveWideEntries == false); // not implemented yet
         const auto relSeqNum = uint32_t(absSeqNum - baseSeqNum);
         const auto *const all = reinterpret_cast<const index_record *>(index.data);
         const auto *const end = all + index.fileSize / sizeof(index_record);
@@ -168,7 +168,7 @@ static uint32_t search_before_offset(uint64_t baseSeqNum, const uint32_t maxSize
 
                 const auto *p = buf;
                 const auto bundleLen = Compression::UnpackUInt32(p);
-		const auto encodedBundleLenLen = p - buf;
+                const auto encodedBundleLenLen = p - buf;
                 const auto bundleFlags = *p++;
                 uint32_t msgSetSize = (bundleFlags >> 2) & 0xf;
 
@@ -182,13 +182,13 @@ static uint32_t search_before_offset(uint64_t baseSeqNum, const uint32_t maxSize
                         break;
                 else
                 {
-			baseSeqNum += msgSetSize;
-			fileOffset += bundleLen + encodedBundleLenLen;
+                        baseSeqNum += msgSetSize;
+                        fileOffset += bundleLen + encodedBundleLenLen;
                 }
         }
 
-	if (trace)
-		SLog("Returnign fileOffset = ", fileOffset, "\n");
+        if (trace)
+                SLog("Returnign fileOffset = ", fileOffset, "\n");
 
         return fileOffset;
 }
@@ -205,6 +205,7 @@ static uint32_t search_before_offset(uint64_t baseSeqNum, const uint32_t maxSize
 // more data at the expense of network I/O and transfer costs
 //
 // This will require some effort once we support sparse logs (e.g due to compaction), but we 'll figure out the appropriate impl. then
+// XXX: make sure this reflects the latest encoding scheme
 static void adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
 {
         uint64_t baseSeqNum = res.absBaseSeqNum;
@@ -212,8 +213,8 @@ static void adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
         if (baseSeqNum == absSeqNum || absSeqNum <= 1)
         {
                 // No need for any ajustements
-		if (trace)
-			SLog("No need for any adjustments\n");
+                if (trace)
+                        SLog("No need for any adjustments\n");
                 return;
         }
 
@@ -238,7 +239,7 @@ static void adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
                 const uint8_t *p = baseBuf;
                 const auto bundleLen = Compression::UnpackUInt32(p);
 
-		require(bundleLen);
+                require(bundleLen);
 
                 const auto encodedBundleLenLen = p - baseBuf;
                 const auto bundleFlags = *p++;
@@ -267,7 +268,7 @@ static void adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
                         if (trace)
                                 SLog("Target in this bundle(", o, ")\n");
 
-			res.fileOffset = o;
+                        res.fileOffset = o;
                         res.absBaseSeqNum = baseSeqNum;
                         break;
                 }
@@ -320,8 +321,8 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
 
                 if (i != e)
                 {
-			if (trace)
-				SLog("In ondisk index (", i->relSeqNum, ", ", i->absPhysical, ")\n");
+                        if (trace)
+                                SLog("In ondisk index (", i->relSeqNum, ", ", i->absPhysical, ")\n");
 
                         res.absBaseSeqNum = cur.baseSeqNum + i->relSeqNum;
                         res.fileOffset = i->absPhysical;
@@ -329,7 +330,7 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
                 else
                 {
                         res.absBaseSeqNum = cur.baseSeqNum;
-			res.fileOffset = 0;
+                        res.fileOffset = 0;
                 }
 
                 inSkiplist = false;
@@ -362,16 +363,16 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
 
                 res.fileOffsetCeiling = search_before_offset(cur.baseSeqNum, maxSize, maxAbsSeqNum, cur.fdh->fd, cur.fileSize, ref.absPhysical);
 
-		if (trace)
-			SLog("maxAbsSeqNum = ", maxAbsSeqNum, " ",res.fileOffsetCeiling, "\n");
+                if (trace)
+                        SLog("maxAbsSeqNum = ", maxAbsSeqNum, " ", res.fileOffsetCeiling, "\n");
         }
-	else
-	{
-		res.fileOffsetCeiling = cur.fileSize;
+        else
+        {
+                res.fileOffsetCeiling = cur.fileSize;
 
-		if (trace)
-			SLog("res.fileOffsetCeiling = ", res.fileOffsetCeiling, "\n");
-	}
+                if (trace)
+                        SLog("res.fileOffsetCeiling = ", res.fileOffsetCeiling, "\n");
+        }
 
         res.highWatermark = highWatermark;
         return res;
@@ -467,7 +468,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         {
                 const auto f = *it;
                 const auto res = f->translateDown(absSeqNum, UINT32_MAX);
-		uint32_t offsetCeil;
+                uint32_t offsetCeil;
 
                 if (trace)
                         SLog("Found in RO segment\n");
@@ -482,8 +483,8 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
 
                         offsetCeil = search_before_offset(f->baseSeqNum, maxSize, maxAbsSeqNum, f->fdh->fd, f->fileSize, r.second);
                 }
-		else
-			offsetCeil = f->fileSize;
+                else
+                        offsetCeil = f->fileSize;
 
                 return {f->fdh, offsetCeil, f->baseSeqNum + res.record.relSeqNum, res.record.absPhysical, highWatermark};
         }
@@ -896,7 +897,7 @@ lookup_res topic_partition::read_from_local(const bool fetchOnlyFromLeader, cons
         // search_before_offset() will need to access the segment log file though, and that may not be optimal; instead
         // we may just want to rely on the client stopping processing chunk bundles if it reaches message id > maxAbsSeqNum(provided
         // in the fetch response), which it already takes into account. This makes sense because we use the index to quickly identify
-	// a ceiling close to the last confirmed sequence anyway, and this is aligned on index interval, which is usually 4k
+        // a ceiling close to the last confirmed sequence anyway, and this is aligned on index interval, which is usually 4k
         const uint64_t maxAbsSeqNum{UINT64_MAX};
 
         if (trace)
@@ -1107,9 +1108,9 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         uint32_t creationTS;
                 };
 
-		// TODO: reuse roLogs and wideEntyRoLogIndices
+                // TODO: reuse roLogs and wideEntyRoLogIndices
                 Switch::vector<rosegment_ctx> roLogs;
-		std::set<uint64_t> wideEntyRoLogIndices;
+                std::set<uint64_t> wideEntyRoLogIndices;
                 auto partition = Switch::make_sharedref(new topic_partition());
                 uint64_t curLogSeqNum{0};
                 uint32_t curLogCreateTS{0};
@@ -1147,13 +1148,13 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         if (r.second.Eq(_S("index")))
                         {
                                 // accept
-				const auto v = r.first.Divided('_');
+                                const auto v = r.first.Divided('_');
 
-				if (v.second.Eq(_S("64")))
-				{
-					// Just so ro_segment::ro_segment() won't have to try different names until it gets it right
-					wideEntyRoLogIndices.insert(v.first.AsUint64());
-				}
+                                if (v.second.Eq(_S("64")))
+                                {
+                                        // Just so ro_segment::ro_segment() won't have to try different names until it gets it right
+                                        wideEntyRoLogIndices.insert(v.first.AsUint64());
+                                }
                         }
                         else if (r.second.Eq(_S("swap")))
                         {
@@ -1532,18 +1533,18 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                         auto res = partition->read_from_local(fetchOnlyFromLeader, fetchOnlyCommitted,
                                                                               absSeqNum, fetchSize);
                                         const auto hwMark = res.highWatermark;
-					range32_t range;
+                                        range32_t range;
 
                                         switch (res.fault)
                                         {
                                                 case lookup_res::Fault::NoFault:
                                                         adjust_range_start(res, absSeqNum);
-							range.Set(res.fileOffset, fetchSize);
-							if (range.End() > res.fileOffsetCeiling)	
-								range.SetEnd(res.fileOffsetCeiling);
+                                                        range.Set(res.fileOffset, fetchSize);
+                                                        if (range.End() > res.fileOffsetCeiling)
+                                                                range.SetEnd(res.fileOffsetCeiling);
 
-							if (trace)
-								SLog(ansifmt::bold, "Response:(baseSeqNum = ", res.absBaseSeqNum, ", range ", range, ")", ansifmt::reset, "\n");
+                                                        if (trace)
+                                                                SLog(ansifmt::bold, "Response:(baseSeqNum = ", res.absBaseSeqNum, ", range ", range, ")", ansifmt::reset, "\n");
 
                                                         respHeader->Serialize(uint8_t(0));        // error
                                                         respHeader->Serialize(res.absBaseSeqNum); // absolute first seq.num of the first message of the first bundle in the streamed chunk
@@ -2323,12 +2324,12 @@ Service::~Service()
 
         while (bufs.size())
                 delete bufs.Pop();
-	
-	while (outgoingQueuesPool.size())
-		delete outgoingQueuesPool.Pop();
 
-	while (connsPool.size())
-		delete connsPool.Pop();
+        while (outgoingQueuesPool.size())
+                delete outgoingQueuesPool.Pop();
+
+        while (connsPool.size())
+                delete connsPool.Pop();
 
 #ifdef LEAN_SWITCH
         for (auto &it : topics)

@@ -3,15 +3,13 @@
 #include <fs.h>
 #include <network.h>
 #include <switch.h>
+#include <switch_dictionary.h>
 #include <switch_ll.h>
 #include <switch_refcnt.h>
 #include <switch_vector.h>
-#include <switch_dictionary.h>
-#include <thread.h>
 #include <sys/mman.h>
 #include <sys/sendfile.h>
-
-
+#include <thread.h>
 
 // The index is sparse, so we need to be able to locate the _last_ index entry for relative sequence number <= targetRelativeSeqNumber
 // so that we can either
@@ -83,26 +81,25 @@ struct ro_segment
 {
         // the absolute sequence number of the first message in this segment
         const uint64_t baseSeqNum;
-	// the absolute sequence number of the last message in this segment
-	// i.e this segment contains [baseSeqNum, lastAssignedSeqNum]
-	// See: https://github.com/phaistos-networks/TANK/issues/2 for rationale
-	const uint64_t lastAvailSeqNum;
+        // the absolute sequence number of the last message in this segment
+        // i.e this segment contains [baseSeqNum, lastAssignedSeqNum]
+        // See: https://github.com/phaistos-networks/TANK/issues/2 for rationale
+        const uint64_t lastAvailSeqNum;
 
-	const uint32_t createdTS;
-	uint32_t lastModTS;
-
+        const uint32_t createdTS;
+        uint32_t lastModTS;
 
         Switch::shared_refptr<fd_handle> fdh;
         uint32_t fileSize;
 
-	// In order to support compactions (in the future), in the very improbable and unlikely case compaction leads
-	// to situations where because of deduplication we will end up having to store messages in a segment where any of those
-	// message.absSeqNum - segment.baseSeqNum > UINT32_MAX, and we don't want to just create a new immutable segment to deal with it(maybe because
-	// that'd lead to creating very small segments), then we encode {absSeqNum:u64, fileOffet:u32} instead in the immutable segment's index and
-	// to set that that, we 'll use a different name for those .index files.
-	// 
-	// For now, the implementation is missing, but we 'll implement what's required if and when we need to do so.
-	const bool haveWideEntries;
+        // In order to support compactions (in the future), in the very improbable and unlikely case compaction leads
+        // to situations where because of deduplication we will end up having to store messages in a segment where any of those
+        // message.absSeqNum - segment.baseSeqNum > UINT32_MAX, and we don't want to just create a new immutable segment to deal with it(maybe because
+        // that'd lead to creating very small segments), then we encode {absSeqNum:u64, fileOffet:u32} instead in the immutable segment's index and
+        // to set that that, we 'll use a different name for those .index files.
+        //
+        // For now, the implementation is missing, but we 'll implement what's required if and when we need to do so.
+        const bool haveWideEntries;
 
         // Every log file is associated with this skip-list index
         struct
@@ -158,10 +155,10 @@ struct lookup_res
                 AtEOF
         } fault;
 
-	// This is set to either fileSize of the segment log file or lower if
-	// we are are setting a boundary based on last assigned committed sequence number phys.offset
-	// adjust_range() cannot exceed that offset
-	uint32_t fileOffsetCeiling;
+        // This is set to either fileSize of the segment log file or lower if
+        // we are are setting a boundary based on last assigned committed sequence number phys.offset
+        // adjust_range() cannot exceed that offset
+        uint32_t fileOffsetCeiling;
         Switch::shared_refptr<fd_handle> fdh;
 
         // Absolute base sequence number of the first message in the first bundle
@@ -171,7 +168,7 @@ struct lookup_res
         uint64_t absBaseSeqNum;
 
         // file offset for the bundle with the first message == absBaseSeqNum
-	uint32_t fileOffset;
+        uint32_t fileOffset;
 
         // The last committed absolute sequence number
         uint64_t highWatermark;
@@ -201,17 +198,17 @@ struct lookup_res
 
 struct partition_config
 {
-	// Kafka defaults
+        // Kafka defaults
         size_t roSegmentsCnt{0};
         uint64_t roSegmentsSize{0};
         uint64_t maxSegmentSize{1 * 1024 * 1024 * 1024};
         size_t indexInterval{4096};
-	size_t maxIndexSize{10 * 1024 * 1024};
-	size_t maxRollJitterSecs{0};
-	size_t lastSegmentMaxAge{86400 * 7}; 	// 1 week (soft limit)
-	size_t curSegmentMaxAge{86400 * 7}; 	// 1 week (soft limit)
-	size_t flushIntervalMsgs{0}; 		// never
-	size_t flushIntervalSecs{0}; 		// never
+        size_t maxIndexSize{10 * 1024 * 1024};
+        size_t maxRollJitterSecs{0};
+        size_t lastSegmentMaxAge{86400 * 7}; // 1 week (soft limit)
+        size_t curSegmentMaxAge{86400 * 7};  // 1 week (soft limit)
+        size_t flushIntervalMsgs{0};         // never
+        size_t flushIntervalSecs{0};         // never
 } config;
 
 static void PrintImpl(Buffer &out, const lookup_res &res)
@@ -246,12 +243,12 @@ struct topic_partition_log
                 // This is always initialized to UINT32_MAX, so that we always index the first bundle in the segment, for impl.simplicity
                 uint32_t sinceLastUpdate;
 
-		// Computed whenever we roll/create a new mutable segment
-		uint32_t rollJitterSecs;
+                // Computed whenever we roll/create a new mutable segment
+                uint32_t rollJitterSecs;
 
-		// When this was created, in seconds
-		uint32_t createdTS;
-		bool nameEncodesTS;
+                // When this was created, in seconds
+                uint32_t createdTS;
+                bool nameEncodesTS;
 
                 struct
                 {
@@ -279,23 +276,22 @@ struct topic_partition_log
 
                 } index;
 
-
-		struct
-		{
-			uint64_t pendingFlushMsgs{0};
-			uint32_t nextFlushTS;
-		} flush_state;
+                struct
+                {
+                        uint64_t pendingFlushMsgs{0};
+                        uint32_t nextFlushTS;
+                } flush_state;
 
         } cur; // the _current_ (latest) segment
 
-	partition_config config;
+        partition_config config;
 
         // a topic partition is comprised of a set of segments(log file, index file) which
         // are immutable, and we don't need to serialize access to them, and a cur(rent) segment, which is not immutable.
         //
         // roSegments can also be atomically exchanged with a new vector, so we don't need to protect that either
         // make sure roSegments is sorted
-	std::shared_ptr<Switch::vector<ro_segment *>> roSegments;
+        std::shared_ptr<Switch::vector<ro_segment *>> roSegments;
 
         ~topic_partition_log()
         {
@@ -306,15 +302,15 @@ struct topic_partition_log
                 }
         }
 
-	lookup_res read_cur(const uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum);
+        lookup_res read_cur(const uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum);
 
-	lookup_res range_for(uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum);
+        lookup_res range_for(uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum);
 
         append_res append_bundle(const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt);
 
-	bool should_roll(const uint32_t) const;
+        bool should_roll(const uint32_t) const;
 
-	void schedule_flush(const uint32_t);
+        void schedule_flush(const uint32_t);
 
         void consider_ro_segments();
 };
@@ -391,7 +387,7 @@ struct topic_partition
 #ifndef LEAN_SWITCH
         Switch::unordered_map<uint16_t, replica *, ReleaseRefDestructor> replicasMap;
 #else
-	Switch::unordered_map<uint16_t, replica *> replicasMap;
+        Switch::unordered_map<uint16_t, replica *> replicasMap;
 #endif
 
         Switch::vector<replica *> insyncReplicas;
@@ -412,7 +408,7 @@ struct topic_partition
 
         append_res append_bundle_to_leader(const uint8_t *const bundle, const size_t bundleLen, const uint8_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL);
 
-	lookup_res read_from_local(const bool fetchOnlyFromLeader, const bool fetchOnlyComittted, const uint64_t absSeqNum, const uint32_t fetchSize);
+        lookup_res read_from_local(const bool fetchOnlyFromLeader, const bool fetchOnlyComittted, const uint64_t absSeqNum, const uint32_t fetchSize);
 };
 
 struct topic
@@ -437,10 +433,10 @@ struct topic
                 if (auto *const p = const_cast<char *>(name_.p))
                         free(p);
 
-		if (partitions_)
+                if (partitions_)
                 {
                         while (partitions_->size())
-                                 partitions_->Pop()->Release();
+                                partitions_->Pop()->Release();
 
                         delete partitions_;
                 }
@@ -507,7 +503,7 @@ struct outgoing_queue
                         payloadBuf = false;
                         file_range.fdh = fdh;
                         file_range.range = r;
-			file_range.fdh->Retain();
+                        file_range.fdh->Retain();
                 }
 
                 payload &operator=(const payload &o)
@@ -764,7 +760,7 @@ class Service
                         throw Switch::exception("Topic ", t->name(), " already registered");
         }
 
-        Switch::shared_refptr<topic_partition> init_local_partition(const uint16_t idx, const char *const bp, const partition_config&);
+        Switch::shared_refptr<topic_partition> init_local_partition(const uint16_t idx, const char *const bp, const partition_config &);
 
         bool isValidBrokerId(const uint16_t replicaId)
         {
@@ -779,10 +775,10 @@ class Service
         const topic_partition *getPartition(const strwlen8_t topic, const uint16_t partitionIdx) const
         {
 #ifdef LEAN_SWITCH
-		const auto it = topics.find(topic);
+                const auto it = topics.find(topic);
 
-		if (it != topics.end())
-			return it->second->partition(partitionIdx);
+                if (it != topics.end())
+                        return it->second->partition(partitionIdx);
 #else
                 if (const auto t = topics[topic])
                         return t->partition(partitionIdx);
@@ -828,7 +824,7 @@ class Service
 
         void destroy_wait_ctx(wait_ctx *const wctx);
 
-	void cleanup_connection(connection *);
+        void cleanup_connection(connection *);
 
         bool shutdown(connection *const c, const uint32_t ref);
 
@@ -852,7 +848,7 @@ class Service
                 switch_dlist_init(&waitExpList);
         }
 
-	~Service();
+        ~Service();
 
         int start(int argc, char **argv);
 };
