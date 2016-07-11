@@ -9,6 +9,7 @@
 #include <switch_mallocators.h>
 #include <switch_vector.h>
 #include <vector>
+#include <atomic>
 
 // Tank, because its a large container of liquid or gas
 // and data flow (as in, liquid), and also, this is a Trinity character name
@@ -247,6 +248,8 @@ class TankClient
         uint32_t nextConsumeReqId{1}, nextProduceReqId{1};
         Switch::vector<connection *> connectionAttempts, connsList;
         EPoller poller;
+	int pipeFd[2];
+	std::atomic<bool> polling{false};
         Switch::vector<connection *> connectionsPool;
         Switch::vector<outgoing_payload *> payloadsPool;
         Switch::vector<IOBuffer *> buffersPool;
@@ -372,10 +375,7 @@ class TankClient
         }
 
       public:
-        TankClient()
-        {
-                switch_dlist_init(&connections);
-        }
+        TankClient();
 
         ~TankClient();
 
@@ -421,6 +421,8 @@ class TankClient
         }
 
         void set_topic_leader(const strwlen8_t topic, const strwlen32_t e);
+
+	void interrupt_poll();
 };
 
 #ifdef LEAN_SWITCH

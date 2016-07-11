@@ -227,5 +227,3 @@ Immediately upon connecting, the first request from a replica(follower) should b
 msgId `0x3`  
 
 This message has no payload. The broker is expected to immediately ping any client or broker that connects to it, and periodically do so as a hearbeat. The client should consider the connection to a broker successfull only as soon as it has received a ping from the broker.
-
-

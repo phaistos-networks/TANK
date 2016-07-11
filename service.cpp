@@ -362,7 +362,8 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
                 }
 
 #if 0
-		res.fileOffsetCeiling = ref.absPhysical;
+		res.fileOffsetCeiling = ref.absPhysical; 	// XXX: we actually need to set this to (it + 1).absPhysical so that we may not skip a bundle that includes
+								// both the highwater mark but also messages with seqnum < highwater mark
 #else
 		// Yes, incur some tiny I/O overhead so that we 'll properly cut-off the content
                 res.fileOffsetCeiling = search_before_offset(cur.baseSeqNum, maxSize, maxAbsSeqNum, cur.fdh->fd, cur.fileSize, ref.absPhysical);
@@ -487,7 +488,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
                                 SLog("maxAbsSeqNum = ", maxAbsSeqNum, " => ", r, "\n");
 
 #if 0
-			offsetCeil = r.second;
+			offsetCeil = r.second;  // XXX: we actually need to set this to (it + 1).absPhysical
 #else
                         // Yes, incur some tiny I/O overhead so that we 'll properly cut-off the content
                         offsetCeil = search_before_offset(f->baseSeqNum, maxSize, maxAbsSeqNum, f->fdh->fd, f->fileSize, r.second);

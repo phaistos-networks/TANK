@@ -2,6 +2,7 @@
 #include <switch_algorithms.h>
 #include <sys/uio.h>
 #include <text.h>
+#include <unistd.h>
 
 static constexpr bool trace{false};
 
@@ -29,6 +30,15 @@ void TankClient::bind_fd(connection *const c, int fd)
         c->state.lastOutputTS = c->state.lastInputTS;
         connectionAttempts.push_back(c);
         c->pendingResponses = 0;
+}
+
+TankClient::TankClient()
+{
+	switch_dlist_init(&connections);
+	if (pipe2(pipeFd, O_CLOEXEC) == -1)
+		throw Switch::system_error("pipe() failed:", strerror(errno));
+
+	poller.AddFd(pipeFd[0], POLLIN, &pipeFd[0]);
 }
 
 TankClient::~TankClient()
@@ -83,6 +93,11 @@ TankClient::~TankClient()
 
         while (buffersPool.size())
                 delete buffersPool.Pop();
+
+	if (pipeFd[0] != -1)
+		close(pipeFd[0]);
+	if (pipeFd[1] != -1)
+		close(pipeFd[1]);
 }
 
 uint8_t TankClient::choose_compression_codec(const msg *const msgs, const size_t msgsCnt)
@@ -1385,7 +1400,11 @@ void TankClient::poll(uint32_t timeoutMS)
                 timeoutMS = first >= nowMS ? first - nowMS : 0;
         }
 
+	polling.store(true, std::memory_order_relaxed);
+
         const auto r = poller.Poll(timeoutMS);
+
+	polling.store(false, std::memory_order_relaxed);
 
         if (r == -1)
         {
@@ -1410,6 +1429,42 @@ void TankClient::poll(uint32_t timeoutMS)
                 if (events & (POLLERR | POLLHUP))
                 {
                         shutdown(c, __LINE__, true);
+                        continue;
+                }
+
+		if (c->fd == pipeFd[0])
+                {
+                        if (events & POLLIN)
+                        {
+                                // drain it
+                                int n;
+                                char buf[512];
+				int fd = c->fd;
+
+                                if (unlikely(ioctl(fd, FIONREAD, &n) == -1))
+                                        throw Switch::system_error("ioctl() failed:", strerror(errno));
+
+                                do
+                                {
+                                        const auto r = read(fd, buf, sizeof(buf));
+
+                                        if (r == -1)
+                                        {
+                                                if (errno != EAGAIN && errno != EINTR)
+							throw Switch::system_error("Unable to drain pipe:", strerror(errno));
+                                                else
+                                                        break;
+                                        }
+                                        else if (!r)
+                                        {
+						break;
+                                        }
+                                        else
+                                                n -= r;
+
+                                } while (n);
+                        }
+
                         continue;
                 }
 
@@ -1560,4 +1615,13 @@ uint32_t TankClient::consume(const std::vector<
         }
 
         return clientReqId;
+}
+
+
+void TankClient::interrupt_poll()
+{
+	bool to{true};
+
+	if (polling.compare_exchange_weak(to, false, std::memory_order_release, std::memory_order_relaxed))
+		write(pipeFd[1], " ", 1);
 }
