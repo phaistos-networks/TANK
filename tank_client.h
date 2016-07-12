@@ -423,6 +423,11 @@ class TankClient
         void set_topic_leader(const strwlen8_t topic, const strwlen32_t e);
 
 	void interrupt_poll();
+
+	bool should_poll() const
+	{
+		return connectionAttempts.size() || pendingConsumeReqs.size() || pendingProduceReqs.size();
+	}
 };
 
 #ifdef LEAN_SWITCH

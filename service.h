@@ -693,6 +693,11 @@ struct connection
 class Service
 {
       private:
+      	enum class OperationMode  : uint8_t 
+	{
+		Standalone = 0,
+		Clustered
+	} opMode{OperationMode::Standalone};
         Switch::vector<wait_ctx *> waitCtxPool[255];
 #ifndef LEAN_SWITCH
         Switch::unordered_map<strwlen8_t, topic *, ReleaseRefDestructor> topics;

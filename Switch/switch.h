@@ -120,4 +120,14 @@ static inline T Max(const T a, const T b)
 #define Auto_INTERNAL2(ctr, ...) Auto_INTERNAL1(TOKEN_PASTE(Auto_func_, ctr), TOKEN_PASTE(Auto_Instance_, ctr), __VA_ARGS__)
 #define Defer(...) Auto_INTERNAL2(__COUNTER__, __VA_ARGS__)
 
+#define IMPLEMENT_ME()                                                                         \
+        do                                                                                     \
+        {                                                                                      \
+                Print(ansifmt::bold, ansifmt::color_red, "Implementation Missing", ansifmt::reset, " at ", __FILE__, ":", __LINE__, ": Will Exit\n"); \
+                std::abort();                                                                  \
+        } while (0)
+
+#define IMPLEMENT_ME_NOEXIT() Print(ansifmt::bold, ansifmt::color_red, "WARNING: Implementation Missing", ansifmt::reset, " at ", __FILE__, ":", __LINE__, "\n")
+
+
 #include "switch_exceptions.h"

@@ -601,6 +601,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
 }
 
 // XXX: make sure this reflects the latest encoding scheme
+// This is somewhat complex, because of boundary checks - can and will simplify later
 bool TankClient::process_consume(connection *const c, const uint8_t *const content, const size_t len)
 {
         const auto *p = content;
@@ -702,6 +703,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                         if (trace)
                                                 SLog("firstAvailSeqNum = ", firstAvailSeqNum, "\n");
+
                                         capturedFaults.push_back({clientReqId, fault::Type::BoundaryCheck, fault::Req::Consume, topicName, partitionId, {{firstAvailSeqNum, highWaterMark}}});
                                 }
                                 else
@@ -711,6 +713,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                 continue;
                         }
+
+
 
                         const auto bundlesForThisTopicPartition = bundles;
                         uint32_t lastPartialMsgMinFetchSize{128};
@@ -730,6 +734,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 {
                                         if (trace)
                                                 SLog("boundaries\n");
+
                                         break;
                                 }
 
@@ -747,6 +752,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                         if (trace)
                                                 SLog("boundaries\n");
+
                                         break;
                                 }
 
@@ -848,7 +854,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                 // Parse the bundle's message set
                                 // if this a compressed messages set, the boundary checks are not necessary
-                                for (const auto *p = msgSetContent.offset, *const endOfMsgSet = p + msgSetContent.len; ;)
+                                for (const auto *p = msgSetContent.offset, *const endOfMsgSet = p + msgSetContent.len;;)
                                 {
                                         // parse next bundle message
                                         if (p + sizeof(uint8_t) > endOfMsgSet)
@@ -858,7 +864,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                 if (trace)
                                                         SLog("Boundaries\n");
 
-                                                goto next;
+                                                goto nextPartition;
                                         }
 
                                         const auto msgFlags = *p++; // msg.flags
@@ -881,7 +887,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                         if (trace)
                                                                 SLog("Boundaries\n");
 
-                                                        goto next;
+                                                        goto nextPartition;
                                                 }
 
                                                 ts = *(uint64_t *)p; // msg.timestamp
@@ -897,7 +903,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                         if (trace)
                                                                 SLog("Boundaries\n");
 
-                                                        goto next;
+                                                        goto nextPartition;
                                                 }
                                                 else
                                                 {
@@ -910,7 +916,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                                 if (trace)
                                                                         SLog("Boundaries\n");
 
-                                                                goto next;
+                                                                goto nextPartition;
                                                         }
                                                         else
                                                         {
@@ -929,7 +935,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                 if (trace)
                                                         SLog("Boundaries\n");
 
-                                                goto next;
+                                                goto nextPartition;
                                         }
 
                                         const auto len = Compression::UnpackUInt32(p); // message.length
@@ -941,7 +947,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                 if (trace)
                                                         SLog("Boundaries(", len, " => ", lastPartialMsgMinFetchSize, ")\n");
 
-                                                goto next;
+                                                goto nextPartition;
                                         }
 
                                         const auto msgAbsSeqNum = logBaseSeqNum++; // This message's absolute sequence number
@@ -954,7 +960,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                 if (trace)
                                                         SLog("Reached past high water mark(last assigned sequence number) ", msgAbsSeqNum, " > ", highWaterMark, "\n");
 
-                                                goto next;
+                                                goto nextPartition;
                                         }
                                         else if (requestedSeqNum == UINT64_MAX || msgAbsSeqNum >= requestedSeqNum)
                                         {
@@ -985,11 +991,10 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         }
 
                                         p += len;
-
                                 }
                         }
 
-                next:
+                nextPartition:
                         // It's possible that next is what we requested already, if
                         // we couldn't parse a single message from any bundle for this (topic, partition)  - i.e consumptionsList.empty() == true
                         const auto next = consumptionList.size() ? Max(requestedSeqNum, consumptionList.back().seqNum + 1) : requestedSeqNum;

@@ -14,6 +14,11 @@
 #include <timings.h>
 #include <unistd.h>
 
+// From SENDFILE(2): The  original  Linux  sendfile() system call was not designed to handle large file offsets.  
+// Consequently, Linux 2.4 added sendfile64(), with a wider type for the offset argument.  
+// The glibc sendfile() wrapper function transparently deals with the kernel differences.
+#define HAVE_SENDFILE64 1
+
 static constexpr bool trace{false};
 
 static Switch::mutex mboxLock;
@@ -768,6 +773,8 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
         Switch::shared_refptr<fd_handle> fdh(cur.fdh);
 
         require(cur.fdh.use_count() == before + 1);
+
+	// https://github.com/phaistos-networks/TANK/issues/14
         if (writev(fd, iov, sizeof_array(iov)) != entryLen)
         {
                 RFLog("Failed to writev():", strerror(errno), "\n");
@@ -817,6 +824,11 @@ void topic_partition_log::schedule_flush(const uint32_t now)
         mboxLock.unlock();
 }
 
+// XXX: this works great for standalone mode, but when the highwater mark is based on an ISR, which means
+// it doesn't get incremented immediately as soon as the leader appends the bundle to its local segment, waking up
+// any waiting consumers is not going to work. We likely need to do this only iff running in standalone mode, otherwise
+// only when the highwater mark is updated.
+// i.e opMode == OperationMode::Standalone
 void topic_partition::consider_append_res(append_res &res, Switch::vector<wait_ctx *> &waitCtxWorkL)
 {
         bool newLogFile{false};
@@ -1867,6 +1879,7 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                                 _exit(1);
                         }
 
+
                         if (trace)
                                 SLog("Took ", duration_repr(Timings::Microseconds::Since(b)), " for ", msgSetSize, " msgs in bundle message set: ", expiredCtxList.size(), "\n");
 
@@ -2253,11 +2266,17 @@ bool Service::try_send(connection *const c)
                 }
                 else
                 {
+			// https://github.com/phaistos-networks/TANK/issues/14
                         for (;;)
                         {
                                 auto &range = it.file_range.range;
+#ifdef HAVE_SENDFILE64
+                                off64_t offset = range.offset;
+                                auto r = sendfile64(fd, it.file_range.fdh->fd, &offset, range.len);
+#else
                                 off_t offset = range.offset;
                                 auto r = sendfile(fd, it.file_range.fdh->fd, &offset, range.len);
+#endif
 
                                 if (trace)
                                         SLog("Sending contents ", range, " => ", r, "\n");
@@ -2419,9 +2438,8 @@ int Service::start(int argc, char **argv)
                 Print(basePath_, " not a directory\n");
                 return 1;
         }
-        else
+        else if (opMode == OperationMode::Standalone)
         {
-                // TODO: only if running in standalone mode; otherwise interface with the etcd cluster for configuration
                 try
                 {
                         const auto basePathLen = basePath_.length();
@@ -2497,6 +2515,10 @@ int Service::start(int argc, char **argv)
                         return 1;
                 }
         }
+	else if (opMode == OperationMode::Clustered)
+	{
+		IMPLEMENT_ME();
+	}
 
         if (topics.empty())
         {
