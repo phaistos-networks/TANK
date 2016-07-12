@@ -416,9 +416,10 @@ struct topic
 {
         const strwlen8_t name_;
         Switch::vector<topic_partition *> *partitions_;
+	partition_config partitionConf;
 
-        topic(const strwlen8_t name)
-            : name_{name.Copy(), name.len}
+        topic(const strwlen8_t name, const partition_config c)
+            : name_{name.Copy(), name.len}, partitionConf{c}
         {
                 partitions_ = new Switch::vector<topic_partition *>();
         }
@@ -446,12 +447,28 @@ struct topic
         {
                 p->owner = this;
                 partitions_->push_back(p);
+
                 std::sort(partitions_->begin(), partitions_->end(), [](const auto a, const auto b) {
                         return a->idx < b->idx;
                 });
 
                 require(partitions_->back()->idx == partitions_->size() - 1);
         }
+
+	void register_partitions(topic_partition **const all, const size_t n)
+	{
+		for (uint32_t i{0}; i != n; ++i)
+		{
+			all[i]->owner = this;
+			partitions_->push_back(all[i]);
+		}
+
+                std::sort(partitions_->begin(), partitions_->end(), [](const auto a, const auto b) {
+                        return a->idx < b->idx;
+                });
+
+                require(partitions_->back()->idx == partitions_->size() - 1);
+	}
 
         const topic_partition *partition(const uint16_t idx) const
         {

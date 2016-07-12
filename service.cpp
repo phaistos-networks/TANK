@@ -13,6 +13,7 @@
 #include <thread>
 #include <timings.h>
 #include <unistd.h>
+#include <future>
 
 // From SENDFILE(2): The  original  Linux  sendfile() system call was not designed to handle large file offsets.  
 // Consequently, Linux 2.4 added sendfile64(), with a wider type for the offset argument.  
@@ -2443,6 +2444,8 @@ int Service::start(int argc, char **argv)
                 try
                 {
                         const auto basePathLen = basePath_.length();
+			static constexpr bool asyncStartup{true};
+			std::vector<std::pair<topic *, size_t>> pendingPartitions;
 
                         for (const auto &&name : DirectoryEntries(basePath_.data()))
                         {
@@ -2490,17 +2493,22 @@ int Service::start(int argc, char **argv)
                                                 if (min != 0 && max != partitionsCnt - 1)
                                                         throw Switch::system_error("Unexpected partitions list; expected [0, ", partitionsCnt - 1, "]");
 
-                                                auto t = Switch::make_sharedref(new topic(name));
+                                                auto t = Switch::make_sharedref(new topic(name, partitionConfig));
 
-                                                for (uint16_t i{0}; i != partitionsCnt; ++i)
+						if (asyncStartup)
+							pendingPartitions.push_back({t.get(), partitionsCnt});
+						else
                                                 {
-                                                        basePath_.SetLength(topicBasePathLen);
-                                                        basePath_.append("/", i);
-                                                        auto partition = init_local_partition(i, basePath_.data(), partitionConfig);
+                                                        for (uint16_t i{0}; i != partitionsCnt; ++i)
+                                                        {
+                                                                basePath_.SetLength(topicBasePathLen);
+                                                                basePath_.append("/", i);
+                                                                auto partition = init_local_partition(i, basePath_.data(), partitionConfig);
 
-                                                        t->register_partition(partition.release());
-                                                        basePath_.SetLength(topicBasePathLen);
-                                                        ++totalPartitions;
+                                                                t->register_partition(partition.release());
+                                                                basePath_.SetLength(topicBasePathLen);
+                                                                ++totalPartitions;
+                                                        }
                                                 }
 
                                                 register_topic(t.release());
@@ -2508,12 +2516,85 @@ int Service::start(int argc, char **argv)
                                 }
                         }
                         basePath_.SetLength(basePathLen);
+
+                        if (asyncStartup && pendingPartitions.size())
+                        {
+				static constexpr bool trace{false};
+                                std::mutex lock;
+                                std::vector<std::future<void>> futures;
+                                std::vector<std::pair<topic *, Switch::shared_refptr<topic_partition>>> list;
+				uint64_t before;
+
+				if (trace)
+					SLog("pendingPartitions.size() = ", pendingPartitions.size(), "\n");
+
+                                for (auto &it : pendingPartitions)
+                                {
+                                        auto t = it.first;
+
+                                        for (uint16_t i{0}; i != it.second; ++i)
+                                        {
+                                                futures.push_back(std::async([&list, &lock, &basePath_ = basePath_, this ](topic *t, const uint16_t partition) {
+                                                        char path[PATH_MAX];
+
+                                                        Snprint(path, sizeof(path), basePath_.data(), "/", t->name_, "/", partition, "/");
+                                                        auto p = init_local_partition(partition, path, t->partitionConf);
+
+                                                        lock.lock();
+                                                        list.push_back({t, std::move(p)});
+                                                        lock.unlock();
+
+                                                },
+                                                                             t, i));
+                                        }
+                                }
+
+				if (trace)
+				{
+					SLog("futures.size() = ", futures.size(), "\n");
+					before = Timings::Microseconds::Tick();
+				}
+
+                                for (auto &it : futures)
+                                        it.get();
+
+				if (trace)
+					SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " for all partitions\n");
+
+                                std::sort(list.begin(), list.end(), [](const auto &a, const auto &b) {
+                                        return uintptr_t(a.first) < uintptr_t(b.first);
+                                });
+
+				const auto n = list.size();
+				std::vector<topic_partition *> partitions;
+
+				if (trace)
+					before = Timings::Microseconds::Tick();
+
+				for (uint32_t i{0}; i != n; )
+				{
+					auto t = list[i].first;
+
+					do
+					{
+						partitions.push_back(list[i].second.release());
+					} while (++i != n && list[i].first == t);
+
+					t->register_partitions(partitions.data(), partitions.size());
+					totalPartitions += partitions.size();
+					partitions.clear();
+				}
+
+				if (trace)
+					SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " to initialize all partitions\n");
+                        }
                 }
                 catch (const std::exception &e)
                 {
                         Print("Failed to initialize topics and partitions:", e.what(), "\n");
                         return 1;
                 }
+
         }
 	else if (opMode == OperationMode::Clustered)
 	{
