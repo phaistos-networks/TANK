@@ -8,12 +8,6 @@ RUN apk add --update \
 	    jemalloc \
 	    && rm -rf /var/cache/apk/*
 
-	    #git \
-	    #musl \
-	    #musl-dev \
-	    #libstdc++ \
-#ENV CXX=/usr/bin/clang++
-
 RUN mkdir -p /TANK
 ADD Makefile *.cpp *.h /TANK/
 ADD Switch /TANK/Switch/
