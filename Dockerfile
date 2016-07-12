@@ -15,7 +15,7 @@ ADD Switch /TANK/Switch/
 RUN cd /TANK \
 	&& sed -i -e s#-Wno-invalid-source-encoding##  Makefile \
 	&& make all \
-	&& mv tank app /usr/local/bin \
+	&& mv tank tank-cli /usr/local/bin \
 	&& rm -rf /TANK
 
 RUN mkdir -p /data
