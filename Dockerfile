@@ -1,17 +1,20 @@
-FROM ubuntu:xenial
+FROM alpine:latest
 MAINTAINER Phaistos Networks
 
-RUN apt update \
-	&& apt -y dist-upgrade \
-	&& apt -y install git clang++-3.8 make zlib1g-dev \
-	&& apt clean
+RUN apk add --update \
+	    zlib-dev \
+	    make \
+	    g++ \
+	    jemalloc \
+	    && rm -rf /var/cache/apk/*
 
+RUN mkdir -p /TANK
+ADD Makefile *.cpp *.h /TANK/
+ADD Switch /TANK/Switch/
 
-ENV CXX=/usr/bin/clang++-3.8
-
-RUN git clone https://github.com/phaistos-networks/TANK.git
-WORKDIR /TANK
-RUN make all \
+RUN cd /TANK \
+	&& sed -i -e s#-Wno-invalid-source-encoding##  Makefile \
+	&& make all \
 	&& mv tank app /usr/local/bin \
 	&& rm -rf /TANK
 
