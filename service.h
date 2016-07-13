@@ -759,8 +759,13 @@ class Service
 
         void put_buffer(IOBuffer *b)
         {
-                b->clear();
-                bufs.push_back(b);
+		if (b->Reserved() > 800*1024 || bufs.size() > 16)
+			delete b;
+		else
+                {
+                        b->clear();
+                        bufs.push_back(b);
+                }
         }
 
         auto get_connection()
@@ -775,7 +780,11 @@ class Service
                         put_buffer(c->inB);
                         c->inB = nullptr;
                 }
-                connsPool.push_back(c);
+
+		if (connsPool.size() > 16)
+			delete c;
+		else
+	                connsPool.push_back(c);
         }
 
         void register_topic(topic *const t)

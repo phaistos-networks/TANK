@@ -539,6 +539,13 @@ void TankClient::track_na_broker(broker *const bs)
         if (trace)
                 SLog("N/A broker, current reachability ", uint8_t(bs->reachability), ", retries = ", bs->block_ctx.retries, "\n");
 
+	if (retryStrategy == RetryStrategy::RetryNever)
+        {
+                bs->set_reachability(broker::Reachability::Unreachable);
+                bs->block_ctx.until = nowMS + Timings::Seconds::ToMillis(8);
+                return;
+        }
+
         if (bs->reachability == broker::Reachability::MaybeReachable)
         {
                 if (ctx->retries >= 3)

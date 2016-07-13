@@ -742,6 +742,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                         SLog("Switched\n");
         }
 
+	// XXX: maybe we should update the index _after_ the log
         if (cur.sinceLastUpdate > config.indexInterval)
         {
                 const uint32_t out[] = {uint32_t(absSeqNum - cur.baseSeqNum), cur.fileSize};
@@ -2462,150 +2463,160 @@ int Service::start(int argc, char **argv)
         {
                 try
                 {
+			// We will parallelize this across multiple threads so that we can support many thousands of topics and partitions
+			// without incurring a long startup-sequence time
                         const auto basePathLen = basePath_.length();
-			static constexpr bool asyncStartup{true};
-			std::vector<std::pair<topic *, size_t>> pendingPartitions;
+                        std::vector<std::pair<topic *, size_t>> pendingPartitions;
+                        uint64_t before;
+                        simple_allocator a{8192};
+                        std::vector<strwlen8_t> collectedTopics;
+                        std::vector<std::future<void>> futures;
+                        std::mutex collectLock;
+
+                        if (trace)
+                                before = Timings::Microseconds::Tick();
 
                         for (const auto &&name : DirectoryEntries(basePath_.data()))
                         {
-                                if (*name.p == '.')
-                                        continue;
-
-                                basePath_.SetLength(basePathLen);
-                                basePath_.append("/", name);
-
-                                if (stat64(basePath_.data(), &st) == -1)
-                                        throw Switch::system_error("Failed to stat(", basePath_, "): ", strerror(errno));
-                                else if (st.st_mode & S_IFDIR)
-                                {
-                                        const auto topicBasePathLen = basePath_.length();
-                                        uint32_t partitionsCnt{0}, min{UINT32_MAX}, max{0};
-                                        partition_config partitionConfig;
-
-                                        for (const auto &&name : DirectoryEntries(basePath_.data()))
-                                        {
-                                                basePath_.SetLength(topicBasePathLen);
-                                                basePath_.append("/", name);
-
-                                                if (name.Eq(_S("config")))
-                                                {
-                                                        // topic overrides defaults
-                                                        parse_partition_config(basePath_.data(), &partitionConfig);
-                                                }
-                                                else if (name.IsDigits())
-                                                {
-                                                        if (stat64(basePath_.data(), &st) == -1)
-                                                                throw Switch::system_error("Failed to stat(", basePath_, "): ", strerror(errno));
-                                                        else if (st.st_mode & S_IFDIR)
-                                                        {
-                                                                const auto id = name.AsUint32();
-
-                                                                min = std::min<uint32_t>(min, id);
-                                                                max = std::max<uint32_t>(max, id);
-                                                                ++partitionsCnt;
-                                                        }
-                                                }
-                                        }
-
-                                        if (partitionsCnt)
-                                        {
-                                                if (min != 0 && max != partitionsCnt - 1)
-                                                        throw Switch::system_error("Unexpected partitions list; expected [0, ", partitionsCnt - 1, "]");
-
-                                                auto t = Switch::make_sharedref(new topic(name, partitionConfig));
-
-						if (asyncStartup)
-							pendingPartitions.push_back({t.get(), partitionsCnt});
-						else
-                                                {
-                                                        for (uint16_t i{0}; i != partitionsCnt; ++i)
-                                                        {
-                                                                basePath_.SetLength(topicBasePathLen);
-                                                                basePath_.append("/", i);
-                                                                auto partition = init_local_partition(i, basePath_.data(), partitionConfig);
-
-                                                                t->register_partition(partition.release());
-                                                                basePath_.SetLength(topicBasePathLen);
-                                                                ++totalPartitions;
-                                                        }
-                                                }
-
-                                                register_topic(t.release());
-                                        }
-                                }
+                                if (*name.p != '.')
+                                        collectedTopics.push_back({a.CopyOf(name.p, name.len), name.len});
                         }
+
+			if (trace)
+				SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " for initial walk ", collectedTopics.size(), "\n");
+
+                        for (const auto &it : collectedTopics)
+                        {
+                                futures.push_back(std::async([&collectLock, &basePath_ = basePath_, this, &pendingPartitions ](const strwlen8_t name) {
+                                        char path[PATH_MAX];
+                                        struct stat64 st;
+                                        const auto len = Snprint(path, sizeof(path), basePath_, "/", name, "/");
+
+                                        if (stat64(path, &st) == -1)
+                                                throw Switch::system_error("Failed to stat(", basePath_, "): ", strerror(errno));
+                                        else if (st.st_mode & S_IFDIR)
+                                        {
+                                                uint32_t partitionsCnt{0}, min{UINT32_MAX}, max{0};
+                                                partition_config partitionConfig;
+
+                                                for (const auto &&name : DirectoryEntries(path))
+                                                {
+                                                        name.ToCString(path + len);
+
+                                                        if (name.Eq(_S("config")))
+                                                        {
+                                                                // topic overrides defaults
+                                                                parse_partition_config(path, &partitionConfig);
+                                                        }
+                                                        else if (name.IsDigits())
+                                                        {
+                                                                if (stat64(path, &st) == -1)
+                                                                        throw Switch::system_error("Failed to stat(", basePath_, "): ", strerror(errno));
+                                                                else if (st.st_mode & S_IFDIR)
+                                                                {
+                                                                        const auto id = name.AsUint32();
+
+                                                                        min = std::min<uint32_t>(min, id);
+                                                                        max = std::max<uint32_t>(max, id);
+                                                                        ++partitionsCnt;
+                                                                }
+                                                        }
+                                                }
+
+                                                if (partitionsCnt)
+                                                {
+                                                        if (min != 0 && max != partitionsCnt - 1)
+                                                                throw Switch::system_error("Unexpected partitions list; expected [0, ", partitionsCnt - 1, "]");
+
+
+                                                        auto t = Switch::make_sharedref(new topic(name, partitionConfig));
+
+                                                        collectLock.lock();
+                                                        pendingPartitions.push_back({t.get(), partitionsCnt});
+                                                        register_topic(t.release());
+                                                        collectLock.unlock();
+                                                }
+                                        }
+
+                                }, it));
+                        }
+
+                        for (auto &it : futures)
+                                it.get();
+
                         basePath_.SetLength(basePathLen);
 
-                        if (asyncStartup && pendingPartitions.size())
+                        if (trace)
+                                SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " for topics\n");
+
+                        if (pendingPartitions.size())
                         {
-				static constexpr bool trace{false};
-                                std::mutex lock;
-                                std::vector<std::future<void>> futures;
+                                static constexpr bool trace{false};
                                 std::vector<std::pair<topic *, Switch::shared_refptr<topic_partition>>> list;
-				uint64_t before;
 
-				if (trace)
-					SLog("pendingPartitions.size() = ", pendingPartitions.size(), "\n");
+                                if (trace)
+                                        SLog("pendingPartitions.size() = ", pendingPartitions.size(), "\n");
 
+                                futures.clear();
                                 for (auto &it : pendingPartitions)
                                 {
                                         auto t = it.first;
 
                                         for (uint16_t i{0}; i != it.second; ++i)
                                         {
-                                                futures.push_back(std::async([&list, &lock, &basePath_ = basePath_, this ](topic *t, const uint16_t partition) {
+                                                futures.push_back(std::async([&list, &collectLock, &basePath_ = basePath_, this ](topic * t, const uint16_t partition) {
                                                         char path[PATH_MAX];
 
                                                         Snprint(path, sizeof(path), basePath_.data(), "/", t->name_, "/", partition, "/");
                                                         auto p = init_local_partition(partition, path, t->partitionConf);
 
-                                                        lock.lock();
+                                                        collectLock.lock();
                                                         list.push_back({t, std::move(p)});
-                                                        lock.unlock();
+                                                        collectLock.unlock();
 
                                                 },
                                                                              t, i));
                                         }
                                 }
 
-				if (trace)
-				{
-					SLog("futures.size() = ", futures.size(), "\n");
-					before = Timings::Microseconds::Tick();
-				}
+                                if (trace)
+                                {
+                                        SLog("futures.size() = ", futures.size(), "\n");
+                                        before = Timings::Microseconds::Tick();
+                                }
 
                                 for (auto &it : futures)
                                         it.get();
 
-				if (trace)
-					SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " for all partitions\n");
+                                if (trace)
+                                        SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " for all partitions\n");
 
                                 std::sort(list.begin(), list.end(), [](const auto &a, const auto &b) {
                                         return uintptr_t(a.first) < uintptr_t(b.first);
                                 });
 
-				const auto n = list.size();
-				std::vector<topic_partition *> partitions;
+                                const auto n = list.size();
+                                std::vector<topic_partition *> partitions;
 
-				if (trace)
-					before = Timings::Microseconds::Tick();
+                                if (trace)
+                                        before = Timings::Microseconds::Tick();
 
-				for (uint32_t i{0}; i != n; )
-				{
-					auto t = list[i].first;
+                                for (uint32_t i{0}; i != n;)
+                                {
+                                        auto t = list[i].first;
 
-					do
-					{
-						partitions.push_back(list[i].second.release());
-					} while (++i != n && list[i].first == t);
+                                        do
+                                        {
+                                                partitions.push_back(list[i].second.release());
+                                        } while (++i != n && list[i].first == t);
 
-					t->register_partitions(partitions.data(), partitions.size());
-					totalPartitions += partitions.size();
-					partitions.clear();
-				}
+                                        t->register_partitions(partitions.data(), partitions.size());
+                                        totalPartitions += partitions.size();
+                                        partitions.clear();
+                                }
 
-				if (trace)
-					SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " to initialize all partitions\n");
+                                if (trace)
+                                        SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " to initialize all partitions\n");
                         }
                 }
                 catch (const std::exception &e)
@@ -2613,9 +2624,8 @@ int Service::start(int argc, char **argv)
                         Print("Failed to initialize topics and partitions:", e.what(), "\n");
                         return 1;
                 }
-
         }
-	else if (opMode == OperationMode::Clustered)
+        else if (opMode == OperationMode::Clustered)
 	{
 		IMPLEMENT_ME();
 	}
@@ -2632,6 +2642,12 @@ int Service::start(int argc, char **argv)
         Print("(C) Phaistos Networks, S.A. - ", ansifmt::color_green, "http://phaistosnetworks.gr/", ansifmt::reset, ". Licensed under the Apache License\n");
 
         listenFd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+
+	if (listenFd == -1)
+        {
+                Print("socket() failed:", strerror(errno), "\n");
+                return 1;
+        }
 
         require(listenFd != -1);
 
@@ -2670,7 +2686,6 @@ int Service::start(int argc, char **argv)
 
                         for (auto &it : local)
                         {
-                                SLog(it.first, " ", it.second, "\n");
                                 fdatasync(it.first);
                                 fdatasync(it.second);
                         }

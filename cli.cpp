@@ -150,12 +150,17 @@ int main(int argc, char *argv[])
                 static constexpr size_t defaultMinFetchSize{32 * 1024 * 1024};
                 size_t minFetchSize{defaultMinFetchSize};
                 uint32_t pendingResp{0};
+		bool statsOnly{false};
 
 		optind = 0;
-                while ((r = getopt(argc, argv, "F:h")) != -1)
+                while ((r = getopt(argc, argv, "SF:h")) != -1)
                 {
                         switch (r)
                         {
+				case 'S':
+					statsOnly = true;
+					break;
+
                                 case 'F':
                                         displayFields = 0;
                                         for (const auto it : strwlen32_t(optarg).Split(','))
@@ -180,6 +185,7 @@ int main(int argc, char *argv[])
 					Print("CONSUME [options] from\n");
 					Print("Options include:\n");
 					Print("-F display format: Specify a ',' separated list of message properties to be displayed. Properties include: \"seqnum\", \"key\", \"content\", \"ts\". By default, only the content is displayed\n");
+					Print("-S: statistics only\n");
 					Print("\"from\" specifies the first message we are interested in.\n");
 					Print("If from is \"beginning\" or \"start\"," \
 						" it will start consuming from the first available message in the selected topic. If it is \"eof\" or \"end\", it will " \
@@ -245,13 +251,20 @@ int main(int argc, char *argv[])
 			}
 
 			for (const auto &it : tankClient.consumed())
-			{
-				for (const auto m : it.msgs)
-					Print(m->content, "\n");
+                        {
+                                if (statsOnly)
+                                {
+					Print(it.msgs.len, " messages\n");
+                                }
+                                else
+                                {
+                                        for (const auto m : it.msgs)
+                                                Print(m->content, "\n");
+                                }
 
-				minFetchSize = Max<size_t>(it.next.minFetchSize, defaultMinFetchSize);
-				next = it.next.seqNum;
-				pendingResp = 0;
+                                minFetchSize = Max<size_t>(it.next.minFetchSize, defaultMinFetchSize);
+                                next = it.next.seqNum;
+                                pendingResp = 0;
                         }
                 }
         }

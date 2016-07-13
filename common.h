@@ -1,3 +1,10 @@
+/*
+ *	(C) Phaistos Networks, S.A
+ *	http://phaistosnetworks.gr/
+ *
+ *	Licensed under Apache 2 License
+ *
+ */
 #pragma once
 #include <switch.h>
 
