@@ -851,7 +851,7 @@ class Service
 
         bool process_msg(connection *const c, const uint8_t msg, const uint8_t *const data, const size_t len);
 
-        void wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes);
+        void wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes, connection *);
 
         void abort_wait_ctx(wait_ctx *const wctx);
 

@@ -678,14 +678,17 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
         bs->reqs_tracker.pendingProduce.erase(reqId);
         for (const auto *ctx = reqInfo.ctx, *const ctxEnd = ctx + reqInfo.ctxLen; p != e;)
         {
+		require(ctx < ctxEnd);
+
                 auto err = *p++;
                 const strwlen8_t topicName((char *)ctx + 1, *ctx);
                 ctx += topicName.len + sizeof(uint8_t);
                 auto partitionsCnt = *ctx++;
 
-                require(partitionsCnt);
                 if (trace)
-                        SLog("topic [", topicName, "] ", partitionsCnt, "\n");
+                        SLog("topic ", topicName, " ", partitionsCnt, "\n");
+
+                require(partitionsCnt);
 
                 Drequire(ctx < ctxEnd);
 
@@ -707,7 +710,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                                 ctx += sizeof(uint16_t);
 
                                 if (trace)
-                                        SLog("for partition ", partitionId, " ", err, " ", partitionsCnt, "\n");
+                                        SLog("for partition ", partitionId, ", err = ", err, ", partitionsCnt = ", partitionsCnt, "\n");
 
                                 if (err == 1)
                                 {
@@ -1241,12 +1244,14 @@ bool TankClient::try_recv(connection *const c)
                                 {
                                         if (trace)
                                                 SLog("Need more for msg\n");
+
                                         return true;
                                 }
 
                                 const auto msg = *p++;
                                 const auto len = *(uint32_t *)p;
                                 p += sizeof(uint32_t);
+
 
                                 // TODO:
                                 // if msg == MSG_CONSUME, and len > threshold, then we could

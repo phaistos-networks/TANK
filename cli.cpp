@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <set>
+#include <text.h>
 
 int main(int argc, char *argv[])
 {
@@ -66,7 +67,7 @@ int main(int argc, char *argv[])
 				Print("-b broker endpoint: The endpoint of the Tank broker\n");
 				Print("-t topic: The topic to produce to or consume from\n");
 				Print("-p partition: The partition of the topic to produce to or consme from\n");
-				Print("Commands available: consume, produce\n");
+				Print("Commands available: consume, produce, benchmark\n");
 				return 0;
 
                         default:
@@ -499,6 +500,124 @@ int main(int argc, char *argv[])
                         }
                 }
         }
+	else if (cmd.Eq(_S("benchmark")) || cmd.Eq(_S("bm")))
+	{
+		optind = 0;
+		while ((r = getopt(argc, argv, "+h")) != -1)
+                {
+                        switch (r)
+                        {
+
+                                case 'h':
+                                        Print("BENCHMARK [options] type\n");
+                                        Print("Options include:\n");
+                                        return 0;
+
+                                default:
+                                        return 1;
+                        }
+                }
+                argc -= optind;
+                argv += optind;
+
+		if (!argc)
+		{
+			Print("Benchmark type not selected. Please use -h option for more\n");
+			return 1;
+		}
+		
+		const strwlen32_t type(argv[0]);
+
+		if (type.Eq(_S("p2c")))
+		{
+			// Measure latency when publishing from publisher to broker and from broker to consume
+			// Submit messages to the broker and wait until you get them back
+			size_t size{128}, cnt{1};
+
+			optind = 0;
+			while ((r = getopt(argc, argv, "+hc:s:")) != -1)
+                        {
+                                switch (r)
+                                {
+					case 'c':
+						cnt = strwlen32_t(optarg).AsUint32();
+						break;
+
+					case 's':
+						size = strwlen32_t(optarg).AsUint32();
+						break;
+
+                                        case 'h':
+						Print("Performs a produce to consumer via Tank latency test. It will produce a message while also 'tailing' the selected topic and will measure how long it takes for the message to reach the broker, stored, forwarded to the client and received\n");
+						Print("Options include:\n");
+						Print("-s message contrent length: by default 11bytes\n");
+						Print("-c total messages to publish: by default 1 message\n");
+						return 0;
+
+                                        default:
+                                                return 1;
+                                }
+                        }
+                        argc -= optind;
+                        argv += optind;
+
+			auto *p = (char *)malloc(size + 16);
+
+			memset(p, 0, size);
+
+			const strwlen32_t content(p, size);
+			const auto start{Timings::Microseconds::Tick()};
+			std::vector<TankClient::msg> msgs;
+
+
+                        if (tankClient.consume({{topicPartition, {UINT64_MAX, 1e4}}}, 10e3, 0) == 0)
+			{
+				Print("Unable to schedule consumer request\n");
+				return 1;
+			}
+
+
+			Defer({free(p);});
+
+			msgs.reserve(cnt);
+
+			for (uint32_t i{0}; i != cnt; ++i)
+				msgs.push_back({content, start, {}});
+
+			if (tankClient.produce(
+				{
+					{
+						topicPartition,  msgs,
+					}
+				}) == 0)
+			{
+				Print("Unable to schedule publisher request\n");
+				return 1;
+			}
+
+			while (tankClient.should_poll())
+                        {
+                                tankClient.poll(1e3);
+
+                                for (const auto &it : tankClient.faults())
+                                {
+                                        consider_fault(it);
+                                        return false;
+                                }
+
+				if (tankClient.consumed().size())
+				{
+					Print("Go data after publishing ", dotnotation_repr(cnt), " message(s) of size ", size_repr(content.len), " (", size_repr(cnt * content.len),"), took ", duration_repr(Timings::Microseconds::Since(start)), "\n");
+					return 0;
+				}
+                        }
+                }
+		else
+		{
+			Print("Unknown benchmark type\n");
+			return 1;
+		}
+	}
         else
 	{
 		Print("Command '", cmd, "' not supported. Please see ", app, " -h\n");

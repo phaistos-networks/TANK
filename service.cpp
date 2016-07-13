@@ -1742,7 +1742,7 @@ bool Service::process_replica_reg(connection *const c, const uint8_t *p, const s
 
 bool Service::process_produce(connection *const c, const uint8_t *p, const size_t len)
 {
-        auto respHeader = get_buffer();
+        auto *const respHeader = get_buffer();
         auto q = c->outQ;
         const auto clientVersion = *(uint16_t *)p;
         p += sizeof(uint16_t);
@@ -1757,6 +1757,8 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
         strwlen8_t topicName;
         strwlen32_t msgContent;
 
+	Drequire(!respHeader->length());
+
         respHeader->Serialize(uint8_t(1));
         const auto sizeOffset = respHeader->length();
         respHeader->MakeSpace(sizeof(uint32_t));
@@ -1767,12 +1769,22 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
 
         if (!q)
                 q = c->outQ = get_outgoing_queue();
+
+	// It is very important that we queue this buffer(respHeader) here, before we may do in wakeup_wait_ctx()
+	// so that if a client has issued a produce and a consume request for the same (topic,partition) from the same connection, the client
+	// will get the produce response first and the consume later.
+	// 
+	// Also, in this case, to avoid wakeup_wait_ctx() to invoke try_send_ifnot_blocked() which would mean that
+	// it would send this produce response respHeader before it has been built, we are going
+	// to provide this connection to wakeup_wait_ctx() so that it will check if the connection it need to wake up
+	// is this connection, and if so, not wake it up for we will wake it up here.
         q->push_back(respHeader);
 
         respHeader->Serialize(requestId);
 
         if (trace)
                 SLog("Parsing ", topicsCnt, "\n");
+
 
         for (uint32_t i{0}; i != topicsCnt; ++i)
         {
@@ -1801,6 +1813,7 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
 
                 if (trace)
                         SLog("partitionsCnt:", partitionsCnt, " for [", topicName, "]\n");
+
                 for (uint32_t k{0}; k != partitionsCnt; ++k)
                 {
                         const auto partitionId = *(uint16_t *)p;
@@ -1827,6 +1840,7 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
 
                         if (trace)
                                 SLog("partitionId = ", partitionId, ",  bundleLen = ", bundleLen, "\n");
+
 
                         // BEGIN: bundle header
                         const auto bundleFlags = *p++;
@@ -1900,7 +1914,6 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                                 _exit(1);
                         }
 
-
                         if (trace)
                                 SLog("Took ", duration_repr(Timings::Microseconds::Since(b)), " for ", msgSetSize, " msgs in bundle message set: ", expiredCtxList.size(), "\n");
 
@@ -1908,17 +1921,19 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                         (void)b;
 #endif
 
+
                         respHeader->Serialize(uint8_t(0));
 
                         while (expiredCtxList.size())
                         {
                                 auto ctx = expiredCtxList.Pop();
 
-                                wakeup_wait_ctx(ctx, res);
+                                wakeup_wait_ctx(ctx, res, c);
                         }
                 }
         }
         *(uint32_t *)respHeader->At(sizeOffset) = respHeader->length() - sizeOffset - sizeof(uint32_t);
+
 
         return try_send_ifnot_blocked(c);
 }
@@ -1948,7 +1963,7 @@ bool Service::process_msg(connection *const c, const uint8_t msg, const uint8_t 
         }
 }
 
-void Service::wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes)
+void Service::wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes, connection *const produceConnection)
 {
         auto respHeader = get_buffer();
         uint8_t topicsCnt{0};
@@ -2031,7 +2046,12 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes)
         *(uint32_t *)respHeader->At(headerSizeOffset) = respHeader->length() - headerSizeOffset - sizeof(uint32_t);
 
         destroy_wait_ctx(wctx);
-        try_send_ifnot_blocked(c);
+
+	if (c != produceConnection)
+	{
+		// see process_produce()
+        	try_send_ifnot_blocked(c);
+	}	
 }
 
 void Service::abort_wait_ctx(wait_ctx *const wctx)
