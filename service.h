@@ -741,6 +741,8 @@ class Service
                 return outgoingQueuesPool.size() ? outgoingQueuesPool.Pop() : new outgoing_queue();
         }
 
+	topic *topic_by_name(const strwlen8_t) const;
+
         void put_outgoing_queue(outgoing_queue *const q)
         {
                 q->clear([this](auto buf) {

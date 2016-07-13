@@ -16,6 +16,7 @@ else
 	SWITCH_DEP:=switch
 endif
 
+#all: cli-tool
 all: service cli-tool
 
 switch:

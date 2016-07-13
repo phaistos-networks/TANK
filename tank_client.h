@@ -10,16 +10,26 @@
 #include <switch_vector.h>
 #include <vector>
 #include <atomic>
+#include <queue>
 
 // Tank, because its a large container of liquid or gas
 // and data flow (as in, liquid), and also, this is a Trinity character name
 class TankClient
 {
+      private:
+        struct broker;
+
       public:
         enum class ProduceFlags : uint8_t
         {
 
         };
+
+	enum class RetryStrategy : uint8_t
+	{
+		RetryNever = 0,
+		RetryAlways
+	};
 
         struct msg
         {
@@ -61,12 +71,14 @@ class TankClient
         struct connection
         {
                 int fd{-1};
-                outgoing_payload *outgoingFront{nullptr}, *outgoingBack{nullptr};
                 switch_dlist list;
                 IOBuffer *inB{nullptr};
-                uint32_t pendingResponses;
-                std::set<uint32_t> pendingConsume, pendingProduce;
-                Switch::endpoint peer;
+                broker *bs{nullptr};
+
+                enum class Type : uint8_t
+                {
+                        Tank
+                } type{Type::Tank};
 
                 struct State
                 {
@@ -80,31 +92,6 @@ class TankClient
                         uint8_t flags;
                         uint64_t lastInputTS, lastOutputTS;
                 } state;
-
-                void push_back(outgoing_payload *const p)
-                {
-                        p->iovIdx = 0;
-                        p->next = nullptr;
-
-                        if (outgoingBack)
-                                outgoingBack->next = p;
-                        else
-                                outgoingFront = p;
-
-                        outgoingBack = p;
-                }
-
-                auto front()
-                {
-                        return outgoingFront;
-                }
-
-                void pop_front()
-                {
-                        outgoingFront = outgoingFront->next;
-                        if (!outgoingFront)
-                                outgoingBack = nullptr;
-                }
 
                 connection()
                 {
@@ -222,16 +209,80 @@ class TankClient
                 } leader_reqs;
         } ids_tracker;
 
-        struct unreachable_broker_ctx
+        struct broker
         {
-                uint32_t prevSleep;
-                uint64_t until;
+                struct connection *con{nullptr};
+                const Switch::endpoint endpoint;
+
+                enum class Reachability : uint8_t
+                {
+                        Reachable = 0, 	// Definitely reachable, or we just don't know yet for we haven't tried to connect
+                        Unreachable, 	// Definitely unreachable; can't retry connection until block_ctx.until
+			MaybeReachable, // Was blocked, and will now retry the connection in case it is now possible
+                        Blocked 	// Blocked; will retry the connection at block_ctx.until 
+                } reachability{Reachability::Reachable};
+
+                struct
+                {
+                        uint32_t prevSleep;
+                        uint64_t until;
+                        uint64_t naSince;
+                        uint16_t retries;
+                } block_ctx;
+
+		void set_reachability(const Reachability r);
+
+                // outgoing content will be associated with a leader state, not its connection
+                // and the connection will drain this outgoing_content
+                struct
+                {
+                        outgoing_payload *front_{nullptr}, *back_{nullptr};
+
+                        void push_back(outgoing_payload *const p)
+                        {
+                                p->iovIdx = 0;
+                                p->next = nullptr;
+
+                                if (back_)
+                                        back_->next = p;
+                                else
+                                        front_ = p;
+
+                                back_ = p;
+                        }
+
+                        auto front()
+                        {
+                                return front_;
+                        }
+
+                        void pop_front()
+                        {
+                                front_ = front_->next;
+                                if (!front_)
+                                        back_ = nullptr;
+                        }
+
+                } outgoing_content;
+
+
+		struct
+                {
+                        std::set<uint32_t> pendingConsume;
+                        std::set<uint32_t> pendingProduce;
+                } reqs_tracker;
+
+                broker(const Switch::endpoint e)
+			: endpoint{e}
+		{
+
+		}
         };
 
-        // topic to standalone broker
+	RetryStrategy retryStrategy{RetryStrategy::RetryAlways};
+        Switch::unordered_map<Switch::endpoint, broker *> bsMap;
         Switch::unordered_map<strwlen8_t, Switch::endpoint> leadersMap;
         Switch::endpoint defaultLeader{};
-        Switch::unordered_map<Switch::endpoint, unreachable_broker_ctx> naBrokers;
         strwlen8_t clientId{"c++"};
         switch_dlist connections;
         Switch::vector<std::pair<connection *, IOBuffer *>> connsBufs;
@@ -248,8 +299,8 @@ class TankClient
         uint32_t nextConsumeReqId{1}, nextProduceReqId{1};
         Switch::vector<connection *> connectionAttempts, connsList;
         EPoller poller;
-	int pipeFd[2];
-	std::atomic<bool> polling{false};
+        int pipeFd[2];
+        std::atomic<bool> polling{false};
         Switch::vector<connection *> connectionsPool;
         Switch::vector<outgoing_payload *> payloadsPool;
         Switch::vector<IOBuffer *> buffersPool;
@@ -257,9 +308,18 @@ class TankClient
         IOBuffer produceCtx;
         Switch::unordered_map<uint32_t, active_consume_req> pendingConsumeReqs;
         Switch::unordered_map<uint32_t, active_produce_req> pendingProduceReqs;
-        Switch::unordered_map<Switch::endpoint, connection *> connectionsMap;
+        struct reschedule_queue_entry_cmp
+        {
+                bool operator()(const broker *const b1, const broker *const b2)
+                {
+			return b1->block_ctx.until < b2->block_ctx.until;
+                }
+        };
+        std::priority_queue<broker *, std::vector<broker *>, reschedule_queue_entry_cmp> rescheduleQueue;
 
       private:
+        broker *broker_state(const Switch::endpoint e);
+
         static uint8_t choose_compression_codec(const msg *const, const size_t);
 
         // this is somewhat complicated, because we want to use varint for the bundle length and we want to
@@ -274,9 +334,15 @@ class TankClient
         // maxWait: The maximum amount of time the server will block before answering a fetch request, if ther isn't sufficeint data to immediately satisfy the requirement set by minSize
         bool consume_from_leader(const uint32_t clientReqId, const Switch::endpoint leader, const consume_ctx *const from, const size_t total, const uint64_t maxWait, const uint32_t minSize);
 
-        void track_na_broker(const Switch::endpoint);
+        void track_na_broker(broker *);
+
+        bool is_unreachable(const Switch::endpoint) const;
+
+	bool consider_retransmission(broker *);
 
         bool shutdown(connection *const c, const uint32_t ref, const bool fault = false);
+
+        void reschedule_any();
 
         bool process_produce(connection *const c, const uint8_t *const content, const size_t len);
 
@@ -348,31 +414,9 @@ class TankClient
 
         void bind_fd(connection *const c, int fd);
 
-        connection *init_connection(const Switch::endpoint e);
+	bool try_transmit(broker *);
 
-        connection *leader_connection(Switch::endpoint leader);
-
-        template <typename L>
-        bool submit(const Switch::endpoint leader, outgoing_payload *const p, L &&l)
-        {
-                if (auto *const c = leader_connection(leader))
-                {
-                        l(c);
-
-                        ++(c->pendingResponses);
-                        c->push_back(p);
-
-                        if (!(c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))))
-                                return try_send(c);
-                        else
-                                return true;
-                }
-                else
-                {
-                        put_payload(p);
-                        return false;
-                }
-        }
+	void flush_broker(broker *bs);
 
       public:
         TankClient();
@@ -407,6 +451,11 @@ class TankClient
                 clientId.Set(p, len);
         }
 
+	void set_retry_strategy(const RetryStrategy r)
+	{
+		retryStrategy = r;
+	}
+
         void set_default_leader(const Switch::endpoint e)
         {
                 if (!e)
@@ -422,12 +471,12 @@ class TankClient
 
         void set_topic_leader(const strwlen8_t topic, const strwlen32_t e);
 
-	void interrupt_poll();
+        void interrupt_poll();
 
-	bool should_poll() const
-	{
-		return connectionAttempts.size() || pendingConsumeReqs.size() || pendingProduceReqs.size();
-	}
+        bool should_poll() const
+        {
+                return connectionAttempts.size() || pendingConsumeReqs.size() || pendingProduceReqs.size() || rescheduleQueue.size();
+        }
 };
 
 #ifdef LEAN_SWITCH

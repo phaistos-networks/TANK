@@ -14,6 +14,7 @@
 #include <timings.h>
 #include <unistd.h>
 #include <future>
+#include <fcntl.h>
 
 // From SENDFILE(2): The  original  Linux  sendfile() system call was not designed to handle large file offsets.  
 // Consequently, Linux 2.4 added sendfile64(), with a wider type for the offset argument.  
@@ -713,7 +714,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 cur.fdh->Release();
 
                 if (cur.fdh->fd == -1)
-                        throw Switch::system_error("open(", basePath, ") failed:", strerror(errno));
+                        throw Switch::system_error("open(", basePath, ") failed:", strerror(errno),". Cannot load segment log");
 
                 basePath.SetLength(basePathLen);
                 basePath.append(cur.baseSeqNum, ".index");
@@ -721,7 +722,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 basePath.SetLength(basePathLen);
 
                 if (cur.index.fd == -1)
-                        throw Switch::system_error("open(", basePath, ") failed:", strerror(errno));
+                        throw Switch::system_error("open(", basePath, ") failed:", strerror(errno), ". Cannot load segment index");
 
                 if (const uint32_t max = config.maxRollJitterSecs)
                 {
@@ -1291,7 +1292,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                 SLog("Have current segment:", basePath, "\n");
 
                         if (fd == -1)
-                                throw Switch::system_error("open(", basePath, ") failed:", strerror(errno));
+                                throw Switch::system_error("open(", basePath, ") failed:", strerror(errno), ". Cannot open current segment log");
 
                         l->cur.fdh.reset(new fd_handle(fd));
                         require(l->cur.fdh->use_count() == 2);
@@ -1305,7 +1306,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         if (fd == -1)
                         {
                                 // TODO: rebuild it
-                                throw Switch::system_error("open(", basePath_, ") failed:", strerror(errno));
+                                throw Switch::system_error("open(", basePath_, ") failed:", strerror(errno), ". Cannot open current segment index");
                         }
 
                         l->cur.index.fd = fd;
@@ -1497,7 +1498,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                         const strwlen8_t topicName((char *)(p + 1), *p);
                         p += topicName.len + sizeof(uint8_t);
                         const auto partitionsCnt = *p++;
-                        auto topic = topics[topicName];
+                        auto topic = topic_by_name(topicName);
 
                         if (trace)
                                 SLog("topic [", topicName, "]\n");
@@ -1575,6 +1576,24 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                                         respHeader->Serialize(res.absBaseSeqNum); // absolute first seq.num of the first message of the first bundle in the streamed chunk
                                                         respHeader->Serialize(hwMark);
                                                         respHeader->Serialize(range.len);
+
+#ifdef __linux__
+							// Initiate readahead on that range so that our subsequent sendfile() from that file will be satisfied from the cache, and will not block on disk I/O
+							// (assuming we have initiated readahead early enough and other activity on the system did not in the meantime flush pages from cache)
+							//
+							// This syscall attempts to schedule the read in the background and return immediately.
+							// However, it may block while it reads the FS metadata needed to locate the requested blocks. This occurs frquently with ext[234] on large files
+							// using indirect blocks instead of extents, giving the appearance that the call blocks until the requested data have been read.
+							//
+							// XXX: I need to find out if readahead() will only read pages not already paged-in, or will re-read pages even if already resident in memory.
+							// XXX: I am not sure if this is a good idea - need to further measure the impact and gains
+							//
+							// UPDATE:
+							// http://lxr.free-electrons.com/source/mm/readahead.c
+							// 	Looks like it will inly deal with pages not mapped yet. The cost should be mininal, though
+							// 	the kernel does have to iterate all pages in the range and look each of those in a RBT.
+							readahead(res.fdh->fd, range.offset, range.len);
+#endif
 
                                                         sum += range.len;
                                                         q->push_back({res.fdh.get(), range});
@@ -1759,7 +1778,7 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                 topicName.Set((char *)p + 1, *p);
                 p += sizeof(uint8_t) + topicName.len;
 
-                auto topic = topics[topicName];
+                auto topic = topic_by_name(topicName);
 
                 if (!topic)
                 {
@@ -2860,6 +2879,21 @@ int Service::start(int argc, char **argv)
         Print("TANK terminated\n");
         return true;
 }
+
+topic *Service::topic_by_name(const strwlen8_t name) const
+{
+#ifdef LEAN_SWITCH
+	auto it = topics.find(name);
+
+	if (it != topics.end())
+		return it->second;
+#else
+	return topics[name];
+#endif
+
+        return nullptr;
+}
+
 
 int main(int argc, char *argv[])
 {

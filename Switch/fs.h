@@ -41,7 +41,7 @@ class DirectoryEntries
             : dh(opendir(path))
         {
                 if (unlikely(!dh))
-                        throw Switch::exception("Failed to access directory ", path);
+                        throw Switch::exception("Failed to access directory ", path,":", strerror(errno));
         }
 
         ~DirectoryEntries()
