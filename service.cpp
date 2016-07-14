@@ -2752,7 +2752,6 @@ int Service::start(int argc, char **argv)
                         {
                                 socklen_t saLen = sizeof(sa);
                                 int newFd = accept4(fd, (sockaddr *)&sa, &saLen, SOCK_NONBLOCK | SOCK_CLOEXEC);
-				//int rcvBufSize{4*1024*1024};
 
                                 if (newFd == -1)
                                 {
@@ -2769,9 +2768,12 @@ int Service::start(int argc, char **argv)
                                         auto c = get_connection();
 
 #if 0
-                                        if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (char *)&rcvBufSize, sizeof(rcvBufSize)) == -1)
-                                                Print("WARNING: unable to set socket receive buffer size:", strerror(errno), "\n");
+                                        {
+                                                int rcvBufSize{16 * 1024 * 1024};
 
+                                                if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (char *)&rcvBufSize, sizeof(rcvBufSize)) == -1)
+                                                        Print("WARNING: unable to set socket receive buffer size:", strerror(errno), "\n");
+                                        }
 #endif
 
                                         c->fd = newFd;
@@ -2836,7 +2838,7 @@ int Service::start(int argc, char **argv)
                                         c->state.lastInputTS = Timings::Milliseconds::Tick();
                                 }
 
-                                for (const auto *const e = (uint8_t *)b->End(); !(c->state.flags & (1u << uint8_t(connection::State::Flags::Busy)));)
+                                for (const auto *e = (uint8_t *)b->End(); !(c->state.flags & (1u << uint8_t(connection::State::Flags::Busy)));)
                                 {
                                         const auto *p = (uint8_t *)b->AtOffset();
 
@@ -2852,17 +2854,36 @@ int Service::start(int argc, char **argv)
                                                         shutdown(c, __LINE__);
                                                         goto nextEvent;
                                                 }
-                                                else if (p + msgLen > e)
+
+						if (0 == (c->state.flags & (1u << uint8_t(connection::State::Flags::ConsideredReqHeader))))
+						{
+							// So that ingestion of future incoming data will not require buffer reallocations
+							const auto o = (char *)p - b->data();
+
+							if (trace)
+								SLog("Need to reserve(", msgLen, ")\n");
+
+							b->reserve(msgLen);
+
+							p = (uint8_t *)b->At(o);
+							e = (uint8_t *)b->End();
+
+							c->state.flags |= 1u << uint8_t(connection::State::Flags::ConsideredReqHeader);
+						}
+
+                                                if (p + msgLen > e)
                                                 {
                                                         if (trace)
                                                                 SLog("Need more data for ", msg, "\n");
+
                                                         goto l1;
                                                 }
-                                                else if (!process_msg(c, msg, reinterpret_cast<const uint8_t *>(p), msgLen))
+
+						c->state.flags  &= ~(1u << uint8_t(connection::State::Flags::ConsideredReqHeader));
+                                                if (!process_msg(c, msg, reinterpret_cast<const uint8_t *>(p), msgLen))
                                                         goto nextEvent;
 
                                                 p += msgLen;
-
                                                 if (p == e)
                                                 {
                                                         b->clear();

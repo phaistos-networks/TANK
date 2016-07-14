@@ -31,6 +31,13 @@ class TankClient
 		RetryAlways
 	};
 
+	enum class CompressionStrategy : uint8_t
+	{
+		CompressNever =0,
+		CompressAlways,
+		CompressIntelligently
+	};
+
         struct msg
         {
                 strwlen32_t content;
@@ -280,6 +287,7 @@ class TankClient
         };
 
 	RetryStrategy retryStrategy{RetryStrategy::RetryAlways};
+	CompressionStrategy compressionStrategy{CompressionStrategy::CompressIntelligently};
         Switch::unordered_map<Switch::endpoint, broker *> bsMap;
         Switch::unordered_map<strwlen8_t, Switch::endpoint> leadersMap;
         Switch::endpoint defaultLeader{};
@@ -454,6 +462,11 @@ class TankClient
 	void set_retry_strategy(const RetryStrategy r)
 	{
 		retryStrategy = r;
+	}
+
+	void set_compression_strategy(const CompressionStrategy c)
+	{
+		compressionStrategy = c;
 	}
 
         void set_default_leader(const Switch::endpoint e)

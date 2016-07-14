@@ -698,8 +698,8 @@ struct connection
                 {
                         PendingIntro = 0,
                         NeedOutAvail,
-                        Busy
-
+                        Busy,
+			ConsideredReqHeader
                 };
 
                 uint8_t flags;

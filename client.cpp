@@ -34,7 +34,7 @@ void TankClient::bind_fd(connection *const c, int fd)
         c->fd = fd;
 
         // we can't write() anything until we got POLLOUT after we connect()
-        c->state.flags |= (1u << uint8_t(connection::State::Flags::ConnectionAttempt)) | (1u << uint8_t(connection::State::Flags::NeedOutAvail));
+        c->state.flags = (1u << uint8_t(connection::State::Flags::ConnectionAttempt)) | (1u << uint8_t(connection::State::Flags::NeedOutAvail));
         poller.AddFd(fd, POLLIN | POLLOUT, c);
         c->state.lastInputTS = Timings::Milliseconds::Tick();
         c->state.lastOutputTS = c->state.lastInputTS;
@@ -175,7 +175,8 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
         {
                 const auto *it = produce + i;
                 const auto topic = it->topic;
-                const uint8_t compressionCodec = choose_compression_codec(it->msgs, it->msgsCnt);
+                const uint8_t compressionCodec = compressionStrategy == CompressionStrategy::CompressIntelligently ? choose_compression_codec(it->msgs, it->msgsCnt)
+                                                                                                                   : compressionStrategy == CompressionStrategy::CompressNever ? 0 : 1;
                 uint8_t partitionsCnt{0};
 
                 b.Serialize(topic.len);
@@ -423,8 +424,11 @@ bool TankClient::try_transmit(broker *const bs)
 
                                 if (trace)
                                         SLog("UNSETTING NeedOutAvail\n");
+
+				return true;
                         }
-                        return true;
+			else
+				return try_send(c);
                 }
 
                 case broker::Reachability::Blocked:
@@ -1408,8 +1412,6 @@ bool TankClient::try_send(connection *const c)
 int TankClient::init_connection_to(const Switch::endpoint e)
 {
         struct sockaddr_in sa;
-	int sndBufSize{4*1024*1024};
-
         int fd;
 
         memset(&sa, 0, sizeof(sa));
@@ -1429,8 +1431,15 @@ int TankClient::init_connection_to(const Switch::endpoint e)
                 SLog("Connecting to ", e, "\n");
 
         Switch::SetNoDelay(fd, 1);
-        if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (char *)&sndBufSize, sizeof(sndBufSize)) == -1)
-		Print("WARNING: unable to set socket send buffer size:", strerror(errno), "\n");
+
+#if 0
+	{
+		int sndBufSize{2*1024*1024};
+
+		if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (char *)&sndBufSize, sizeof(sndBufSize)) == -1)
+			Print("WARNING: unable to set socket send buffer size:", strerror(errno), "\n");
+	}
+#endif
 
         if (connect(fd, (sockaddr *)&sa, sizeof(sa)) == -1 && errno != EINPROGRESS)
         {

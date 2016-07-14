@@ -538,10 +538,14 @@ int main(int argc, char *argv[])
 			size_t size{128}, cnt{1};
 
 			optind = 0;
-			while ((r = getopt(argc, argv, "+hc:s:")) != -1)
+			while ((r = getopt(argc, argv, "+hc:s:R")) != -1)
                         {
                                 switch (r)
                                 {
+					case 'R':
+						tankClient.set_compression_strategy(TankClient::CompressionStrategy::CompressNever);
+						break;
+						
 					case 'c':
 						cnt = strwlen32_t(optarg).AsUint32();
 						break;
@@ -555,6 +559,7 @@ int main(int argc, char *argv[])
 						Print("Options include:\n");
 						Print("-s message contrent length: by default 11bytes\n");
 						Print("-c total messages to publish: by default 1 message\n");
+						Print("-R: do not compress bundle\n");
 						return 0;
 
                                         default:
@@ -623,10 +628,14 @@ int main(int argc, char *argv[])
 			size_t size{128}, cnt{1};
 
 			optind = 0;
-			while ((r = getopt(argc, argv, "+hc:s:")) != -1)
+			while ((r = getopt(argc, argv, "+hc:s:R")) != -1)
                         {
                                 switch (r)
                                 {
+					case 'R':
+						tankClient.set_compression_strategy(TankClient::CompressionStrategy::CompressNever);
+						break;
+
 					case 'c':
 						cnt = strwlen32_t(optarg).AsUint32();
 						break;
@@ -640,6 +649,7 @@ int main(int argc, char *argv[])
 						Print("Options include:\n");
 						Print("-s message contrent length: by default 11bytes\n");
 						Print("-c total messages to publish: by default 1 message\n");
+						Print("-R: do not compress bundle\n");
 						return 0;
 
                                         default:
