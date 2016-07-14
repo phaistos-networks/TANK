@@ -13,14 +13,18 @@ int main(int argc, char *argv[])
 	int r;
 	TankClient tankClient;
 	const char *const app = argv[0];
+	bool verbose{false};
 
 	if (argc == 1)
 		goto help;
 
-	while ((r = getopt(argc, argv, "+b:t:p:h")) != -1) 	// see GETOPT(3) for '+' initial character semantics
+	while ((r = getopt(argc, argv, "+vb:t:p:h")) != -1) 	// see GETOPT(3) for '+' initial character semantics
         {
                 switch (r)
                 {
+			case 'v':
+				verbose = true;
+				break;
 
 			case 'b':
 				endpoint.clear();
@@ -227,7 +231,10 @@ int main(int argc, char *argv[])
                 {
                         if (!pendingResp)
                         {
-                                pendingResp = tankClient.consume({{topicPartition, {next, minFetchSize}}}, 2e3, 0);
+				if (verbose)
+					Print("Requesting from ", next, "\n");
+
+                                pendingResp = tankClient.consume({{topicPartition, {next, minFetchSize}}}, 8e3, 0);
 
                                 if (!pendingResp)
                                 {
@@ -333,6 +340,10 @@ int main(int argc, char *argv[])
                         return true;
                 };
                 const auto publish_msgs = [&]() {
+
+                        if (verbose)
+                                Print("Publishing ", msgs.size(), " messages\n");
+
                         const auto reqId = tankClient.produce(
                             {{topicPartition, msgs}});
 

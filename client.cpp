@@ -1159,7 +1159,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                 nextPartition:
                         // It's possible that next is what we requested already, if
                         // we couldn't parse a single message from any bundle for this (topic, partition)  - i.e consumptionsList.empty() == true
-                        const auto next = consumptionList.size() ? Max(requestedSeqNum, consumptionList.back().seqNum + 1) : requestedSeqNum;
+                        const auto next = consumptionList.size() ? Max(requestedSeqNum == UINT64_MAX ? 0 : requestedSeqNum, consumptionList.back().seqNum + 1) : requestedSeqNum;
 
                         if (const uint32_t cnt = consumptionList.size())
                         {
@@ -1454,6 +1454,8 @@ int TankClient::init_connection_to(const Switch::endpoint e)
 void TankClient::poll(uint32_t timeoutMS)
 {
         // Reset state / buffers used for tracking collected content and responses in last poll() call
+	// if this client has joined a consumer group, it is important that the application poll()s giving chances to
+	// the tank client to send H/Bs to the broker so that it won't remove the client from the consumer group. See Kafka Consumer Groups
         for (auto &it : connsBufs)
         {
                 auto c = it.first;
