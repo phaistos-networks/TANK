@@ -91,9 +91,16 @@ class TankClient
                 {
                         enum class Flags : uint8_t
                         {
-                                ConnectionAttempt,
+                                ConnectionAttempt = 0,
                                 NeedOutAvail,
-                                RetryingConnection
+                                RetryingConnection,
+				ConsideredReqHeader,
+
+				// Consume responses, produce acks, and errors almost all derefence in connection input buffer
+				// once we dereference it, we can't reallocate the buffer internal memory, so this is set.
+				// This flag is unset when we read data, and may be set by various process_() methods, and considered
+				// when we process the ingested input
+				LockedInputBuffer
                         };
 
                         uint8_t flags;

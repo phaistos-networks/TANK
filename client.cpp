@@ -694,6 +694,8 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
         const auto clientReqId = reqInfo.clientReqId;
 
         Defer({ free(reqInfo.ctx); });
+	
+	c->state.flags|=(1u << uint8_t(connection::State::Flags::LockedInputBuffer));
 
         if (trace)
                 SLog("got produce resp\n");
@@ -777,6 +779,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
         p += sizeof(uint32_t);
         const auto *bundles = p + respHeaderLen, *const bundlesBase = bundles;
         const auto reqId = *(uint32_t *)p;
+
+	c->state.flags|=(1u << uint8_t(connection::State::Flags::LockedInputBuffer));
 
         if (trace)
                 SLog("Processing consume response for ", reqId, ", of length ", len, "\n");
@@ -1258,10 +1262,11 @@ bool TankClient::try_recv(connection *const c)
                         }
 
                         c->state.lastInputTS = nowMS;
+			c->state.flags &= ~(1u << uint8_t(connection::State::Flags::LockedInputBuffer));
 
                         b->AdvanceLength(r);
 
-                        for (const auto *const e = (uint8_t *)b->End(); p != e;)
+                        for (const auto *e = (uint8_t *)b->End(); p != e;)
                         {
                                 if (p + sizeof(uint8_t) + sizeof(uint32_t) > e)
                                 {
@@ -1275,6 +1280,23 @@ bool TankClient::try_recv(connection *const c)
                                 const auto len = *(uint32_t *)p;
                                 p += sizeof(uint32_t);
 
+                                if (0 == (c->state.flags & (1u << uint8_t(connection::State::Flags::ConsideredReqHeader))))
+                                {
+                                        // So that ingestion of future incoming data will not require buffer reallocations
+					if (0 == (c->state.flags & (1u << uint8_t(connection::State::Flags::LockedInputBuffer))))
+                                        {
+						// We need to make sure we won't force a reallocation of the internal buffer memory
+						// See LockedInputBuffer comments
+                                                const auto o = (char *)p - b->data();
+
+                                                b->reserve(len);
+
+                                                p = (uint8_t *)b->At(o);
+                                                e = (uint8_t *)b->End();
+                                        }
+
+                                        c->state.flags |= 1u << uint8_t(connection::State::Flags::ConsideredReqHeader);
+                                }
 
                                 // TODO:
                                 // if msg == MSG_CONSUME, and len > threshold, then we could
@@ -1290,6 +1312,7 @@ bool TankClient::try_recv(connection *const c)
                                         return true;
                                 }
 
+                                c->state.flags &= ~(1u << uint8_t(connection::State::Flags::ConsideredReqHeader));
                                 if (!process(c, msg, p, len))
                                         return false;
                                 else
