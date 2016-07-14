@@ -4,8 +4,8 @@ SWITCH_DEP:=
 ifeq ($(HOST), origin)
 # When building on our dev.system
 	include /home/system/Development/Switch/Makefile.dfl
-	CXXFLAGS:=$(CPPFLAGS_SANITY_DEBUG) -fsanitize=address
-	LDFLAGS:=$(LDFLAGS_SANITY) -L$(SWITCH_BASE) -lswitch -lpthread -ldl -lcrypto -lz -lssl -fsanitize=address
+	CXXFLAGS:=$(CPPFLAGS_SANITY_DEBUG) #-fsanitize=address
+	LDFLAGS:=$(LDFLAGS__DEBUG) -L$(SWITCH_BASE) -lswitch -lpthread -ldl -lcrypto -lz -lssl -ljemalloc #-fsanitize=address
 	SWITCH_LIB:=-lswitch
 	CXX:=clang++
 else
@@ -16,7 +16,6 @@ else
 	SWITCH_DEP:=switch
 endif
 
-#all: cli-tool
 all: service cli-tool
 
 switch:

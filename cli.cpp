@@ -510,6 +510,9 @@ int main(int argc, char *argv[])
 
                                 case 'h':
                                         Print("BENCHMARK [options] type\n");
+					Print("Type can be:\n");
+					Print("- p2c:  Measures latency when producing from client to broker and consuming(tailing) the broker that message\n");
+					Print("- p2b:  Measures latency when producing from client to broker\n");
                                         Print("Options include:\n");
                                         return 0;
 
@@ -548,7 +551,7 @@ int main(int argc, char *argv[])
 						break;
 
                                         case 'h':
-						Print("Performs a produce to consumer via Tank latency test. It will produce a message while also 'tailing' the selected topic and will measure how long it takes for the message to reach the broker, stored, forwarded to the client and received\n");
+						Print("Performs a produce to consumer via Tank latency test. It will produce messages while also 'tailing' the selected topic and will measure how long it takes for the messages to reach the broker, stored, forwarded to the client and received\n");
 						Print("Options include:\n");
 						Print("-s message contrent length: by default 11bytes\n");
 						Print("-c total messages to publish: by default 1 message\n");
@@ -566,7 +569,6 @@ int main(int argc, char *argv[])
 			memset(p, 0, size);
 
 			const strwlen32_t content(p, size);
-			const auto start{Timings::Microseconds::Tick()};
 			std::vector<TankClient::msg> msgs;
 
 
@@ -582,7 +584,9 @@ int main(int argc, char *argv[])
 			msgs.reserve(cnt);
 
 			for (uint32_t i{0}; i != cnt; ++i)
-				msgs.push_back({content, start, {}});
+				msgs.push_back({content, 0, {}});
+
+			const auto start{Timings::Microseconds::Tick()};
 
 			if (tankClient.produce(
 				{
@@ -608,6 +612,83 @@ int main(int argc, char *argv[])
 				if (tankClient.consumed().size())
 				{
 					Print("Go data after publishing ", dotnotation_repr(cnt), " message(s) of size ", size_repr(content.len), " (", size_repr(cnt * content.len),"), took ", duration_repr(Timings::Microseconds::Since(start)), "\n");
+					return 0;
+				}
+                        }
+                }
+		else if (type.Eq(_S("p2t")))
+		{
+			// Measure latency when publishing from publisher to broker and from broker to consume
+			// Submit messages to the broker and wait until you get them back
+			size_t size{128}, cnt{1};
+
+			optind = 0;
+			while ((r = getopt(argc, argv, "+hc:s:")) != -1)
+                        {
+                                switch (r)
+                                {
+					case 'c':
+						cnt = strwlen32_t(optarg).AsUint32();
+						break;
+
+					case 's':
+						size = strwlen32_t(optarg).AsUint32();
+						break;
+
+                                        case 'h':
+						Print("Performs a produce to tank latency test. It will produce messages while also 'tailing' the selected topic and will measure how long it takes for the messages to reach the broker, stored, and acknowledged to the client\n");
+						Print("Options include:\n");
+						Print("-s message contrent length: by default 11bytes\n");
+						Print("-c total messages to publish: by default 1 message\n");
+						return 0;
+
+                                        default:
+                                                return 1;
+                                }
+                        }
+                        argc -= optind;
+                        argv += optind;
+
+			auto *p = (char *)malloc(size + 16);
+
+			memset(p, 0, size);
+
+			const strwlen32_t content(p, size);
+			std::vector<TankClient::msg> msgs;
+
+
+			Defer({free(p);});
+
+			msgs.reserve(cnt);
+			for (uint32_t i{0}; i != cnt; ++i)
+				msgs.push_back({content, 0, {}});
+
+			const auto start{Timings::Microseconds::Tick()};
+
+			if (tankClient.produce(
+				{
+					{
+						topicPartition,  msgs,
+					}
+				}) == 0)
+			{
+				Print("Unable to schedule publisher request\n");
+				return 1;
+			}
+
+			while (tankClient.should_poll())
+                        {
+                                tankClient.poll(1e3);
+
+                                for (const auto &it : tankClient.faults())
+                                {
+                                        consider_fault(it);
+                                        return false;
+                                }
+
+				if (tankClient.produce_acks().size())
+				{
+					Print("Go ACK after publishing ", dotnotation_repr(cnt), " message(s) of size ", size_repr(content.len), " (", size_repr(cnt * content.len),"), took ", duration_repr(Timings::Microseconds::Since(start)), "\n");
 					return 0;
 				}
                         }

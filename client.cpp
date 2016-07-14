@@ -142,6 +142,7 @@ uint8_t TankClient::choose_compression_codec(const msg *const msgs, const size_t
 
 bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::endpoint leader, const produce_ctx *const produce, const size_t cnt)
 {
+	const uint64_t start = trace ? Timings::Microseconds::Tick() : 0;
         auto bs = broker_state(leader);
         auto payload = get_payload();
         auto &b = *payload->b;
@@ -159,6 +160,7 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
 
         // req(msg, size) not serialized here, we 'll use payload->iov[] to make sure they are transmitted before anything else later
 
+	b.reserve(256);
         b.Serialize<uint16_t>(1); // client version
         b.Serialize<uint32_t>(reqId);
         b.Serialize(clientId.len);
@@ -225,9 +227,22 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
 
                         const auto msgSetOffset = b.length();
                         uint64_t lastTS{0};
+			size_t required{0};
 
                         if (trace)
                                 SLog("Packing ", it->msgsCnt, " for bundle msg set, for partition ", it->partitionId, "\n");
+
+			// This helps a lot; down from 0.84 to 0.226 for 1,000,000 messages, of 100bytes each
+                        for (uint32_t i{0}; i != it->msgsCnt; ++i)
+                        {
+                                const auto &m = it->msgs[i];
+
+				required+=m.key.len;
+				required+=m.content.len;
+			}
+			required += it->msgsCnt * (16);
+
+			b.reserve(required);
 
                         for (uint32_t i{0}; i != it->msgsCnt; ++i)
                         {
@@ -273,6 +288,7 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
                                 const auto msgSetLen = b.length() - msgSetOffset, bundleHeaderLength = msgSetOffset - bundleOffset;
                                 auto &cmpBuf = b2;
                                 const auto o = cmpBuf.length();
+				const uint64_t start = trace  ? Timings::Microseconds::Tick() : 0;
 
                                 if (unlikely(!Compression::Compress(Compression::Algo::SNAPPY, b.At(msgSetOffset), msgSetLen, &cmpBuf)))
                                 {
@@ -281,7 +297,7 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
                                 }
 
                                 if (trace)
-                                        SLog(msgSetLen, " => ", cmpBuf.length(), "\n");
+                                        SLog(size_repr(msgSetLen), " => ", size_repr(cmpBuf.length()), ", in ", duration_repr(Timings::Microseconds::Since(start)), "\n");
 
                                 // TODO: if cmpBuf.length() > msgSetLen, don't use compressed content(not worth it) - also unset flags compression codec bits
 
@@ -336,6 +352,9 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
         bs->reqs_tracker.pendingProduce.insert(reqId);
         bs->outgoing_content.push_back(payload);
         pendingProduceReqs.Add(reqId, {clientReqId, nowMS, ctx, produceCtx.length()});
+
+	if (trace)
+		SLog("Took ", duration_repr(Timings::Microseconds::Since(start)), " to generate produce request\n");
 
         return try_transmit(bs);
 }
@@ -1389,6 +1408,8 @@ bool TankClient::try_send(connection *const c)
 int TankClient::init_connection_to(const Switch::endpoint e)
 {
         struct sockaddr_in sa;
+	int sndBufSize{4*1024*1024};
+
         int fd;
 
         memset(&sa, 0, sizeof(sa));
@@ -1408,6 +1429,8 @@ int TankClient::init_connection_to(const Switch::endpoint e)
                 SLog("Connecting to ", e, "\n");
 
         Switch::SetNoDelay(fd, 1);
+        if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (char *)&sndBufSize, sizeof(sndBufSize)) == -1)
+		Print("WARNING: unable to set socket send buffer size:", strerror(errno), "\n");
 
         if (connect(fd, (sockaddr *)&sa, sizeof(sa)) == -1 && errno != EINPROGRESS)
         {

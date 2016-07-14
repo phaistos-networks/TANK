@@ -774,6 +774,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
         const range32_t fileRange(cur.fileSize, entryLen);
         const auto before = cur.fdh.use_count();
         Switch::shared_refptr<fd_handle> fdh(cur.fdh);
+	const auto b = trace ? Timings::Microseconds::Tick() : uint64_t(0);
 
         require(cur.fdh.use_count() == before + 1);
 
@@ -784,6 +785,9 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
         }
         else
         {
+		if (trace)
+			SLog("writev() took ", duration_repr(Timings::Microseconds::Since(b)), "\n");
+
                 cur.fileSize += entryLen;
                 cur.sinceLastUpdate += entryLen;
 
@@ -1742,6 +1746,7 @@ bool Service::process_replica_reg(connection *const c, const uint8_t *p, const s
 
 bool Service::process_produce(connection *const c, const uint8_t *p, const size_t len)
 {
+        const uint64_t processBegin = trace ? Timings::Microseconds::Tick() : 0;
         auto *const respHeader = get_buffer();
         auto q = c->outQ;
         const auto clientVersion = *(uint16_t *)p;
@@ -1934,6 +1939,11 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
         }
         *(uint32_t *)respHeader->At(sizeOffset) = respHeader->length() - sizeOffset - sizeof(uint32_t);
 
+	if (trace)
+	{
+		// for 100MBs, this takes Took 0.005s
+		SLog("Took ", duration_repr(Timings::Microseconds::Since(processBegin)), "\n");
+	}
 
         return try_send_ifnot_blocked(c);
 }
@@ -2742,6 +2752,7 @@ int Service::start(int argc, char **argv)
                         {
                                 socklen_t saLen = sizeof(sa);
                                 int newFd = accept4(fd, (sockaddr *)&sa, &saLen, SOCK_NONBLOCK | SOCK_CLOEXEC);
+				//int rcvBufSize{4*1024*1024};
 
                                 if (newFd == -1)
                                 {
@@ -2756,6 +2767,12 @@ int Service::start(int argc, char **argv)
                                         require(saLen == sizeof(sockaddr_in));
 
                                         auto c = get_connection();
+
+#if 0
+                                        if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (char *)&rcvBufSize, sizeof(rcvBufSize)) == -1)
+                                                Print("WARNING: unable to set socket receive buffer size:", strerror(errno), "\n");
+
+#endif
 
                                         c->fd = newFd;
                                         c->replicaId = 0;
