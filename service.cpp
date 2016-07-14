@@ -2,10 +2,13 @@
 #include <ansifmt.h>
 #include <compress.h>
 #include <date.h>
+#include <fcntl.h>
 #include <fs.h>
+#include <future>
 #include <random>
 #include <set>
 #include <signal.h>
+#include <switch_mallocators.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
 #include <text.h>
@@ -13,12 +16,9 @@
 #include <thread>
 #include <timings.h>
 #include <unistd.h>
-#include <future>
-#include <fcntl.h>
-#include <switch_mallocators.h>
 
-// From SENDFILE(2): The  original  Linux  sendfile() system call was not designed to handle large file offsets.  
-// Consequently, Linux 2.4 added sendfile64(), with a wider type for the offset argument.  
+// From SENDFILE(2): The  original  Linux  sendfile() system call was not designed to handle large file offsets.
+// Consequently, Linux 2.4 added sendfile64(), with a wider type for the offset argument.
 // The glibc sendfile() wrapper function transparently deals with the kernel differences.
 #define HAVE_SENDFILE64 1
 
@@ -373,7 +373,7 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
 		res.fileOffsetCeiling = ref.absPhysical; 	// XXX: we actually need to set this to (it + 1).absPhysical so that we may not skip a bundle that includes
 								// both the highwater mark but also messages with seqnum < highwater mark
 #else
-		// Yes, incur some tiny I/O overhead so that we 'll properly cut-off the content
+                // Yes, incur some tiny I/O overhead so that we 'll properly cut-off the content
                 res.fileOffsetCeiling = search_before_offset(cur.baseSeqNum, maxSize, maxAbsSeqNum, cur.fdh->fd, cur.fileSize, ref.absPhysical);
 #endif
 
@@ -697,7 +697,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 // so we set cur.sinceLastUpdate = UINT32_MAX to force that
                 cur.sinceLastUpdate = UINT32_MAX;
                 cur.createdTS = Timings::Seconds::SysTime();
-		cur.nameEncodesTS = true;
+                cur.nameEncodesTS = true;
 
                 cur.index.skipList.clear();
                 close(cur.index.fd);
@@ -715,7 +715,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 cur.fdh->Release();
 
                 if (cur.fdh->fd == -1)
-                        throw Switch::system_error("open(", basePath, ") failed:", strerror(errno),". Cannot load segment log");
+                        throw Switch::system_error("open(", basePath, ") failed:", strerror(errno), ". Cannot load segment log");
 
                 basePath.SetLength(basePathLen);
                 basePath.append(cur.baseSeqNum, ".index");
@@ -743,7 +743,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                         SLog("Switched\n");
         }
 
-	// XXX: maybe we should update the index _after_ the log
+        // XXX: maybe we should update the index _after_ the log
         if (cur.sinceLastUpdate > config.indexInterval)
         {
                 const uint32_t out[] = {uint32_t(absSeqNum - cur.baseSeqNum), cur.fileSize};
@@ -775,19 +775,19 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
         const range32_t fileRange(cur.fileSize, entryLen);
         const auto before = cur.fdh.use_count();
         Switch::shared_refptr<fd_handle> fdh(cur.fdh);
-	const auto b = trace ? Timings::Microseconds::Tick() : uint64_t(0);
+        const auto b = trace ? Timings::Microseconds::Tick() : uint64_t(0);
 
         require(cur.fdh.use_count() == before + 1);
 
-	// https://github.com/phaistos-networks/TANK/issues/14
+        // https://github.com/phaistos-networks/TANK/issues/14
         if (writev(fd, iov, sizeof_array(iov)) != entryLen)
         {
                 RFLog("Failed to writev():", strerror(errno), "\n");
         }
         else
         {
-		if (trace)
-			SLog("writev() took ", duration_repr(Timings::Microseconds::Since(b)), "\n");
+                if (trace)
+                        SLog("writev() took ", duration_repr(Timings::Microseconds::Since(b)), "\n");
 
                 cur.fileSize += entryLen;
                 cur.sinceLastUpdate += entryLen;
@@ -1420,7 +1420,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         l->cur.nameEncodesTS = curLogCreateTS;
                         l->cur.flush_state.pendingFlushMsgs = 0;
                         l->cur.flush_state.nextFlushTS = config.flushIntervalSecs ? now + config.flushIntervalSecs : UINT32_MAX;
- 
+
                         if (trace)
                                 SLog("createdTS(", l->cur.createdTS, ") nameEncodesTS(", l->cur.nameEncodesTS, ")\n");
                 }
@@ -1584,21 +1584,31 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                                         respHeader->Serialize(range.len);
 
 #ifdef __linux__
-							// Initiate readahead on that range so that our subsequent sendfile() from that file will be satisfied from the cache, and will not block on disk I/O
-							// (assuming we have initiated readahead early enough and other activity on the system did not in the meantime flush pages from cache)
-							//
-							// This syscall attempts to schedule the read in the background and return immediately.
-							// However, it may block while it reads the FS metadata needed to locate the requested blocks. This occurs frquently with ext[234] on large files
-							// using indirect blocks instead of extents, giving the appearance that the call blocks until the requested data have been read.
-							//
-							// XXX: I need to find out if readahead() will only read pages not already paged-in, or will re-read pages even if already resident in memory.
-							// XXX: I am not sure if this is a good idea - need to further measure the impact and gains
-							//
-							// UPDATE:
-							// http://lxr.free-electrons.com/source/mm/readahead.c
-							// 	Looks like it will inly deal with pages not mapped yet. The cost should be mininal, though
-							// 	the kernel does have to iterate all pages in the range and look each of those in a RBT.
-							readahead(res.fdh->fd, range.offset, range.len);
+                                                        // Initiate readahead on that range so that our subsequent sendfile() from that file will be satisfied from the cache, and will not block on disk I/O
+                                                        // (assuming we have initiated readahead early enough and other activity on the system did not in the meantime flush pages from cache)
+                                                        //
+                                                        // This syscall attempts to schedule the read in the background and return immediately.
+                                                        // However, it may block while it reads the FS metadata needed to locate the requested blocks. This occurs frquently with ext[234] on large files
+                                                        // using indirect blocks instead of extents, giving the appearance that the call blocks until the requested data have been read.
+                                                        //
+                                                        // XXX: I need to find out if readahead() will only read pages not already paged-in, or will re-read pages even if already resident in memory.
+                                                        // XXX: I am not sure if this is a good idea - need to further measure the impact and gains
+                                                        //
+                                                        // UPDATE:
+                                                        // http://lxr.free-electrons.com/source/mm/readahead.c
+                                                        // 	Looks like it will inly deal with pages not mapped yet. The cost should be mininal, though
+                                                        // 	the kernel does have to iterate all pages in the range and look each of those in a RBT.
+
+                                                        if (1)
+                                                        {
+                                                                // See https://github.com/phaistos-networks/TANK/issues/14 for measurements
+                                                                const uint64_t b = trace ? Timings::Microseconds::Tick() : 0;
+
+                                                                readahead(res.fdh->fd, range.offset, range.len);
+
+                                                                if (trace)
+                                                                        SLog("Took ", duration_repr(Timings::Microseconds::Since(b)), " for readahead(", range, ") ", size_repr(range.len), "\n");
+                                                        }
 #endif
 
                                                         sum += range.len;
@@ -1763,7 +1773,7 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
         strwlen8_t topicName;
         strwlen32_t msgContent;
 
-	Drequire(!respHeader->length());
+        Drequire(!respHeader->length());
 
         respHeader->Serialize(uint8_t(1));
         const auto sizeOffset = respHeader->length();
@@ -1776,21 +1786,20 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
         if (!q)
                 q = c->outQ = get_outgoing_queue();
 
-	// It is very important that we queue this buffer(respHeader) here, before we may do in wakeup_wait_ctx()
-	// so that if a client has issued a produce and a consume request for the same (topic,partition) from the same connection, the client
-	// will get the produce response first and the consume later.
-	// 
-	// Also, in this case, to avoid wakeup_wait_ctx() to invoke try_send_ifnot_blocked() which would mean that
-	// it would send this produce response respHeader before it has been built, we are going
-	// to provide this connection to wakeup_wait_ctx() so that it will check if the connection it need to wake up
-	// is this connection, and if so, not wake it up for we will wake it up here.
+        // It is very important that we queue this buffer(respHeader) here, before we may do in wakeup_wait_ctx()
+        // so that if a client has issued a produce and a consume request for the same (topic,partition) from the same connection, the client
+        // will get the produce response first and the consume later.
+        //
+        // Also, in this case, to avoid wakeup_wait_ctx() to invoke try_send_ifnot_blocked() which would mean that
+        // it would send this produce response respHeader before it has been built, we are going
+        // to provide this connection to wakeup_wait_ctx() so that it will check if the connection it need to wake up
+        // is this connection, and if so, not wake it up for we will wake it up here.
         q->push_back(respHeader);
 
         respHeader->Serialize(requestId);
 
         if (trace)
                 SLog("Parsing ", topicsCnt, "\n");
-
 
         for (uint32_t i{0}; i != topicsCnt; ++i)
         {
@@ -1846,7 +1855,6 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
 
                         if (trace)
                                 SLog("partitionId = ", partitionId, ",  bundleLen = ", bundleLen, "\n");
-
 
                         // BEGIN: bundle header
                         const auto bundleFlags = *p++;
@@ -1927,7 +1935,6 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                         (void)b;
 #endif
 
-
                         respHeader->Serialize(uint8_t(0));
 
                         while (expiredCtxList.size())
@@ -1940,11 +1947,11 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
         }
         *(uint32_t *)respHeader->At(sizeOffset) = respHeader->length() - sizeOffset - sizeof(uint32_t);
 
-	if (trace)
-	{
-		// for 100MBs, this takes Took 0.005s
-		SLog("Took ", duration_repr(Timings::Microseconds::Since(processBegin)), "\n");
-	}
+        if (trace)
+        {
+                // for 100MBs, this takes Took 0.005s
+                SLog("Took ", duration_repr(Timings::Microseconds::Since(processBegin)), "\n");
+        }
 
         return try_send_ifnot_blocked(c);
 }
@@ -2058,11 +2065,11 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes,
 
         destroy_wait_ctx(wctx);
 
-	if (c != produceConnection)
-	{
-		// see process_produce()
-        	try_send_ifnot_blocked(c);
-	}	
+        if (c != produceConnection)
+        {
+                // see process_produce()
+                try_send_ifnot_blocked(c);
+        }
 }
 
 void Service::abort_wait_ctx(wait_ctx *const wctx)
@@ -2284,6 +2291,7 @@ bool Service::try_send(connection *const c)
                                                 continue;
                                         else if (errno == EAGAIN)
                                         {
+                                        set_need_outavail:
                                                 if (haveCork)
                                                 {
                                                         if (trace)
@@ -2314,24 +2322,40 @@ bool Service::try_send(connection *const c)
                                         q->pop_front();
                                         break;
                                 }
+
+                                if (r != range.len)
+                                {
+                                        // if we didn't get to write() all the data we wanted to write
+					// it means that the socket buffer is now full, and it will almost definitely
+					// not be drained by the time we call write() again in this loop; we 'd insted
+					// get EAGAIN.
+					// So we 'll just consider the socket buffer full now and execute the EAGAIN logic
+                                        goto set_need_outavail;
+                                }
                         }
                 }
                 else
                 {
-			// https://github.com/phaistos-networks/TANK/issues/14
+                        // https://github.com/phaistos-networks/TANK/issues/14
                         for (;;)
                         {
                                 auto &range = it.file_range.range;
+                                const uint64_t before = trace ? Timings::Microseconds::Tick() : 0;
+                                const auto outLen = range.len;
+
 #ifdef HAVE_SENDFILE64
                                 off64_t offset = range.offset;
-                                auto r = sendfile64(fd, it.file_range.fdh->fd, &offset, range.len);
+                                const auto r = sendfile64(fd, it.file_range.fdh->fd, &offset, outLen);
 #else
                                 off_t offset = range.offset;
-                                auto r = sendfile(fd, it.file_range.fdh->fd, &offset, range.len);
+                                const auto r = sendfile(fd, it.file_range.fdh->fd, &offset, outLen);
 #endif
 
                                 if (trace)
-                                        SLog("Sending contents ", range, " => ", r, "\n");
+                                {
+                                        // See https://github.com/phaistos-networks/TANK/issues/14 for measurements
+                                        SLog("Sending contents ", range, " => ", r, " ", duration_repr(Timings::Microseconds::Since(before)), "\n");
+                                }
 
                                 if (r == -1)
                                 {
@@ -2339,6 +2363,7 @@ bool Service::try_send(connection *const c)
                                                 continue;
                                         else if (errno == EAGAIN)
                                         {
+                                        set_need_outavail2:
                                                 if (trace)
                                                         SLog("EAGAIN (haveCork = ", haveCork, ", needOutAvail = ", (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))), ")\n");
 
@@ -2374,6 +2399,16 @@ bool Service::try_send(connection *const c)
                                                 it.file_range.fdh->Release();
                                                 q->pop_front();
                                                 break;
+                                        }
+
+                                        if (r != outLen)
+                                        {
+                                                // if we didn't get to sendfile() all the data we wanted to write
+                                                // it means that the socket buffer is now full, and it will almost definitely
+                                                // not be drained by the time we call sendfile() again in this loop; we 'd insted
+                                                // get EAGAIN.
+                                                // So we 'll just consider the socket buffer full now and execute the EAGAIN logic
+                                                goto set_need_outavail2;
                                         }
                                 }
                         }
@@ -2413,12 +2448,12 @@ Service::~Service()
 
         while (connsPool.size())
                 delete connsPool.Pop();
-	
-	for (auto &it : waitCtxPool)
-	{
-		while (it.size())
-			free(it.Pop());
-	}
+
+        for (auto &it : waitCtxPool)
+        {
+                while (it.size())
+                        free(it.Pop());
+        }
 
 #ifdef LEAN_SWITCH
         for (auto &it : topics)
@@ -2464,17 +2499,17 @@ int Service::start(int argc, char **argv)
                                 }
                                 break;
 
-			case 'h':
-				Print("-p path: Specifies the base path where all topic exist. Used in standalone mode\n");
-				Print("-b endpoint: Specifies that the service will run in standalone mode, listening for connections to that address\n");
-				Print("-v : displays Tank version and exits\n");
-				Print("-h : this help message\n");
-				return 0;
+                        case 'h':
+                                Print("-p path: Specifies the base path where all topic exist. Used in standalone mode\n");
+                                Print("-b endpoint: Specifies that the service will run in standalone mode, listening for connections to that address\n");
+                                Print("-v : displays Tank version and exits\n");
+                                Print("-h : this help message\n");
+                                return 0;
 
-			case 'v':
-				Print("TANK v", TANK_VERSION / 100, ".", TANK_VERSION % 100, ", (C) Phaistos Networks, S.A | http://phaistosnetworks.gr/\n");
-				Print("You can always get the latest release from the GitHub hosted repository at https://github.com/phaistos-networks/TANK\n");
-				return 0;
+                        case 'v':
+                                Print("TANK v", TANK_VERSION / 100, ".", TANK_VERSION % 100, ", (C) Phaistos Networks, S.A | http://phaistosnetworks.gr/\n");
+                                Print("You can always get the latest release from the GitHub hosted repository at https://github.com/phaistos-networks/TANK\n");
+                                return 0;
 
                         default:
                                 return 1;
@@ -2506,8 +2541,8 @@ int Service::start(int argc, char **argv)
         {
                 try
                 {
-			// We will parallelize this across multiple threads so that we can support many thousands of topics and partitions
-			// without incurring a long startup-sequence time
+                        // We will parallelize this across multiple threads so that we can support many thousands of topics and partitions
+                        // without incurring a long startup-sequence time
                         const auto basePathLen = basePath_.length();
                         std::vector<std::pair<topic *, size_t>> pendingPartitions;
                         uint64_t before;
@@ -2525,8 +2560,8 @@ int Service::start(int argc, char **argv)
                                         collectedTopics.push_back({a.CopyOf(name.p, name.len), name.len});
                         }
 
-			if (trace)
-				SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " for initial walk ", collectedTopics.size(), "\n");
+                        if (trace)
+                                SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " for initial walk ", collectedTopics.size(), "\n");
 
                         for (const auto &it : collectedTopics)
                         {
@@ -2571,7 +2606,6 @@ int Service::start(int argc, char **argv)
                                                         if (min != 0 && max != partitionsCnt - 1)
                                                                 throw Switch::system_error("Unexpected partitions list; expected [0, ", partitionsCnt - 1, "]");
 
-
                                                         auto t = Switch::make_sharedref(new topic(name, partitionConfig));
 
                                                         collectLock.lock();
@@ -2581,7 +2615,8 @@ int Service::start(int argc, char **argv)
                                                 }
                                         }
 
-                                }, it));
+                                },
+                                                             it));
                         }
 
                         for (auto &it : futures)
@@ -2669,9 +2704,9 @@ int Service::start(int argc, char **argv)
                 }
         }
         else if (opMode == OperationMode::Clustered)
-	{
-		IMPLEMENT_ME();
-	}
+        {
+                IMPLEMENT_ME();
+        }
 
         if (topics.empty())
         {
@@ -2686,7 +2721,7 @@ int Service::start(int argc, char **argv)
 
         listenFd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 
-	if (listenFd == -1)
+        if (listenFd == -1)
         {
                 Print("socket() failed:", strerror(errno), "\n");
                 return 1;
@@ -2868,21 +2903,21 @@ int Service::start(int argc, char **argv)
                                                         goto nextEvent;
                                                 }
 
-						if (0 == (c->state.flags & (1u << uint8_t(connection::State::Flags::ConsideredReqHeader))))
-						{
-							// So that ingestion of future incoming data will not require buffer reallocations
-							const auto o = (char *)p - b->data();
+                                                if (0 == (c->state.flags & (1u << uint8_t(connection::State::Flags::ConsideredReqHeader))))
+                                                {
+                                                        // So that ingestion of future incoming data will not require buffer reallocations
+                                                        const auto o = (char *)p - b->data();
 
-							if (trace)
-								SLog("Need to reserve(", msgLen, ")\n");
+                                                        if (trace)
+                                                                SLog("Need to reserve(", msgLen, ")\n");
 
-							b->reserve(msgLen);
+                                                        b->reserve(msgLen);
 
-							p = (uint8_t *)b->At(o);
-							e = (uint8_t *)b->End();
+                                                        p = (uint8_t *)b->At(o);
+                                                        e = (uint8_t *)b->End();
 
-							c->state.flags |= 1u << uint8_t(connection::State::Flags::ConsideredReqHeader);
-						}
+                                                        c->state.flags |= 1u << uint8_t(connection::State::Flags::ConsideredReqHeader);
+                                                }
 
                                                 if (p + msgLen > e)
                                                 {
@@ -2892,7 +2927,7 @@ int Service::start(int argc, char **argv)
                                                         goto l1;
                                                 }
 
-						c->state.flags  &= ~(1u << uint8_t(connection::State::Flags::ConsideredReqHeader));
+                                                c->state.flags &= ~(1u << uint8_t(connection::State::Flags::ConsideredReqHeader));
                                                 if (!process_msg(c, msg, reinterpret_cast<const uint8_t *>(p), msgLen))
                                                         goto nextEvent;
 
@@ -2969,17 +3004,16 @@ int Service::start(int argc, char **argv)
 topic *Service::topic_by_name(const strwlen8_t name) const
 {
 #ifdef LEAN_SWITCH
-	auto it = topics.find(name);
+        auto it = topics.find(name);
 
-	if (it != topics.end())
-		return it->second;
+        if (it != topics.end())
+                return it->second;
 #else
-	return topics[name];
+        return topics[name];
 #endif
 
         return nullptr;
 }
-
 
 int main(int argc, char *argv[])
 {
