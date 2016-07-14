@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <future>
 #include <fcntl.h>
+#include <switch_mallocators.h>
 
 // From SENDFILE(2): The  original  Linux  sendfile() system call was not designed to handle large file offsets.  
 // Consequently, Linux 2.4 added sendfile64(), with a wider type for the offset argument.  
@@ -2445,7 +2446,7 @@ int Service::start(int argc, char **argv)
         signal(SIGPIPE, SIG_IGN);
         signal(SIGHUP, SIG_IGN);
         signal(SIGINT, sig_handler);
-        while ((r = getopt(argc, argv, "p:l:")) != -1)
+        while ((r = getopt(argc, argv, "p:l:hv")) != -1)
         {
                 switch (r)
                 {
@@ -2462,6 +2463,18 @@ int Service::start(int argc, char **argv)
                                         return 1;
                                 }
                                 break;
+
+			case 'h':
+				Print("-p path: Specifies the base path where all topic exist. Used in standalone mode\n");
+				Print("-b endpoint: Specifies that the service will run in standalone mode, listening for connections to that address\n");
+				Print("-v : displays Tank version and exits\n");
+				Print("-h : this help message\n");
+				return 0;
+
+			case 'v':
+				Print("TANK v", TANK_VERSION / 100, ".", TANK_VERSION % 100, ", (C) Phaistos Networks, S.A | http://phaistosnetworks.gr/\n");
+				Print("You can always get the latest release from the GitHub hosted repository at https://github.com/phaistos-networks/TANK\n");
+				return 0;
 
                         default:
                                 return 1;
