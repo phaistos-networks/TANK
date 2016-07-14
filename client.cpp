@@ -1025,8 +1025,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                                 if (trace)
                                                         SLog("Boundaries\n");
-
-                                                goto nextPartition;
+						break;
                                         }
 
                                         const auto msgFlags = *p++; // msg.flags
@@ -1064,8 +1063,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                                         if (trace)
                                                                 SLog("Boundaries\n");
-
-                                                        goto nextPartition;
+							break;
                                                 }
                                                 else
                                                 {
@@ -1159,7 +1157,9 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                 nextPartition:
                         // It's possible that next is what we requested already, if
                         // we couldn't parse a single message from any bundle for this (topic, partition)  - i.e consumptionsList.empty() == true
-                        const auto next = consumptionList.size() ? Max(requestedSeqNum == UINT64_MAX ? 0 : requestedSeqNum, consumptionList.back().seqNum + 1) : requestedSeqNum;
+                        const auto next = consumptionList.size()
+                                              ? requestedSeqNum == UINT64_MAX ? consumptionList.back().seqNum + 1 : Max(requestedSeqNum, consumptionList.back().seqNum + 1)
+                                              : requestedSeqNum;
 
                         if (const uint32_t cnt = consumptionList.size())
                         {
@@ -1285,7 +1285,7 @@ bool TankClient::try_recv(connection *const c)
                                         // because we already reserve()d FIONREAD result earlier and this could also
                                         // cause problems with references in e.g consumedPartitionContent that derefs buffer's data
                                         if (trace)
-                                                SLog("Need more content (len = ", len, ") for msg(", msg, ")\n");
+                                                SLog("Need more content (len = ", len, ") for msg(", msg, "), now have = ", b->length(), "\n");
 
                                         return true;
                                 }

@@ -71,6 +71,7 @@ int main(int argc, char *argv[])
 				Print("-b broker endpoint: The endpoint of the Tank broker\n");
 				Print("-t topic: The topic to produce to or consume from\n");
 				Print("-p partition: The partition of the topic to produce to or consme from\n");
+				Print("-v : Verbose output\n");
 				Print("Commands available: consume, produce, benchmark\n");
 				return 0;
 
@@ -152,7 +153,7 @@ int main(int argc, char *argv[])
                         TS
                 };
                 uint8_t displayFields{1u << uint8_t(Fields::Content)};
-                static constexpr size_t defaultMinFetchSize{32 * 1024 * 1024};
+                static constexpr size_t defaultMinFetchSize{48 * 1024 * 1024};
                 size_t minFetchSize{defaultMinFetchSize};
                 uint32_t pendingResp{0};
 		bool statsOnly{false};
