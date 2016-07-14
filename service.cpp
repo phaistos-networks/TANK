@@ -2337,6 +2337,11 @@ bool Service::try_send(connection *const c)
                 else
                 {
                         // https://github.com/phaistos-networks/TANK/issues/14
+			// if only FreeBSD's great sendfile() syscall was available on Linux, with support for the
+			// extra flags based on NGINX's and Netflix's work, that'd make everything so much simpler.
+			// We 'd just use the SF_NODISKIO flag and the SF_READAHEAD macro, and check for EBUSY
+			// and optionally use readahead() and try again later(we could also mmap() the log and use mincore() to determine if
+			// all pages are cached)
                         for (;;)
                         {
                                 auto &range = it.file_range.range;

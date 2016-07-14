@@ -1,6 +1,7 @@
 #pragma once
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <netdb.h>
 #include <netinet/tcp.h>
 #include <poll.h>
 #include <sys/epoll.h>
@@ -155,7 +156,19 @@ namespace Switch
                         bool succ;
 
                         res.addr4 = ParseHostAddress({r.first.p, r.first.len}, succ);
-                        if (!succ)
+                        if (!succ && r.first.len < 250)
+                        {
+                                char n[256], buf[512];
+                                struct hostent ret, *he;
+                                int errno_;
+
+                                r.first.ToCString(n);
+                                if (gethostbyname_r(n, &ret, buf, sizeof(buf), &he, &errno_) == 0 && he && he->h_addrtype == AF_INET && he->h_length)
+                                        res.addr4 = *(uint32_t *)he->h_addr_list[0];
+                                else
+                                        return {0, 0};
+                        }
+                        else
                                 return {0, 0};
                 }
 

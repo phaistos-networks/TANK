@@ -1,4 +1,5 @@
 HOST:=$(shell hostname)
+HOST:=
 SWITCH_DEP:=
 
 ifeq ($(HOST), origin)
