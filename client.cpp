@@ -1280,20 +1280,17 @@ bool TankClient::try_recv(connection *const c)
                                 const auto len = *(uint32_t *)p;
                                 p += sizeof(uint32_t);
 
-                                if (0 == (c->state.flags & (1u << uint8_t(connection::State::Flags::ConsideredReqHeader))))
+                                if (0 == (c->state.flags & ((1u << uint8_t(connection::State::Flags::LockedInputBuffer)) | (1u << uint8_t(connection::State::Flags::ConsideredReqHeader)))))
                                 {
                                         // So that ingestion of future incoming data will not require buffer reallocations
-					if (0 == (c->state.flags & (1u << uint8_t(connection::State::Flags::LockedInputBuffer))))
-                                        {
-						// We need to make sure we won't force a reallocation of the internal buffer memory
-						// See LockedInputBuffer comments
-                                                const auto o = (char *)p - b->data();
+                                        // We need to make sure we won't force a reallocation of the internal buffer memory
+                                        // See LockedInputBuffer comments
+                                        const auto o = (char *)p - b->data();
 
-                                                b->reserve(len);
+                                        b->reserve(len);
 
-                                                p = (uint8_t *)b->At(o);
-                                                e = (uint8_t *)b->End();
-                                        }
+                                        p = (uint8_t *)b->At(o);
+                                        e = (uint8_t *)b->End();
 
                                         c->state.flags |= 1u << uint8_t(connection::State::Flags::ConsideredReqHeader);
                                 }
