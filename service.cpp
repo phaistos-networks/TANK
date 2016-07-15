@@ -17,7 +17,7 @@
 #include <timings.h>
 #include <unistd.h>
 
-// From SENDFILE(2): The  original  Linux  sendfile() system call was not designed to handle large file offsets.
+// From SENDFILE(2): The  original Linux sendfile() system call was not designed to handle large file offsets.
 // Consequently, Linux 2.4 added sendfile64(), with a wider type for the offset argument.
 // The glibc sendfile() wrapper function transparently deals with the kernel differences.
 #define HAVE_SENDFILE64 1
@@ -570,6 +570,7 @@ void topic_partition_log::consider_ro_segments()
                 segment->fdh.reset(nullptr);
 
                 sum -= segment->fileSize;
+		delete segment;
                 roSegments->pop_front();
         }
 
@@ -2497,7 +2498,6 @@ int Service::start(int argc, char **argv)
 
         signal(SIGPIPE, SIG_IGN);
         signal(SIGHUP, SIG_IGN);
-        signal(SIGINT, sig_handler);
         while ((r = getopt(argc, argv, "p:l:hv")) != -1)
         {
                 switch (r)
@@ -2792,6 +2792,7 @@ int Service::start(int argc, char **argv)
 
         poller.AddFd(listenFd, POLLIN, &listenFd);
 
+        signal(SIGINT, sig_handler);
         while (likely(running))
         {
                 const auto r = poller.Poll(1000);
