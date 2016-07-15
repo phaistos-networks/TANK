@@ -47,14 +47,22 @@ class TankClient
 
         using topic_partition = std::pair<strwlen8_t, uint16_t>;
 
+	// there is one such payload per request
+	// we are going to keep them around even after we have dispatched them 
+	// in case we want to retry them; that is the purprose of the pendingRespList and retainForAck
         struct outgoing_payload
         {
                 outgoing_payload *next;
+                switch_dlist pendingRespList;
+
                 IOBuffer *b{nullptr}, *b2{nullptr};
 
                 struct iovec iov[256];
                 uint8_t iovCnt{0};
                 uint8_t iovIdx{0};
+		bool retainForAck{false};
+
+                uint32_t __id;
         };
 
         struct consume_ctx
@@ -121,6 +129,7 @@ class TankClient
         struct active_consume_req
         {
                 uint32_t clientReqId;
+		outgoing_payload *reqPayload;
                 uint64_t ts;
                 uint64_t *seqNums;
                 uint8_t seqNumsCnt;
@@ -129,6 +138,7 @@ class TankClient
         struct active_produce_req
         {
                 uint32_t clientReqId;
+		outgoing_payload *reqPayload;
                 uint64_t ts;
                 uint8_t *ctx;
                 uint32_t ctxLen;
@@ -228,6 +238,8 @@ class TankClient
                 struct connection *con{nullptr};
                 const Switch::endpoint endpoint;
 
+		switch_dlist retainedPayloadsList;
+
                 enum class Reachability : uint8_t
                 {
                         Reachable = 0, 	// Definitely reachable, or we just don't know yet for we haven't tried to connect
@@ -251,6 +263,26 @@ class TankClient
                 struct
                 {
                         outgoing_payload *front_{nullptr}, *back_{nullptr};
+
+			void push_front(outgoing_payload *const p)
+			{
+				p->iovIdx = 0;
+				p->next = front_;
+				front_ = p;
+				if (!back_)
+					back_ = front_;
+			}
+
+			// this will be a no-op a few revisions later
+			// just need to make sure ordering is preserved
+			void validate()
+			{
+				if (auto it = front_)
+				{
+					for (auto prev = it; (it = it->next); )
+						require(it->__id > prev->__id);
+				}
+			}
 
                         void push_back(outgoing_payload *const p)
                         {
@@ -289,7 +321,7 @@ class TankClient
                 broker(const Switch::endpoint e)
 			: endpoint{e}
 		{
-
+			switch_dlist_init(&retainedPayloadsList);
 		}
         };
 
@@ -370,9 +402,15 @@ class TankClient
                 return buffersPool.size() ? buffersPool.Pop() : new IOBuffer();
         }
 
+        void ack_payload(broker *, outgoing_payload *);
+
+        void prepare_retransmission(broker *);
+
         bool try_recv(connection *const c);
 
         bool try_send(connection *const c);
+
+        void retain_for_resp(broker *, outgoing_payload *);
 
         void put_buffer(IOBuffer *const b)
         {
@@ -386,12 +424,19 @@ class TankClient
                 }
         }
 
+	uint32_t __nextPayloadId{0};
+
         auto get_payload()
         {
                 auto res = payloadsPool.size() ? payloadsPool.Pop() : new outgoing_payload();
 
                 res->b = get_buffer();
                 res->b2 = get_buffer();
+
+		{
+			// See broker::outgoing_content::validate()
+			res->__id = ++__nextPayloadId;
+		}
 
                 return res;
         }
@@ -402,6 +447,7 @@ class TankClient
         {
                 p->iovCnt = p->iovIdx = 0;
                 p->next = nullptr;
+		p->retainForAck = false;
 
                 if (p->b)
                         put_buffer(p->b);
