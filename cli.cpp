@@ -13,15 +13,19 @@ int main(int argc, char *argv[])
 	int r;
 	TankClient tankClient;
 	const char *const app = argv[0];
-	bool verbose{false};
+	bool verbose{false}, retry{false};
 
 	if (argc == 1)
 		goto help;
 
-	while ((r = getopt(argc, argv, "+vb:t:p:h")) != -1) 	// see GETOPT(3) for '+' initial character semantics
+	while ((r = getopt(argc, argv, "+vb:t:p:hr")) != -1) 	// see GETOPT(3) for '+' initial character semantics
         {
                 switch (r)
                 {
+			case 'r':
+				retry = true;
+				break;
+
 			case 'v':
 				verbose = true;
 				break;
@@ -256,7 +260,13 @@ int main(int argc, char *argv[])
                         for (const auto &it : tankClient.faults())
                         {
 				consider_fault(it);
-				return 1;
+				if (retry && it.type == TankClient::fault::Type::Network)
+				{
+					Timings::Milliseconds::Sleep(400);
+					pendingResp = 0;
+				}
+				else
+					return 1;
 			}
 
 			for (const auto &it : tankClient.consumed())
@@ -332,7 +342,13 @@ int main(int argc, char *argv[])
                         for (const auto &it : tankClient.faults())
                         {
                                 consider_fault(it);
-                                return false;
+				if (retry && it.type == TankClient::fault::Type::Network)
+                                {
+                                        Timings::Milliseconds::Sleep(400);
+					pendingResps.clear();
+                                }
+                                else
+                                        return false;
                         }
 
                         for (const auto &it : tankClient.produce_acks())
