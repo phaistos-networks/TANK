@@ -542,21 +542,29 @@ void topic_partition_log::consider_ro_segments()
                 sum += it->fileSize;
 
         if (trace)
-                SLog(ansifmt::bold, "Considering segments sum=", sum, ", total = ", roSegments->size(), " limits { roSegmentsCnt ", config.roSegmentsCnt, ", roSegmentsSize ", config.roSegmentsSize, "}", ansifmt::reset, "\n");
+                SLog(ansifmt::bold, ansifmt::color_blue, "Considering segments sum=", sum, ", total = ", roSegments->size(), " limits { roSegmentsCnt ", config.roSegmentsCnt, ", roSegmentsSize ", config.roSegmentsSize, "}", ansifmt::reset, "\n");
 
-        while (((config.roSegmentsCnt && roSegments->size() > config.roSegmentsCnt) || (config.roSegmentsSize && sum > config.roSegmentsSize) || (roSegments->front()->createdTS && config.lastSegmentMaxAge && roSegments->front()->createdTS + config.lastSegmentMaxAge < nowTS)) && roSegments->size())
+        while (roSegments->size() && ((config.roSegmentsCnt && roSegments->size() > config.roSegmentsCnt) || (config.roSegmentsSize && sum > config.roSegmentsSize) || (roSegments->front()->createdTS && config.lastSegmentMaxAge && roSegments->front()->createdTS + config.lastSegmentMaxAge < nowTS)))
         {
                 auto segment = roSegments->front();
                 const auto basePathLen = basePath.length();
 
                 if (trace)
-                        SLog(ansifmt::color_red, "Removing ", segment->baseSeqNum, ansifmt::reset, "\n");
+                        SLog(ansifmt::bold, ansifmt::color_red, "Removing ", segment->baseSeqNum, ansifmt::reset, "\n");
 
-                basePath.append("/", segment->baseSeqNum, "-", segment->lastAvailSeqNum, ".ilog");
-                unlink(basePath.data());
+                basePath.append("/", segment->baseSeqNum, "-", segment->lastAvailSeqNum, "_", segment->createdTS, ".ilog");
+                if (unlink(basePath.data()) == -1)
+			Print("Failed to unlink ", basePath, ": ", strerror(errno), "\n");
+		else if (trace)
+			SLog("Removed ", basePath, "\n");
+
                 basePath.SetLength(basePathLen);
                 basePath.append("/", segment->baseSeqNum, ".index");
-                unlink(basePath.data());
+                if (unlink(basePath.data()) == -1)
+			Print("Failed to unlink ", basePath, ": ", strerror(errno), "\n");
+		else if (trace)
+			SLog("Removed ", basePath, "\n");
+
                 basePath.SetLength(basePathLen);
 
                 segment->fdh.reset(nullptr);
@@ -565,7 +573,11 @@ void topic_partition_log::consider_ro_segments()
                 roSegments->pop_front();
         }
 
-        firstAvailableSeqNum = roSegments->front()->baseSeqNum;
+	if (roSegments->size())
+        	firstAvailableSeqNum = roSegments->front()->baseSeqNum;
+	else
+		firstAvailableSeqNum = cur.baseSeqNum;
+
         if (trace)
                 SLog("firstAvailableSeqNum now = ", firstAvailableSeqNum, "\n");
 }
@@ -2822,10 +2834,13 @@ int Service::start(int argc, char **argv)
 
 #if 0
                                         {
-                                                int rcvBufSize{16 * 1024 * 1024};
+						// Default (socket.send.buffer and socket.receive.buffer) from Kafka
+                                                int rcvBufSize{102400}, sndBufSize{102400};
 
                                                 if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (char *)&rcvBufSize, sizeof(rcvBufSize)) == -1)
                                                         Print("WARNING: unable to set socket receive buffer size:", strerror(errno), "\n");
+                                                if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (char *)&sndBufSize, sizeof(sndBufSize)) == -1)
+                                                        Print("WARNING: unable to set socket send buffer size:", strerror(errno), "\n");
                                         }
 #endif
 
