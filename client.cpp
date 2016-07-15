@@ -83,6 +83,16 @@ TankClient::~TankClient()
                         put_payload(p);
                 }
 
+
+		for (auto it = bs->retainedPayloadsList.next; it != &bs->retainedPayloadsList; )
+		{
+			auto next = it->next;
+			auto payload = switch_list_entry(outgoing_payload, pendingRespList, it);
+
+			put_payload(payload);
+			it = next;
+		}
+
                 for (const auto id : bs->reqs_tracker.pendingConsume)
                 {
                         const auto res = pendingConsumeReqs.detach(id);
