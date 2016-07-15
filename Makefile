@@ -4,9 +4,10 @@ SWITCH_DEP:=
 ifeq ($(HOST), origin)
 # When building on our dev.system
 	include /home/system/Development/Switch/Makefile.dfl
-	CXXFLAGS:=$(CPPFLAGS_SANITY_DEBUG) #-fsanitize=address
-	LDFLAGS:=$(LDFLAGS__DEBUG) -L$(SWITCH_BASE) -lswitch -lpthread -ldl -lcrypto -lz -lssl -ljemalloc #-fsanitize=address
+	CXXFLAGS:=$(CPPFLAGS_SANITY_DEBUG) -fsanitize=address
+	LDFLAGS:=$(LDFLAGS__DEBUG) -L$(SWITCH_BASE) -lswitch -lpthread -ldl -lcrypto -lz -lssl -ljemalloc -fsanitize=address
 	SWITCH_LIB:=-lswitch
+	#CXX:=scan-build clang++
 	CXX:=clang++
 else
 # Lean switch bundled in this repo
