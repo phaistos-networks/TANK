@@ -360,10 +360,22 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
 
         memcpy(ctx, produceCtx.data(), produceCtx.length());
 
-	payload->retainForAck = true;
         bs->reqs_tracker.pendingProduce.insert(reqId);
         bs->outgoing_content.push_back(payload);
+#if 0
+	payload->retainForAck = true;
         pendingProduceReqs.Add(reqId, {clientReqId, payload, nowMS, ctx, produceCtx.length()});
+#else
+	// This not an idempotent request
+	// If we have managed to write _all_ data of the request to the socket buffer, then we can't tell if
+	// the request has reached the broker, the broker has processed the request, the broker sent a response but we never got it, etc
+	// So if we reschedule the request like we do with idempotent requests if retryStrategy == RetryStrategy::RetryAlways, it is possible
+	// we 'll publish the same messages twice, or more.
+	//
+	// In the future, we 'll need a tunagble for those kind of requests. For now, the selected retryStrategy does not apply
+	// to publis requests.
+        pendingProduceReqs.Add(reqId, {clientReqId, nullptr, nowMS, ctx, produceCtx.length()});
+#endif
 
 
 	if (trace)

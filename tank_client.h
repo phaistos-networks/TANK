@@ -60,6 +60,9 @@ class TankClient
                 struct iovec iov[256];
                 uint8_t iovCnt{0};
                 uint8_t iovIdx{0};
+
+		// if this set, it means this payload must be retained if it has been sent via write()
+		// until the response for the request of this payload is received
 		bool retainForAck{false};
 
                 uint32_t __id;
