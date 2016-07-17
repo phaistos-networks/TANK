@@ -784,7 +784,9 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
         const auto reqInfo = res.value();
         const auto clientReqId = reqInfo.clientReqId;
 
-	ack_payload(bs, reqInfo.reqPayload);
+	if (auto payload = reqInfo.reqPayload)
+		ack_payload(bs, payload);
+
         Defer({ free(reqInfo.ctx); });
 	
 	c->state.flags|=(1u << uint8_t(connection::State::Flags::LockedInputBuffer));
