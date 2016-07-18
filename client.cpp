@@ -506,7 +506,7 @@ bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::e
         uint8_t topicsCnt{0};
         const auto reqId = ids_tracker.leader_reqs.next++;
 
-        b.Serialize<uint8_t>(uint8_t(TankAPIMsgType::Consume)); // request msg.type
+        b.Serialize(uint8_t(TankAPIMsgType::Consume)); // request msg.type
         const auto reqSizeOffset = b.length();
         b.MakeSpace(sizeof(uint32_t)); // request length
 
