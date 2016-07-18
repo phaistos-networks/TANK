@@ -1834,9 +1834,9 @@ uint32_t TankClient::produce(const std::vector<
 
 void TankClient::set_topic_leader(const strwlen8_t topic, const strwlen32_t endpoint)
 {
-        Drequire(topic);
         const auto e = Switch::ParseSrvEndpoint(endpoint, {_S("tank")}, 11011);
 
+        Drequire(topic);
         if (!e)
                 throw Switch::data_error("Unable to parse leader endpoint");
 
@@ -1886,10 +1886,10 @@ uint32_t TankClient::consume(const std::vector<
 {
         auto &out = consumeOut;
 
-        out.clear();
         if (trace)
                 SLog("About to request consume from ", req.size(), " topics\n");
 
+        out.clear();
         for (const auto &p : req)
         {
                 const auto ref = p.first;
@@ -1942,5 +1942,6 @@ void TankClient::broker::set_reachability(const Reachability r)
 {
         if (trace)
                 SLog(ansifmt::bold, ansifmt::color_green, "Reachability from ", uint8_t(reachability), " to ", uint8_t(r), ansifmt::reset, "\n");
+
         reachability = r;
 }
