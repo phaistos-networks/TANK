@@ -83,15 +83,14 @@ TankClient::~TankClient()
                         put_payload(p);
                 }
 
+                for (auto it = bs->retainedPayloadsList.next; it != &bs->retainedPayloadsList;)
+                {
+                        auto next = it->next;
+                        auto payload = switch_list_entry(outgoing_payload, pendingRespList, it);
 
-		for (auto it = bs->retainedPayloadsList.next; it != &bs->retainedPayloadsList; )
-		{
-			auto next = it->next;
-			auto payload = switch_list_entry(outgoing_payload, pendingRespList, it);
-
-			put_payload(payload);
-			it = next;
-		}
+                        put_payload(payload);
+                        it = next;
+                }
 
                 for (const auto id : bs->reqs_tracker.pendingConsume)
                 {
@@ -152,7 +151,7 @@ uint8_t TankClient::choose_compression_codec(const msg *const msgs, const size_t
 
 bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::endpoint leader, const produce_ctx *const produce, const size_t cnt)
 {
-	const uint64_t start = trace ? Timings::Microseconds::Tick() : 0;
+        const uint64_t start = trace ? Timings::Microseconds::Tick() : 0;
         auto bs = broker_state(leader);
         auto payload = get_payload();
         auto &b = *payload->b;
@@ -170,7 +169,7 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
 
         // req(msg, size) not serialized here, we 'll use payload->iov[] to make sure they are transmitted before anything else later
 
-	b.reserve(256);
+        b.reserve(256);
         b.Serialize<uint16_t>(1); // client version
         b.Serialize<uint32_t>(reqId);
         b.Serialize(clientId.len);
@@ -238,22 +237,22 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
 
                         const auto msgSetOffset = b.length();
                         uint64_t lastTS{0};
-			size_t required{0};
+                        size_t required{0};
 
                         if (trace)
                                 SLog("Packing ", it->msgsCnt, " for bundle msg set, for partition ", it->partitionId, "\n");
 
-			// This helps a lot; down from 0.84 to 0.226 for 1,000,000 messages, of 100bytes each
+                        // This helps a lot; down from 0.84 to 0.226 for 1,000,000 messages, of 100bytes each
                         for (uint32_t i{0}; i != it->msgsCnt; ++i)
                         {
                                 const auto &m = it->msgs[i];
 
-				required+=m.key.len;
-				required+=m.content.len;
-			}
-			required += it->msgsCnt * (16);
+                                required += m.key.len;
+                                required += m.content.len;
+                        }
+                        required += it->msgsCnt * (16);
 
-			b.reserve(required);
+                        b.reserve(required);
 
                         for (uint32_t i{0}; i != it->msgsCnt; ++i)
                         {
@@ -299,7 +298,7 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
                                 const auto msgSetLen = b.length() - msgSetOffset, bundleHeaderLength = msgSetOffset - bundleOffset;
                                 auto &cmpBuf = b2;
                                 const auto o = cmpBuf.length();
-				const uint64_t start = trace  ? Timings::Microseconds::Tick() : 0;
+                                const uint64_t start = trace ? Timings::Microseconds::Tick() : 0;
 
                                 if (unlikely(!Compression::Compress(Compression::Algo::SNAPPY, b.At(msgSetOffset), msgSetLen, &cmpBuf)))
                                 {
@@ -340,8 +339,8 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
 
         b.reserve(sizeof(uint8_t) + sizeof(uint32_t));
         payload->iov[payload->iovCnt++] = {b.End(), sizeof(uint8_t) + sizeof(uint32_t)};
-        b.Serialize(uint8_t(1));        // req.msgtype (1= produce)
-        b.Serialize<uint32_t>(reqSize); // req.size
+        b.Serialize(uint8_t(TankAPIMsgType::Produce)); // req.msgtype
+        b.Serialize<uint32_t>(reqSize);                // req.size
 
         for (const auto &r : ranges)
         {
@@ -366,25 +365,47 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
 	payload->retainForAck = true;
         pendingProduceReqs.Add(reqId, {clientReqId, payload, nowMS, ctx, produceCtx.length()});
 #else
-	// This not an idempotent request
-	// If we have managed to write _all_ data of the request to the socket buffer, then we can't tell if
-	// the request has reached the broker, the broker has processed the request, the broker sent a response but we never got it, etc
-	// So if we reschedule the request like we do with idempotent requests if retryStrategy == RetryStrategy::RetryAlways, it is possible
-	// we 'll publish the same messages twice, or more.
+        // This not an idempotent request
 	//
-	// In the future, we 'll need a tunagble for those kind of requests. For now, the selected retryStrategy does not apply
-	// to publis requests.
+        // If we have managed to write _all_ data of the request to the socket buffer, then we can't tell if
+        // the request has reached the broker, the broker has processed the request, the broker sent a response but we never got it, etc
+	//
+        // So if we reschedule the request like we do with idempotent requests if retryStrategy == RetryStrategy::RetryAlways, it is possible
+        // we 'll publish the same messages twice, or more.
+        //
+        // In the future, we 'll need a tunable for those kind of requests. For now, the selected retryStrategy does not apply
+        // to publish requests.
         pendingProduceReqs.Add(reqId, {clientReqId, nullptr, nowMS, ctx, produceCtx.length()});
 #endif
 
+        track_inflight_req(reqId, nowMS, TankAPIMsgType::Produce);
 
-	if (trace)
-		SLog("Took ", duration_repr(Timings::Microseconds::Since(start)), " to generate produce request\n");
+        if (trace)
+                SLog("Took ", duration_repr(Timings::Microseconds::Since(start)), " to generate produce request\n");
 
         return try_transmit(bs);
 }
 
-// TODO: if too many outgoing messages in bs->outgoing_content, and in Reachability::Blocked reachability, 
+void TankClient::track_inflight_req(const uint32_t reqId, const uint64_t ts, const TankAPIMsgType reqMsg)
+{
+        // TODO: https://github.com/phaistos-networks/TANK/issues/21
+        if (trace)
+                SLog("Registering ", reqId, " of type ", uint8_t(reqMsg), "\n");
+}
+
+void TankClient::consider_inflight_reqs(const uint64_t ts)
+{
+        // TODO: https://github.com/phaistos-networks/TANK/issues/21
+}
+
+void TankClient::forget_inflight_req(const uint32_t reqId, const TankAPIMsgType reqMsg)
+{
+        // TODO: https://github.com/phaistos-networks/TANK/issues/21
+        if (trace)
+                SLog("Forgetting ", reqId, " of type ", uint8_t(reqMsg), "\n");
+}
+
+// TODO: if too many outgoing messages in bs->outgoing_content, and in Reachability::Blocked reachability,
 // we need to flush_broker(bs); return false;  so that we won't use too much memory queuing up too much data
 bool TankClient::try_transmit(broker *const bs)
 {
@@ -419,8 +440,8 @@ bool TankClient::try_transmit(broker *const bs)
                 {
                         auto c = bs->con;
 
-			if (trace)
-				SLog("MaybeReachable or Reachable\n");
+                        if (trace)
+                                SLog("MaybeReachable or Reachable\n");
 
                         if (!c)
                         {
@@ -434,7 +455,7 @@ bool TankClient::try_transmit(broker *const bs)
 
                                 c = get_connection();
 
-				Drequire(bs);
+                                Drequire(bs);
                                 c->bs = bs;
                                 bs->con = c;
 
@@ -466,11 +487,10 @@ bool TankClient::try_transmit(broker *const bs)
 
                         return true;
 
-		default:
-			IMPLEMENT_ME();
-			break;
+                default:
+                        IMPLEMENT_ME();
+                        break;
         }
-
 
         flush_broker(bs);
         return false;
@@ -486,7 +506,7 @@ bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::e
         uint8_t topicsCnt{0};
         const auto reqId = ids_tracker.leader_reqs.next++;
 
-        b.Serialize<uint8_t>(2); // request msg.type=2(fetch)
+        b.Serialize<uint8_t>(uint8_t(TankAPIMsgType::Consume)); // request msg.type
         const auto reqSizeOffset = b.length();
         b.MakeSpace(sizeof(uint32_t)); // request length
 
@@ -542,19 +562,21 @@ bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::e
         memcpy(seqsNumsData, absSeqNums, sizeof(uint64_t) * absSeqNumsCnt);
         pendingConsumeReqs.Add(reqId, {clientReqId, payload, nowMS, seqsNumsData, absSeqNumsCnt});
 
+        track_inflight_req(reqId, nowMS, TankAPIMsgType::Consume);
+
         // patch request length
         *(uint32_t *)b.At(reqSizeOffset) = b.length() - reqSizeOffset - sizeof(uint32_t);
 
         payload->iov[payload->iovCnt++] = {(void *)b.data(), b.length()};
 
         bs->reqs_tracker.pendingConsume.insert(reqId);
-	payload->retainForAck = true;
+        payload->retainForAck = true;
         bs->outgoing_content.push_back(payload);
 
-	if (trace)
-		SLog(ansifmt::color_green, "About to transmit", ansifmt::reset,"\n");
+        if (trace)
+                SLog(ansifmt::color_green, "About to transmit", ansifmt::reset, "\n");
 
-	return try_transmit(bs);
+        return try_transmit(bs);
 }
 
 void TankClient::flush_broker(broker *const bs)
@@ -571,17 +593,19 @@ void TankClient::flush_broker(broker *const bs)
         }
         bs->outgoing_content.front_ = bs->outgoing_content.back_ = nullptr;
 
-	for (auto it = bs->retainedPayloadsList.next; it != &bs->retainedPayloadsList; )
-	{
-		auto next = it->next;
-		auto payload = switch_list_entry(outgoing_payload, pendingRespList, it);
+        for (auto it = bs->retainedPayloadsList.next; it != &bs->retainedPayloadsList;)
+        {
+                auto next = it->next;
+                auto payload = switch_list_entry(outgoing_payload, pendingRespList, it);
 
-		put_payload(payload);
-		it = next;
-	}
+                put_payload(payload);
+                it = next;
+        }
 
         for (const auto id : bs->reqs_tracker.pendingConsume)
         {
+                forget_inflight_req(id, TankAPIMsgType::Consume);
+
                 const auto res = pendingConsumeReqs.detach(id);
                 auto info = res.value();
 
@@ -592,6 +616,8 @@ void TankClient::flush_broker(broker *const bs)
 
         for (const auto id : bs->reqs_tracker.pendingProduce)
         {
+                forget_inflight_req(id, TankAPIMsgType::Produce);
+
                 const auto res = pendingProduceReqs.detach(id);
                 const auto info = res.value();
 
@@ -600,8 +626,8 @@ void TankClient::flush_broker(broker *const bs)
         }
         bs->reqs_tracker.pendingProduce.clear();
 
-	if (trace)
-		SLog("capturedFaults ", capturedFaults.size(), "\n");
+        if (trace)
+                SLog("capturedFaults ", capturedFaults.size(), "\n");
 }
 
 void TankClient::track_na_broker(broker *const bs)
@@ -612,7 +638,7 @@ void TankClient::track_na_broker(broker *const bs)
         if (trace)
                 SLog("N/A broker, current reachability ", uint8_t(bs->reachability), ", retries = ", bs->block_ctx.retries, ", retryStrategy = ", unsigned(retryStrategy), "\n");
 
-	if (retryStrategy == RetryStrategy::RetryNever)
+        if (retryStrategy == RetryStrategy::RetryNever)
         {
                 bs->set_reachability(broker::Reachability::Unreachable);
                 bs->block_ctx.until = nowMS + Timings::Seconds::ToMillis(8);
@@ -621,9 +647,9 @@ void TankClient::track_na_broker(broker *const bs)
 
         if (bs->reachability == broker::Reachability::MaybeReachable)
         {
-                if (ctx->retries >= 3)
+                if (ctx->retries >= 4)
                 {
-                        // Give up - try again way, way later, and reject all new requests
+                        // Give up - try again in 1 minute, and reject all new requests until then
                         bs->set_reachability(broker::Reachability::Unreachable);
                         bs->block_ctx.until = nowMS + Timings::Seconds::ToMillis(60);
 
@@ -651,7 +677,7 @@ void TankClient::track_na_broker(broker *const bs)
 
         ++(ctx->retries);
 
-        const auto delay = SwitchAlgorithms::ComputeExponentialBackoffWithDeccorelatedJitter(Timings::Seconds::ToMillis(8), 500, ctx->prevSleep);
+        const auto delay = SwitchAlgorithms::ComputeExponentialBackoffWithDeccorelatedJitter(Timings::Seconds::ToMillis(8), 720, ctx->prevSleep);
 
         ctx->prevSleep = delay;
         ctx->until = nowMS + delay;
@@ -710,40 +736,40 @@ bool TankClient::shutdown(connection *const c, const uint32_t ref, const bool fa
 
 void TankClient::ack_payload(broker *const bs, outgoing_payload *const p)
 {
-	if (trace)
-		SLog(ansifmt::color_magenta, "ACKnowledgeing payload for broker", ansifmt::reset, "\n");
-	
-	require(p->retainForAck);
-	require(p->pendingRespList.next != &p->pendingRespList);
+        if (trace)
+                SLog(ansifmt::color_magenta, "ACKnowledgeing payload for broker", ansifmt::reset, "\n");
 
-	p->retainForAck = false;
-	switch_dlist_del_and_reset(&p->pendingRespList);
+        require(p->retainForAck);
+        require(p->pendingRespList.next != &p->pendingRespList);
 
-	put_payload(p);
+        p->retainForAck = false;
+        switch_dlist_del_and_reset(&p->pendingRespList);
+
+        put_payload(p);
 }
 
 void TankClient::prepare_retransmission(broker *const bs)
 {
-	if (trace)
-		SLog(ansifmt::color_magenta, ansifmt::bold, "Preparing transmission (retainedPayloadsList.len = ", switch_dlist_size(&bs->retainedPayloadsList), ")", ansifmt::reset, "\n");
+        if (trace)
+                SLog(ansifmt::color_magenta, ansifmt::bold, "Preparing transmission (retainedPayloadsList.len = ", switch_dlist_size(&bs->retainedPayloadsList), ")", ansifmt::reset, "\n");
 
-	// reset remaining payloads in outgoing queue
+        // reset remaining payloads in outgoing queue
         for (auto it = bs->outgoing_content.front(); it && it->iovIdx; it = it->next)
                 it->iovIdx = 0;
 
-	// insert all retained payloads to front
-	for (auto it = bs->retainedPayloadsList.next; it != &bs->retainedPayloadsList; it = it->next)
-	{
-		auto payload = switch_list_entry(outgoing_payload, pendingRespList, it);
+        // insert all retained payloads to front
+        for (auto it = bs->retainedPayloadsList.next; it != &bs->retainedPayloadsList; it = it->next)
+        {
+                auto payload = switch_list_entry(outgoing_payload, pendingRespList, it);
 
-		if (trace)
-			SLog(ansifmt::color_magenta, "Rescheduling retained payload ", ptr_repr(payload), ansifmt::reset, "\n");
+                if (trace)
+                        SLog(ansifmt::color_magenta, "Rescheduling retained payload ", ptr_repr(payload), ansifmt::reset, "\n");
 
-		bs->outgoing_content.push_front(payload);
-	}
-	switch_dlist_init(&bs->retainedPayloadsList);
+                bs->outgoing_content.push_front(payload);
+        }
+        switch_dlist_init(&bs->retainedPayloadsList);
 
-	bs->outgoing_content.validate();
+        bs->outgoing_content.validate();
 }
 
 void TankClient::reschedule_any()
@@ -766,7 +792,7 @@ void TankClient::reschedule_any()
                 if (trace)
                         SLog("Will now try reschedule(reachability set to MaybeReachable), rescheduleQueue.size() = ", rescheduleQueue.size(), "\n");
 
-		prepare_retransmission(bs);
+                prepare_retransmission(bs);
                 try_transmit(bs);
         }
 
@@ -784,20 +810,22 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
         const auto reqInfo = res.value();
         const auto clientReqId = reqInfo.clientReqId;
 
-	if (auto payload = reqInfo.reqPayload)
-		ack_payload(bs, payload);
+        if (auto payload = reqInfo.reqPayload)
+                ack_payload(bs, payload);
 
         Defer({ free(reqInfo.ctx); });
-	
-	c->state.flags|=(1u << uint8_t(connection::State::Flags::LockedInputBuffer));
+
+        c->state.flags |= (1u << uint8_t(connection::State::Flags::LockedInputBuffer));
 
         if (trace)
                 SLog("got produce resp\n");
 
         bs->reqs_tracker.pendingProduce.erase(reqId);
+        forget_inflight_req(reqId, TankAPIMsgType::Produce);
+
         for (const auto *ctx = reqInfo.ctx, *const ctxEnd = ctx + reqInfo.ctxLen; p != e;)
         {
-		require(ctx < ctxEnd);
+                require(ctx < ctxEnd);
 
                 auto err = *p++;
                 const strwlen8_t topicName((char *)ctx + 1, *ctx);
@@ -874,7 +902,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
         const auto *bundles = p + respHeaderLen, *const bundlesBase = bundles;
         const auto reqId = *(uint32_t *)p;
 
-	c->state.flags|=(1u << uint8_t(connection::State::Flags::LockedInputBuffer));
+        c->state.flags |= (1u << uint8_t(connection::State::Flags::LockedInputBuffer));
 
         if (trace)
                 SLog("Processing consume response for ", reqId, ", of length ", len, "\n");
@@ -888,11 +916,11 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
         uint8_t reqOffsetIdx{0};
         strwlen8_t key;
 
-
-	ack_payload(bs, reqInfo.reqPayload);
+        ack_payload(bs, reqInfo.reqPayload);
         Defer({ free(reqInfo.seqNums); });
 
         bs->reqs_tracker.pendingConsume.erase(reqId);
+        forget_inflight_req(reqId, TankAPIMsgType::Consume);
 
         for (uint32_t i{0}; i != topicsCnt; ++i)
         {
@@ -1125,7 +1153,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                                 if (trace)
                                                         SLog("Boundaries\n");
-						break;
+                                                break;
                                         }
 
                                         const auto msgFlags = *p++; // msg.flags
@@ -1163,7 +1191,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                                         if (trace)
                                                                 SLog("Boundaries\n");
-							break;
+                                                        break;
                                                 }
                                                 else
                                                 {
@@ -1293,23 +1321,22 @@ bool TankClient::process(connection *const c, const uint8_t msg, const uint8_t *
         if (trace)
                 SLog("PROCESS ", msg, " ", len, "\n");
 
-        switch (msg)
+        switch (TankAPIMsgType(msg))
         {
-                case 1:
+                case TankAPIMsgType::Produce:
                         return process_produce(c, content, len);
 
-                case 2:
+                case TankAPIMsgType::Consume:
                         return process_consume(c, content, len);
 
-                case 3:
+                case TankAPIMsgType::Ping:
                         if (trace)
                                 SLog("PING\n");
-
                         return true;
 
                 default:
                         shutdown(c, __LINE__);
-			return false;
+                        return false;
         }
 }
 
@@ -1339,16 +1366,16 @@ bool TankClient::try_recv(connection *const c)
                         else if (errno == EAGAIN)
                                 return true;
                         else
-			{
+                        {
                                 shutdown(c, __LINE__, true);
-				return false;
-			}
+                                return false;
+                        }
                 }
                 else if (!r)
-		{
+                {
                         shutdown(c, __LINE__, true);
-			return false;
-		}
+                        return false;
+                }
                 else
                 {
                         const auto *p = (uint8_t *)b->AtOffset();
@@ -1365,7 +1392,7 @@ bool TankClient::try_recv(connection *const c)
                         }
 
                         c->state.lastInputTS = nowMS;
-			c->state.flags &= ~(1u << uint8_t(connection::State::Flags::LockedInputBuffer));
+                        c->state.flags &= ~(1u << uint8_t(connection::State::Flags::LockedInputBuffer));
 
                         b->AdvanceLength(r);
 
@@ -1434,8 +1461,8 @@ bool TankClient::try_recv(connection *const c)
 
 void TankClient::retain_for_resp(broker *const bs, outgoing_payload *const p)
 {
-	switch_dlist_init(&p->pendingRespList);
-	switch_dlist_insert_after(&bs->retainedPayloadsList, &p->pendingRespList);
+        switch_dlist_init(&p->pendingRespList);
+        switch_dlist_insert_after(&bs->retainedPayloadsList, &p->pendingRespList);
 }
 
 bool TankClient::try_send(connection *const c)
@@ -1444,9 +1471,9 @@ bool TankClient::try_send(connection *const c)
         auto bs = c->bs;
 
         Drequire(bs);
-	Drequire(c->fd != -1);
+        Drequire(c->fd != -1);
 
-	bs->outgoing_content.validate();
+        bs->outgoing_content.validate();
 
         for (;;)
         {
@@ -1456,7 +1483,7 @@ bool TankClient::try_send(connection *const c)
                 {
                         const auto n = Min<uint32_t>(outEnd - out, (it->iovCnt - it->iovIdx));
 
-			if (trace)
+                        if (trace)
                                 SLog(ansifmt::bold, ansifmt::color_red, "SENDING ", ptr_repr(it), " ", it->iovIdx, ansifmt::reset, "\n");
 
                         memcpy(out, it->iov + it->iovIdx, n * sizeof(struct iovec));
@@ -1516,14 +1543,14 @@ bool TankClient::try_send(connection *const c)
                                         {
                                                 bs->outgoing_content.pop_front();
 
-						if (it->retainForAck)
-						{
-							// We are going to keep this around
-							// until we get a response for the request for this payload
-							retain_for_resp(bs, it);
-						}
-						else
-							put_payload(it);
+                                                if (it->retainForAck)
+                                                {
+                                                        // We are going to keep this around
+                                                        // until we get a response for the request for this payload
+                                                        retain_for_resp(bs, it);
+                                                }
+                                                else
+                                                        put_payload(it);
 
                                                 bs->outgoing_content.front_ = next;
                                                 goto next;
@@ -1597,8 +1624,8 @@ int TankClient::init_connection_to(const Switch::endpoint e)
 void TankClient::poll(uint32_t timeoutMS)
 {
         // Reset state / buffers used for tracking collected content and responses in last poll() call
-	// if this client has joined a consumer group, it is important that the application poll()s giving chances to
-	// the tank client to send H/Bs to the broker so that it won't remove the client from the consumer group. See Kafka Consumer Groups
+        // if this client has joined a consumer group, it is important that the application poll()s giving chances to
+        // the tank client to send H/Bs to the broker so that it won't remove the client from the consumer group. See Kafka Consumer Groups
         for (auto &it : connsBufs)
         {
                 auto c = it.first;
@@ -1624,6 +1651,15 @@ void TankClient::poll(uint32_t timeoutMS)
         while (usedBufs.size())
                 put_buffer(usedBufs.Pop());
 
+        // Reset prior to reschedule_any() not after we have called it
+        // because it may push to capturedFaults[] so we don't want to clear it after we called it
+        resultsAllocator.Reuse();
+        consumedPartitionContent.clear();
+        capturedFaults.clear();
+        produceAcks.clear();
+
+        reschedule_any();
+
         // Adjust timeout if we have any ongoing connection attempts
         if (connectionAttempts.size())
         {
@@ -1632,15 +1668,6 @@ void TankClient::poll(uint32_t timeoutMS)
 
                 timeoutMS = first >= nowMS ? first - nowMS : 0;
         }
-
-	// Reset prior to reschedule_any() not after we have called it
-	// because it may push to capturedFaults[] so we don't want to clear it after we called it
-        resultsAllocator.Reuse();
-        consumedPartitionContent.clear();
-        capturedFaults.clear();
-        produceAcks.clear();
-
-        reschedule_any();
 
         polling.store(true, std::memory_order_relaxed);
 
@@ -1657,7 +1684,6 @@ void TankClient::poll(uint32_t timeoutMS)
         }
 
         nowMS = Timings::Milliseconds::Tick();
-
 
         for (const auto *it = poller.Events(), *const e = it + r; it != e; ++it)
         {
@@ -1726,13 +1752,14 @@ void TankClient::poll(uint32_t timeoutMS)
                 }
 
                 while (connsList.size())
-                        shutdown(connsList.Pop(), __LINE__);
+                        shutdown(connsList.Pop(), __LINE__, true);
         }
 
-        // TODO: if too long since last connection::lastOutputTS, ping
-
-	if (trace)
-		SLog("Returning ", capturedFaults.size(), "\n");
+        if (nowMS > nextInflightReqsTimeoutCheckTs)
+        {
+                consider_inflight_reqs(nowMS);
+                nextInflightReqsTimeoutCheckTs = nowMS + 800;
+        }
 }
 
 uint32_t TankClient::produce(const std::vector<
@@ -1852,12 +1879,12 @@ uint32_t TankClient::consume(const std::vector<
                 });
 
                 if (!consume_from_leader(clientReqId, leader, all + base, i - base, maxWait, minSize))
-		{
-			if (trace)
-				SLog("consume_from_leader() returned false\n");
+                {
+                        if (trace)
+                                SLog("consume_from_leader() returned false\n");
 
                         return 0;
-		}
+                }
         }
 
         return clientReqId;

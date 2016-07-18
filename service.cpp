@@ -1490,7 +1490,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                 if (trace)
                         SLog("topicsCnt = ", topicsCnt, "\n");
 
-                respHeader->Serialize(uint8_t(2));
+                respHeader->Serialize(uint8_t(TankAPIMsgType::Consume));
                 const auto sizeOffset = respHeader->length();
                 respHeader->MakeSpace(sizeof(uint32_t));
 
@@ -1788,7 +1788,7 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
 
         Drequire(!respHeader->length());
 
-        respHeader->Serialize(uint8_t(1));
+        respHeader->Serialize(uint8_t(TankAPIMsgType::Produce));
         const auto sizeOffset = respHeader->length();
         respHeader->MakeSpace(sizeof(uint32_t));
 
@@ -1974,19 +1974,18 @@ bool Service::process_msg(connection *const c, const uint8_t msg, const uint8_t 
         if (trace)
                 SLog("New message  type ", msg, ", len ", len, "\n");
 
-        switch (msg)
+        switch (TankAPIMsgType(msg))
         {
-                case 1:
+                case TankAPIMsgType::Produce:
                         return process_produce(c, data, len);
 
-                case 2:
+                case TankAPIMsgType::Consume:
                         return process_consume(c, data, len);
 
-                case 3: // ping
-                        return true;
-                        break;
+                case TankAPIMsgType::Ping:
+			return true;
 
-                case 4:
+                case TankAPIMsgType::RegReplica:
                         return process_replica_reg(c, data, len);
 
                 default:
@@ -2238,8 +2237,8 @@ bool Service::try_send(connection *const c)
         {
                 uint8_t b[sizeof(uint8_t) + sizeof(uint32_t)];
 
-                b[0] = 3;                               // msg = ping
-                *(uint32_t *)(b + sizeof(uint8_t)) = 0; // no payload
+                b[0] = uint8_t(TankAPIMsgType::Ping);          // msg = ping
+                *(uint32_t *)(b + sizeof(uint8_t)) = 0; 	// no payload
 
                 if (trace)
                         SLog("PINGING\n");

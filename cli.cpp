@@ -18,12 +18,14 @@ int main(int argc, char *argv[])
 	if (argc == 1)
 		goto help;
 
+	tankClient.set_retry_strategy(TankClient::RetryStrategy::RetryNever);
 	while ((r = getopt(argc, argv, "+vb:t:p:hr")) != -1) 	// see GETOPT(3) for '+' initial character semantics
         {
                 switch (r)
                 {
 			case 'r':
 				retry = true;
+				tankClient.set_retry_strategy(TankClient::RetryStrategy::RetryAlways);
 				break;
 
 			case 'v':
@@ -436,12 +438,15 @@ int main(int argc, char *argv[])
 
 						if (msgs.size() == bundleSize)
 						{
-							if (!publish_msgs())
-								return false;
+							const auto r = publish_msgs();
 
 							for (auto &it : msgs)
 								std::free(const_cast<char *>(it.content.p));
+
 							msgs.clear();
+
+							if (!r)
+								return false;
 						}
                                         }
                                         else
@@ -450,12 +455,15 @@ int main(int argc, char *argv[])
 
 				if (last && msgs.size())
                                 {
-                                        if (!publish_msgs())
-                                                return false;
+                                        const auto r = publish_msgs();
 
                                         for (auto &it : msgs)
                                                 std::free(const_cast<char *>(it.content.p));
+
                                         msgs.clear();
+
+                                        if (!r)
+                                                return false;
                                 }
 
                                 if (!range)

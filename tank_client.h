@@ -57,7 +57,7 @@ class TankClient
 
                 IOBuffer *b{nullptr}, *b2{nullptr};
 
-                struct iovec iov[256];
+                struct iovec iov[64];
                 uint8_t iovCnt{0};
                 uint8_t iovIdx{0};
 
@@ -328,6 +328,7 @@ class TankClient
 		}
         };
 
+	uint64_t nextInflightReqsTimeoutCheckTs{0};
 	RetryStrategy retryStrategy{RetryStrategy::RetryAlways};
 	CompressionStrategy compressionStrategy{CompressionStrategy::CompressIntelligently};
         Switch::unordered_map<Switch::endpoint, broker *> bsMap;
@@ -354,6 +355,7 @@ class TankClient
         Switch::vector<connection *> connectionsPool;
         Switch::vector<outgoing_payload *> payloadsPool;
         Switch::vector<IOBuffer *> buffersPool;
+	size_t buffersPoolPressure{0};
         Switch::vector<range32_t> ranges;
         IOBuffer produceCtx;
         Switch::unordered_map<uint32_t, active_consume_req> pendingConsumeReqs;
@@ -362,7 +364,7 @@ class TankClient
         {
                 bool operator()(const broker *const b1, const broker *const b2)
                 {
-			return b1->block_ctx.until < b2->block_ctx.until;
+			return b1->block_ctx.until > b2->block_ctx.until;
                 }
         };
         std::priority_queue<broker *, std::vector<broker *>, reschedule_queue_entry_cmp> rescheduleQueue;
@@ -390,6 +392,12 @@ class TankClient
 
 	bool consider_retransmission(broker *);
 
+	void track_inflight_req(const uint32_t, const uint64_t, const TankAPIMsgType);
+
+	void consider_inflight_reqs(const uint64_t);
+
+	void forget_inflight_req(const uint32_t, const TankAPIMsgType);
+
         bool shutdown(connection *const c, const uint32_t ref, const bool fault = false);
 
         void reschedule_any();
@@ -402,7 +410,15 @@ class TankClient
 
         auto get_buffer()
         {
-                return buffersPool.size() ? buffersPool.Pop() : new IOBuffer();
+		if (buffersPool.size())
+		{
+			auto b = buffersPool.Pop();
+
+			buffersPoolPressure-=b->Reserved();
+			return b;
+		}
+		else
+			return new IOBuffer();
         }
 
         void ack_payload(broker *, outgoing_payload *);
@@ -418,10 +434,12 @@ class TankClient
         void put_buffer(IOBuffer *const b)
         {
                 require(b);
-                if (b->Reserved() > 1024 * 1024 || buffersPool.size() > 128)
-                        delete b;
+
+		if (buffersPoolPressure + b->Reserved() > 4 * 1024 * 1024 || buffersPool.size() > 128)
+			delete b;
                 else
                 {
+			buffersPoolPressure -= b->Reserved();
                         b->clear();
                         buffersPool.push_back(b);
                 }
