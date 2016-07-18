@@ -501,7 +501,7 @@ class TankClient
 	void flush_broker(broker *bs);
 
       public:
-        TankClient();
+        TankClient(const strwlen32_t defaultLeader = {});
 
         ~TankClient();
 
@@ -523,10 +523,14 @@ class TankClient
         void poll(uint32_t timeoutMS);
 
         uint32_t produce(const std::vector<std::pair<topic_partition, std::vector<msg>>> &req);
+	
+	uint32_t produce_to(const topic_partition &to, std::vector<msg> &msgs);
 
         Switch::endpoint leader_for(const strwlen8_t topic, const uint16_t partition);
 
         uint32_t consume(const std::vector<std::pair<topic_partition, std::pair<uint64_t, uint32_t>>> &req, const uint64_t maxWait, const uint32_t minSize);
+
+        uint32_t consume_from(const topic_partition &from, const uint64_t seqNum, const uint32_t minFetchSize, const uint64_t maxWait, const uint32_t minSize);
 
         void set_client_id(const char *const p, const uint32_t len)
         {

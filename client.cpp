@@ -41,13 +41,16 @@ void TankClient::bind_fd(connection *const c, int fd)
         connectionAttempts.push_back(c);
 }
 
-TankClient::TankClient()
+TankClient::TankClient(const strwlen32_t defaultLeader)
 {
         switch_dlist_init(&connections);
         if (pipe2(pipeFd, O_CLOEXEC) == -1)
                 throw Switch::system_error("pipe() failed:", strerror(errno));
 
         poller.AddFd(pipeFd[0], POLLIN, &pipeFd[0]);
+
+	if (defaultLeader)
+		set_default_leader(defaultLeader);
 }
 
 TankClient::~TankClient()
@@ -160,6 +163,7 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
         uint8_t topicsCnt{0};
         const auto reqId = ids_tracker.leader_reqs.next++;
 
+	require(cnt); // can't publish an empty messages set
         require(payload->iovCnt == 0);
         ranges.clear();
         produceCtx.clear();
@@ -1762,6 +1766,24 @@ void TankClient::poll(uint32_t timeoutMS)
         }
 }
 
+uint32_t TankClient::produce_to(const topic_partition &to, std::vector<msg> &msgs)
+{
+        const auto clientReqId = ids_tracker.client.produce.next++;
+	const auto leader = leader_for(to.first, to.second);
+	produce_ctx ctx;
+
+	ctx.leader = leader;
+	ctx.topic = to.first;
+	ctx.partitionId = to.second;
+	ctx.msgs = msgs.data();
+	ctx.msgsCnt = msgs.size();
+
+        if (!produce_to_leader(clientReqId, leader, &ctx, 1))
+		return 0;
+	else
+		return clientReqId;
+}
+
 uint32_t TankClient::produce(const std::vector<
                              std::pair<topic_partition, std::vector<msg>>> &req)
 {
@@ -1837,6 +1859,24 @@ Switch::endpoint TankClient::leader_for(const strwlen8_t topic, const uint16_t p
                 throw Switch::data_error("Default leader not specified: use set_default_leader() to specify it");
 
         return defaultLeader;
+}
+
+uint32_t TankClient::consume_from(const topic_partition &from, const uint64_t seqNum, const uint32_t minFetchSize, const uint64_t maxWait, const uint32_t minSize)
+{
+	const auto leader = leader_for(from.first, from.second);
+        const auto clientReqId = ids_tracker.client.consume.next++;
+	consume_ctx ctx;
+
+	ctx.leader = leader;
+	ctx.topic = from.first;
+	ctx.partitionId = from.second;
+	ctx.absSeqNum = seqNum;
+	ctx.fetchSize = minFetchSize;
+
+        if (!consume_from_leader(clientReqId, leader, &ctx, 1, maxWait, minSize))
+		return 0;
+	else
+		return clientReqId;
 }
 
 uint32_t TankClient::consume(const std::vector<
