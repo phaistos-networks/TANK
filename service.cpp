@@ -230,6 +230,7 @@ static void adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
                 // No need for any ajustements
                 if (trace)
                         SLog("No need for any adjustments\n");
+
                 return;
         }
 
@@ -337,7 +338,7 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
                 if (i != e)
                 {
                         if (trace)
-                                SLog("In ondisk index (", i->relSeqNum, ", ", i->absPhysical, ")\n");
+                                SLog("In ondisk index (relSeqNum:", i->relSeqNum, ", absPhysical:", i->absPhysical, ")\n");
 
                         res.absBaseSeqNum = cur.baseSeqNum + i->relSeqNum;
                         res.fileOffset = i->absPhysical;
@@ -1167,8 +1168,8 @@ void Service::rebuild_index(int logFd, int indexFd)
 
                 if (p >= next)
                 {
-                        b.Serialize<uint32_t>(bundleBase - base);
                         b.Serialize<uint32_t>(relSeqNum);
+                        b.Serialize<uint32_t>(bundleBase - base);
                         next = bundleBase + step;
                 }
 
@@ -1188,6 +1189,91 @@ void Service::rebuild_index(int logFd, int indexFd)
 
         fdatasync(indexFd);
 }
+
+uint32_t Service::verify_log(int logFd)
+{
+        const auto fileSize = lseek64(logFd, 0, SEEK_END);
+        auto *const fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, logFd, 0);
+	strwlen8_t key;
+	strwlen32_t msgContent;
+        uint32_t relSeqNum{0};
+	IOBuffer cb;
+        range_base<const uint8_t *, size_t> msgSetContent;
+
+        if (fileData == MAP_FAILED)
+                throw Switch::system_error("Unable to mmap():", strerror(errno));
+
+        Defer({ munmap(fileData, fileSize); });
+        madvise(fileData, fileSize, MADV_SEQUENTIAL);
+
+        for (const auto *p = (uint8_t *)fileData, *const e = p + fileSize, *const base = p; p != e;)
+        {
+		const auto *const bundleBase = p;
+                const auto bundleLen = Compression::UnpackUInt32(p);
+                const auto nextBundle = p + bundleLen;
+
+		require(p < e);
+		require(bundleLen);
+
+                const auto bundleFlags = *p++;
+		const auto codec = bundleFlags & 3;
+                uint32_t msgsSetSize = (bundleFlags >> 2) & 0xf;
+
+                if (!msgsSetSize)
+                        msgsSetSize = Compression::UnpackUInt32(p);
+
+		require(p <= e);
+		require(msgsSetSize);
+		require(codec == 0 || codec == 1);
+
+		if (0)
+			Print(relSeqNum, " => OFFSET ", bundleBase - base, "\n");
+
+		if (codec)
+		{
+			cb.clear();
+			if (!Compression::UnCompress(Compression::Algo::SNAPPY, p, nextBundle - p, &cb))
+				throw Switch::system_error("Failed to decompress content");
+			msgSetContent.Set((uint8_t *)cb.data(), cb.length());
+		}
+		else
+			msgSetContent.Set(p, nextBundle - p);
+
+                uint64_t msgTs{0};
+
+                for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.len; p != e;)
+                {
+                        // Next message set message
+                        const auto flags = *p++;
+
+                        if (!(flags & uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS)))
+                        {
+                                msgTs = *(uint64_t *)p;
+                                p += sizeof(uint64_t);
+                        }
+
+                        if (flags & uint8_t(TankFlags::BundleMsgFlags::HaveKey))
+                        {
+                                key.Set((char *)p + 1, *p);
+                                p += key.len + sizeof(uint8_t);
+                        }
+                        else
+                                key.Unset();
+
+                        const auto msgLen = Compression::UnpackUInt32(p);
+
+                        msgContent.Set((char *)p, msgLen);
+                        p += msgLen;
+                }
+
+                relSeqNum += msgsSetSize;
+                p = nextBundle;
+
+		require(p <= e);
+        }
+
+	return relSeqNum;
+} 
 
 Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint16_t idx, const char *const bp, const partition_config &partitionConf)
 {
@@ -1372,8 +1458,6 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         if (fd == -1)
                                 throw Switch::system_error("open(", basePath, ") failed:", strerror(errno), ". Cannot open current segment log");
 
-			Print(basePath, "..\n");
-
                         l->cur.fdh.reset(new fd_handle(fd));
                         require(l->cur.fdh->use_count() == 2);
                         l->cur.fdh->Release();
@@ -1383,7 +1467,8 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         Snprint(basePath, sizeof(basePath), b, curLogSeqNum, ".index");
                         fd = open(basePath, O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND, 0775);
 
-			SLog(lseek64(fd, 0, SEEK_END), " ", basePath, "\n");
+			if (trace)
+				SLog("Considering ", basePath, "\n");
 
                         if (fd == -1)
                                 throw Switch::system_error("open(", basePath_, ") failed:", strerror(errno), ". Cannot open current segment index");
@@ -1416,7 +1501,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
 #if 1
                                         for (const auto *it = (uint32_t *)l->cur.index.ondisk.data, *const base = it, *const e = it + l->cur.index.ondisk.span / sizeof(uint32_t); it != e; it+=2)
                                         {
-						SLog(it[0], " => ", it[1], "\n");
+						//SLog(it[0], " => ", it[1], "\n");
 						if (it != base)
 						{
 							Drequire(it[0] != it[-2]);
@@ -2573,6 +2658,34 @@ int Service::start(int argc, char **argv)
         struct stat64 st;
         size_t totalPartitions{0};
         Switch::endpoint listenAddr;
+
+	if (argc > 1 && !strcmp(argv[1], "verify"))
+	{
+		for (uint32_t i{2}; i < argc; ++i)
+		{
+			const char *const path = argv[i];
+			int fd = open(path, O_RDONLY|O_LARGEFILE);
+
+			if (fd == -1)
+			{
+				Print("Failed to access ", path, ": ", strerror(errno), "\n");
+				return 1;
+			}
+			else
+			{
+				Print("Verifying ", path, " (", size_repr(lseek64(fd, 0, SEEK_END)), ") ..\n");
+
+				const auto r = Service::verify_log(fd);
+
+				close(fd);
+
+				Print("> ", dotnotation_repr(r), " msgs\n");
+			}
+		}
+
+		Print("All ", argc - 2, " logs verified OK\n");
+		return 0;
+	}
 
         signal(SIGPIPE, SIG_IGN);
         signal(SIGHUP, SIG_IGN);

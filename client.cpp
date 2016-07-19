@@ -1138,7 +1138,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                         break;
 
                                                 default:
-                                                        RFLog("Unexpected\n");
+                                                        RFLog("Unexpected codec ", codec, "\n");
                                                         exit(1);
                                         }
 

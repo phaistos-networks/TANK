@@ -889,6 +889,8 @@ class Service
 	protected:
 	static void rebuild_index(int, int);
 
+	static uint32_t verify_log(int);
+
       public:
         Service()
         {
