@@ -1194,7 +1194,6 @@ void Service::rebuild_index(int logFd, int indexFd)
                 throw Switch::system_error("Failed to truncate index file:", strerror(errno));
 
         fdatasync(indexFd);
-	Print("Exiting\n"); _exit(0);
 }
 
 void Service::verify_index(int fd)
