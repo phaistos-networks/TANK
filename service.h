@@ -71,7 +71,10 @@ struct fd_handle
         ~fd_handle()
         {
                 if (fd != -1)
+		{
+			fdatasync(fd);
                         close(fd);
+		}
         }
 };
 
@@ -300,6 +303,12 @@ struct topic_partition_log
                         for (ro_segment *it : *roSegments)
                                 delete it;
                 }
+
+		if (cur.index.fd != -1)
+		{
+			fdatasync(cur.index.fd);
+			close(cur.index.fd);
+		}
         }
 
         lookup_res read_cur(const uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum);

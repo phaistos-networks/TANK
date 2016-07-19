@@ -720,6 +720,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 cur.nameEncodesTS = true;
 
                 cur.index.skipList.clear();
+		fdatasync(cur.index.fd);
                 close(cur.index.fd);
 
                 if (cur.index.ondisk.data != nullptr && cur.index.ondisk.data != MAP_FAILED)
@@ -1371,6 +1372,8 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         if (fd == -1)
                                 throw Switch::system_error("open(", basePath, ") failed:", strerror(errno), ". Cannot open current segment log");
 
+			Print(basePath, "..\n");
+
                         l->cur.fdh.reset(new fd_handle(fd));
                         require(l->cur.fdh->use_count() == 2);
                         l->cur.fdh->Release();
@@ -1379,6 +1382,8 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
 
                         Snprint(basePath, sizeof(basePath), b, curLogSeqNum, ".index");
                         fd = open(basePath, O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND, 0775);
+
+			SLog(lseek64(fd, 0, SEEK_END), " ", basePath, "\n");
 
                         if (fd == -1)
                                 throw Switch::system_error("open(", basePath_, ") failed:", strerror(errno), ". Cannot open current segment index");
@@ -1477,6 +1482,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
 
                                         next += msgSetSize;
                                         p = bundleEnd;
+                                        Drequire(p <= e);
                                 }
 
                                 l->lastAssignedSeqNum = next - 1;
