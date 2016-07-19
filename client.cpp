@@ -952,6 +952,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                         const auto partitionId = *(uint16_t *)p;
                         p += sizeof(uint16_t);
                         const auto error = *p++;
+			size_t totalSeenBundles{0};
 
                         if (error == 0xff)
                         {
@@ -1032,6 +1033,9 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         break;
                                 }
 
+				if (trace)
+					SLog("NEW bundle at ", p - bundlesBase, "(" ,consumptionList.size(), ") ", ++totalSeenBundles, "\n");
+
                                 const auto bundleLen = Compression::UnpackUInt32(p);
                                 const auto *const bundleEnd = p + bundleLen;
 
@@ -1049,6 +1053,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                         break;
                                 }
+
 
                                 // BEGIN: bundle header
                                 const auto bundleFlags = *p++;
@@ -1145,6 +1150,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 p = bundleEnd;
 
                                 uint64_t ts{0};
+				const auto _saved = consumptionList.size();
 
                                 // Parse the bundle's message set
                                 // if this a compressed messages set, the boundary checks are not necessary
@@ -1156,7 +1162,9 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                 lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - bundlesBase);
 
                                                 if (trace)
-                                                        SLog("Boundaries\n");
+						{
+                                                        SLog("Boundaries, total parsed ", consumptionList.size() - _saved, " ", msgsSetSize, "\n");
+						}
                                                 break;
                                         }
 
@@ -1170,6 +1178,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                 // Using the timestamp of the last message that had a specified timestamp in this bundle
                                                 // This is very useful; if all messages in a bundle have the same timestamp, then
                                                 // we only need to encode the timestamp once
+						if (trace)
+							SLog("Using last specified TS\n");
                                         }
                                         else
                                         {
@@ -1185,6 +1195,9 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                                 ts = *(uint64_t *)p; // msg.timestamp
                                                 p += sizeof(uint64_t);
+
+						if (trace)
+							SLog("Specifying ts = ", ts, "\n");
                                         }
 
                                         if (msgFlags & uint8_t(TankFlags::BundleMsgFlags::HaveKey))
@@ -1195,7 +1208,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                                         if (trace)
                                                                 SLog("Boundaries\n");
-                                                        break;
+
+							goto nextPartition;
                                                 }
                                                 else
                                                 {
@@ -1245,7 +1259,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         const auto msgAbsSeqNum = logBaseSeqNum++; // This message's absolute sequence number
 
                                         if (trace)
-                                                SLog("message length = ", len, ", ts = ", ts, " for (", msgAbsSeqNum, ")\n");
+                                                SLog("message length = ", len, "(", strwlen32_t((char *)p, len).CRC32(), "), ts = ", ts, "(", Date::ts_repr(Timings::Milliseconds::ToSeconds(ts)), " for (", msgAbsSeqNum, ")\n");
 
                                         if (msgAbsSeqNum > highWaterMark)
                                         {

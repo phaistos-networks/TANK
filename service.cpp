@@ -17,7 +17,7 @@
 #include <timings.h>
 #include <unistd.h>
 
-// From SENDFILE(2): The  original Linux sendfile() system call was not designed to handle large file offsets.
+// From SENDFILE(2): The original Linux sendfile() system call was not designed to handle large file offsets.
 // Consequently, Linux 2.4 added sendfile64(), with a wider type for the offset argument.
 // The glibc sendfile() wrapper function transparently deals with the kernel differences.
 #define HAVE_SENDFILE64 1
@@ -67,13 +67,20 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
         else
                 indexFd = open(Buffer::build(base, "/", absSeqNum, ".index").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
 
+        Defer({ if (indexFd != -1) close(indexFd); });
+
         if (indexFd == -1)
         {
-                // TODO: rebuild it
-                throw Switch::system_error("Failed to access the index file:", Buffer::build(base, "/", absSeqNum, ".index"), ": ", strerror(errno));
-        }
+                if (haveWideEntries)
+                        indexFd = open(Buffer::build(base, "/", absSeqNum, "_64.index").data(), O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME);
+                else
+                        indexFd = open(Buffer::build(base, "/", absSeqNum, ".index").data(), O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME);
 
-        Defer({ close(indexFd); });
+                if (indexFd == -1)
+                        throw Switch::system_error("Failed to rebuild index file:", strerror(errno));
+
+                Service::rebuild_index(fdh->fd, indexFd);
+        }
 
         size = lseek64(indexFd, 0, SEEK_END);
 
@@ -723,7 +730,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 
                 basePath.append(cur.baseSeqNum, "_", cur.createdTS, ".log");
 
-                cur.fdh.reset(new fd_handle(open(basePath.data(), O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME, 0775)));
+                cur.fdh.reset(new fd_handle(open(basePath.data(), O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME|O_APPEND, 0775)));
                 require(cur.fdh->use_count() == 2);
                 cur.fdh->Release();
 
@@ -732,7 +739,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 
                 basePath.SetLength(basePathLen);
                 basePath.append(cur.baseSeqNum, ".index");
-                cur.index.fd = open(basePath.data(), O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME, 0775);
+                cur.index.fd = open(basePath.data(), O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND, 0775);
                 basePath.SetLength(basePathLen);
 
                 if (cur.index.fd == -1)
@@ -1126,6 +1133,61 @@ bool Service::parse_partition_config(const char *const path, partition_config *c
         return true;
 }
 
+void Service::rebuild_index(int logFd, int indexFd)
+{
+        const auto fileSize = lseek64(logFd, 0, SEEK_END);
+        auto *const fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, logFd, 0);
+        IOBuffer b;
+        uint32_t relSeqNum{0};
+        static constexpr size_t step{8192};
+
+        if (fileData == MAP_FAILED)
+                throw Switch::system_error("Unable to mmap():", strerror(errno));
+
+        Defer({ munmap(fileData, fileSize); });
+        madvise(fileData, fileSize, MADV_SEQUENTIAL);
+
+	Print("Rebuilding index of log of size ", size_repr(fileSize), " ..\n");
+        for (const auto *p = (uint8_t *)fileData, *const e = p + fileSize, *const base = p, *next = p; p != e;)
+        {
+                const auto bundleBase = p;
+                const auto bundleLen = Compression::UnpackUInt32(p);
+                const auto nextBundle = p + bundleLen;
+
+		Drequire(p < e);
+
+                const auto bundleFlags = *p++;
+                uint32_t msgsSetSize = (bundleFlags >> 2) & 0xf;
+
+                if (!msgsSetSize)
+                        msgsSetSize = Compression::UnpackUInt32(p);
+
+		Drequire(p <= e);
+
+                if (p >= next)
+                {
+                        b.Serialize<uint32_t>(bundleBase - base);
+                        b.Serialize<uint32_t>(relSeqNum);
+                        next = bundleBase + step;
+                }
+
+                relSeqNum += msgsSetSize;
+                p = nextBundle;
+
+		Drequire(p <= e);
+        }
+
+        if (trace)
+                SLog("Rebuilt index ", size_repr(b.length()), ", last ", relSeqNum, "\n");
+
+        if (ftruncate(indexFd, 0))
+                throw Switch::system_error("Failed to truncate index file:", strerror(errno));
+        else if (pwrite64(indexFd, b.data(), b.length(), 0) != b.length())
+                throw Switch::system_error("Failed to store index:", strerror(errno));
+
+        fdatasync(indexFd);
+}
+
 Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint16_t idx, const char *const bp, const partition_config &partitionConf)
 {
         char basePath[PATH_MAX];
@@ -1306,10 +1368,6 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                 Snprint(basePath, sizeof(basePath), b, curLogSeqNum, ".log");
 
                         fd = open(basePath, O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME, 0775);
-
-                        if (trace)
-                                SLog("Have current segment:", basePath, "\n");
-
                         if (fd == -1)
                                 throw Switch::system_error("open(", basePath, ") failed:", strerror(errno), ". Cannot open current segment log");
 
@@ -1320,13 +1378,12 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         l->cur.fileSize = lseek64(fd, 0, SEEK_END);
 
                         Snprint(basePath, sizeof(basePath), b, curLogSeqNum, ".index");
-                        fd = open(basePath, O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME, 0775);
+                        fd = open(basePath, O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND, 0775);
 
                         if (fd == -1)
-                        {
-                                // TODO: rebuild it
                                 throw Switch::system_error("open(", basePath_, ") failed:", strerror(errno), ". Cannot open current segment index");
-                        }
+                        else if (lseek64(fd, 0, SEEK_END) == 0 && l->cur.fileSize)
+                                Service::rebuild_index(l->cur.fdh->fd, fd);
 
                         l->cur.index.fd = fd;
                         // if this an empty commit log, need to update the index immediately
@@ -1348,8 +1405,24 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                 l->cur.index.ondisk.lastRecorded.absPhysical = p[1];
 
                                 if (trace)
+                                {
                                         SLog("Have cur.index.ondisk.span = ", l->cur.index.ondisk.span, " lastRecorded =  ( relSeqNum = ", l->cur.index.ondisk.lastRecorded.relSeqNum, ", absPhysical = ", l->cur.index.ondisk.lastRecorded.absPhysical, ")\n");
+
+#if 1
+                                        for (const auto *it = (uint32_t *)l->cur.index.ondisk.data, *const base = it, *const e = it + l->cur.index.ondisk.span / sizeof(uint32_t); it != e; it+=2)
+                                        {
+						SLog(it[0], " => ", it[1], "\n");
+						if (it != base)
+						{
+							Drequire(it[0] != it[-2]);
+						}
+                                        }
+
+#endif
+                                }
                         }
+
+
 
                         l->lastAssignedSeqNum = 0;
 

@@ -709,6 +709,8 @@ struct connection
 
 class Service
 {
+	friend struct ro_segment;
+
       private:
       	enum class OperationMode  : uint8_t 
 	{
@@ -793,6 +795,7 @@ class Service
                         throw Switch::exception("Topic ", t->name(), " already registered");
         }
 
+
         Switch::shared_refptr<topic_partition> init_local_partition(const uint16_t idx, const char *const bp, const partition_config &);
 
         bool isValidBrokerId(const uint16_t replicaId)
@@ -873,6 +876,9 @@ class Service
         }
 
         bool try_send(connection *const c);
+
+	protected:
+	static void rebuild_index(int, int);
 
       public:
         Service()
