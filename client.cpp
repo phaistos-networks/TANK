@@ -3,6 +3,7 @@
 #include <sys/uio.h>
 #include <text.h>
 #include <unistd.h>
+#include <date.h>
 
 static constexpr bool trace{false};
 
