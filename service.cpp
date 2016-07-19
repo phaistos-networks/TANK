@@ -1150,13 +1150,13 @@ void Service::rebuild_index(int logFd, int indexFd)
         madvise(fileData, fileSize, MADV_SEQUENTIAL);
 
 	Print("Rebuilding index of log of size ", size_repr(fileSize), " ..\n");
-        for (const auto *p = (uint8_t *)fileData, *const e = p + fileSize, *const base = p, *next = p; p != e;)
+        for (const auto *p = reinterpret_cast<const uint8_t *>(fileData), *const e = p + fileSize, *const base = p, *next = p; p != e;)
         {
                 const auto bundleBase = p;
                 const auto bundleLen = Compression::UnpackUInt32(p);
                 const auto nextBundle = p + bundleLen;
 
-		Drequire(p < e);
+		expect(p < e);
 
                 const auto bundleFlags = *p++;
                 uint32_t msgsSetSize = (bundleFlags >> 2) & 0xf;
@@ -1164,7 +1164,7 @@ void Service::rebuild_index(int logFd, int indexFd)
                 if (!msgsSetSize)
                         msgsSetSize = Compression::UnpackUInt32(p);
 
-		Drequire(p <= e);
+		expect(p <= e);
 
                 if (p >= next)
                 {
@@ -1176,24 +1176,64 @@ void Service::rebuild_index(int logFd, int indexFd)
                 relSeqNum += msgsSetSize;
                 p = nextBundle;
 
-		Drequire(p <= e);
+		expect(p <= e);
         }
 
         if (trace)
-                SLog("Rebuilt index ", size_repr(b.length()), ", last ", relSeqNum, "\n");
+                SLog("Rebuilt index ", size_repr(b.length()), ", last ", relSeqNum, ", ", b.length(), "\n");
 
-        if (ftruncate(indexFd, 0))
-                throw Switch::system_error("Failed to truncate index file:", strerror(errno));
-        else if (pwrite64(indexFd, b.data(), b.length(), 0) != b.length())
+        if (pwrite64(indexFd, b.data(), b.length(), 0) != b.length())
                 throw Switch::system_error("Failed to store index:", strerror(errno));
+        if (ftruncate(indexFd, b.length()))
+                throw Switch::system_error("Failed to truncate index file:", strerror(errno));
 
         fdatasync(indexFd);
+	Print("Exiting\n"); _exit(0);
 }
 
-uint32_t Service::verify_log(int logFd)
+void Service::verify_index(int fd)
 {
-        const auto fileSize = lseek64(logFd, 0, SEEK_END);
-        auto *const fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, logFd, 0);
+        const auto fileSize = lseek64(fd, 0, SEEK_END);
+
+	if (!fileSize)
+		return;
+	else if (fileSize & 7)
+		throw Switch::system_error("Unexpected index filesize");
+
+        auto *const fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, fd, 0);
+
+        if (fileData == MAP_FAILED)
+                throw Switch::system_error("Unable to mmap():", strerror(errno));
+
+        Defer({ munmap(fileData, fileSize); });
+        madvise(fileData, fileSize, MADV_SEQUENTIAL);
+
+	for (const auto *p = reinterpret_cast<const uint32_t *>(fileData), 
+		*const e = p + (fileSize / sizeof(uint32_t)), *const b = p; p != e; p+=2)
+        {
+		//SLog(p[0], " ", p[1], "\n");
+
+                if (p != b)
+                {
+                        expect(p[0] > p[-2]);
+                        expect(p[1] > p[-1]);
+                }
+		else
+		{
+			expect(p[0] == 0);
+			expect(p[1] == 0);
+		}
+        }
+}
+
+uint32_t Service::verify_log(int fd)
+{
+        const auto fileSize = lseek64(fd, 0, SEEK_END);
+
+	if (!fileSize)
+		return 0;
+
+        auto *const fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, fd, 0);
 	strwlen8_t key;
 	strwlen32_t msgContent;
         uint32_t relSeqNum{0};
@@ -1212,8 +1252,8 @@ uint32_t Service::verify_log(int logFd)
                 const auto bundleLen = Compression::UnpackUInt32(p);
                 const auto nextBundle = p + bundleLen;
 
-		require(p < e);
-		require(bundleLen);
+		expect(p < e);
+		expect(bundleLen);
 
                 const auto bundleFlags = *p++;
 		const auto codec = bundleFlags & 3;
@@ -1222,9 +1262,9 @@ uint32_t Service::verify_log(int logFd)
                 if (!msgsSetSize)
                         msgsSetSize = Compression::UnpackUInt32(p);
 
-		require(p <= e);
-		require(msgsSetSize);
-		require(codec == 0 || codec == 1);
+		expect(p <= e);
+		expect(msgsSetSize);
+		expect(codec == 0 || codec == 1);
 
 		if (0)
 			Print(relSeqNum, " => OFFSET ", bundleBase - base, "\n");
@@ -1269,7 +1309,7 @@ uint32_t Service::verify_log(int logFd)
                 relSeqNum += msgsSetSize;
                 p = nextBundle;
 
-		require(p <= e);
+		expect(p <= e);
         }
 
 	return relSeqNum;
@@ -2660,32 +2700,60 @@ int Service::start(int argc, char **argv)
         Switch::endpoint listenAddr;
 
 	if (argc > 1 && !strcmp(argv[1], "verify"))
-	{
-		for (uint32_t i{2}; i < argc; ++i)
-		{
-			const char *const path = argv[i];
-			int fd = open(path, O_RDONLY|O_LARGEFILE);
+        {
+                // https://github.com/phaistos-networks/TANK/wiki/Managing-Segments-files
+                size_t n{0};
+                bool anyFailed{false};
 
-			if (fd == -1)
-			{
-				Print("Failed to access ", path, ": ", strerror(errno), "\n");
-				return 1;
-			}
-			else
-			{
-				Print("Verifying ", path, " (", size_repr(lseek64(fd, 0, SEEK_END)), ") ..\n");
+                for (uint32_t i{2}; i < argc; ++i)
+                {
+                        const char *const path = argv[i];
+                        const strwlen32_t fullPath(path);
+                        const auto ext = fullPath.Extension();
 
-				const auto r = Service::verify_log(fd);
+                        if (ext.Eq(_S("ilog")) || ext.Eq(_S("log")) || ext.Eq(_S("index")))
+                        {
+                                int fd = open(path, O_RDONLY | O_LARGEFILE);
 
-				close(fd);
+                                if (fd == -1)
+                                {
+                                        Print("Failed to access ", fullPath, ": ", strerror(errno), "\n");
+                                        return 1;
+                                }
 
-				Print("> ", dotnotation_repr(r), " msgs\n");
-			}
-		}
+                                Defer({ close(fd); });
 
-		Print("All ", argc - 2, " logs verified OK\n");
-		return 0;
-	}
+                                Print("Verifying ", fullPath, " (", size_repr(lseek64(fd, 0, SEEK_END)), ") ..\n");
+
+                                try
+                                {
+                                        if (ext.Eq(_S("ilog")) || ext.Eq(_S("log")))
+                                        {
+                                                const auto r = Service::verify_log(fd);
+
+                                                Print("> ", dotnotation_repr(r), " msgs\n");
+                                        }
+                                        else if (ext.Eq(_S("index")))
+                                        {
+                                                Service::verify_index(fd);
+                                        }
+                                }
+                                catch (const std::exception &e)
+                                {
+                                        Print(ansifmt::bold, ansifmt::color_red, "Failed to verify (", fullPath, ansifmt::reset, ")\n");
+                                        anyFailed = true;
+                                }
+
+                                ++n;
+                        }
+                        else
+                                Print("Ignoring ", fullPath, "\n");
+                }
+
+                if (!anyFailed)
+                        Print(ansifmt::color_green, "All ", dotnotation_repr(n), " files verified OK", ansifmt::reset, "\n");
+                return 0;
+        }
 
         signal(SIGPIPE, SIG_IGN);
         signal(SIGHUP, SIG_IGN);

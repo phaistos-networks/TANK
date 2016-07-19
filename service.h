@@ -891,6 +891,8 @@ class Service
 
 	static uint32_t verify_log(int);
 
+	static void verify_index(int);
+
       public:
         Service()
         {
