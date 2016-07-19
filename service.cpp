@@ -765,24 +765,6 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                         SLog("Switched\n");
         }
 
-        // XXX: maybe we should update the index _after_ the log
-        if (cur.sinceLastUpdate > config.indexInterval)
-        {
-                const uint32_t out[] = {uint32_t(absSeqNum - cur.baseSeqNum), cur.fileSize};
-
-                cur.index.skipList.push_back({out[0], out[1]});
-
-                if (trace)
-                        SLog(">> ", out[0], ", ", out[1], "\n");
-
-                if (unlikely(write(cur.index.fd, out, sizeof(out)) != sizeof(out)))
-                {
-                        RFLog("Failed to write():", strerror(errno), "\n");
-                        return {nullptr, {}, {}};
-                }
-
-                cur.sinceLastUpdate = 0;
-        }
 
         require(cur.fdh.use_count() >= 1);
 
@@ -802,14 +784,38 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
         require(cur.fdh.use_count() == before + 1);
 
         // https://github.com/phaistos-networks/TANK/issues/14
-        if (writev(fd, iov, sizeof_array(iov)) != entryLen)
+        if (unlikely(writev(fd, iov, sizeof_array(iov)) != entryLen))
         {
                 RFLog("Failed to writev():", strerror(errno), "\n");
+		lastAssignedSeqNum = savedLastAssignedSeqNum;
+                return {nullptr, {}, {}};
         }
         else
         {
                 if (trace)
                         SLog("writev() took ", duration_repr(Timings::Microseconds::Since(b)), "\n");
+
+		// Even if we fail to update the index, that's not a big deal because
+		// 1. we can always rebuild the index 2. we use the index to locate the closest bundle to the target sequence number
+                if (cur.sinceLastUpdate > config.indexInterval)
+                {
+                        const uint32_t out[] = {uint32_t(absSeqNum - cur.baseSeqNum), cur.fileSize};
+
+                        cur.index.skipList.push_back({out[0], out[1]});
+
+                        if (trace)
+                                SLog(">> ", out[0], ", ", out[1], "\n");
+
+                        if (unlikely(write(cur.index.fd, out, sizeof(out)) != sizeof(out)))
+                        {
+                                RFLog("Failed to write():", strerror(errno), "\n");
+				// don't restore neither lastAssignedSeqNum from savedLastAssignedSeqNum,  nor fileSize
+				// because this has been accepted
+                                return {nullptr, {}, {}};
+                        }
+
+                        cur.sinceLastUpdate = 0;
+                }
 
                 cur.fileSize += entryLen;
                 cur.sinceLastUpdate += entryLen;
@@ -1563,6 +1569,9 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                 // We just start from the last tracked-recorded (relSeqNum, absPhysical) and skip bundles until EOF
                                 // keeping track of offsets as we go.
                                 const auto span = s - o;
+
+				Drequire(span);
+
                                 uint8_t *const data = (uint8_t *)malloc(span);
                                 // first message in the first bundle we 'll parse
                                 uint64_t next = l->cur.index.ondisk.lastRecorded.relSeqNum + l->cur.baseSeqNum;
@@ -1610,10 +1619,11 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                         Drequire(p <= e);
                                 }
 
+
                                 l->lastAssignedSeqNum = next - 1;
 
                                 if (trace)
-                                        SLog("Set lastAssignedSeqNum = ", l->lastAssignedSeqNum, "\n");
+                                        SLog(ansifmt::bold, "Set lastAssignedSeqNum = ", l->lastAssignedSeqNum, ansifmt::reset, "\n");
                         }
 
                         // Just in case
@@ -2083,6 +2093,12 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                                 // more than 15 messages in the message set; were not able to encode that in the 4 bits reserved
                                 // in flags; so that's encoded as a varint here
                                 msgSetSize = Compression::UnpackUInt32(p);
+
+				if (unlikely(msgSetSize == 0))
+				{
+					// This is absolutely unacceptable
+					return shutdown(c, __LINE__);
+				}
                         }
 
                         if (trace)
@@ -2702,7 +2718,7 @@ int Service::start(int argc, char **argv)
 	if (argc > 1 && !strcmp(argv[1], "verify"))
         {
                 // https://github.com/phaistos-networks/TANK/wiki/Managing-Segments-files
-                size_t n{0};
+                size_t n{0}, tot{0};
                 bool anyFailed{false};
 
                 for (uint32_t i{2}; i < argc; ++i)
@@ -2732,6 +2748,7 @@ int Service::start(int argc, char **argv)
                                                 const auto r = Service::verify_log(fd);
 
                                                 Print("> ", dotnotation_repr(r), " msgs\n");
+						tot+=r;
                                         }
                                         else if (ext.Eq(_S("index")))
                                         {
@@ -2751,7 +2768,7 @@ int Service::start(int argc, char **argv)
                 }
 
                 if (!anyFailed)
-                        Print(ansifmt::color_green, "All ", dotnotation_repr(n), " files verified OK", ansifmt::reset, "\n");
+                        Print(ansifmt::color_green, "All ", dotnotation_repr(n), " files verified OK, ", dotnotation_repr(tot), " messages", ansifmt::reset, "\n");
                 return 0;
         }
 
