@@ -1260,7 +1260,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         const auto msgAbsSeqNum = logBaseSeqNum++; // This message's absolute sequence number
 
                                         if (trace)
-                                                SLog("message length = ", len, "(", strwlen32_t((char *)p, len).CRC32(), "), ts = ", ts, "(", Date::ts_repr(Timings::Milliseconds::ToSeconds(ts)), " for (", msgAbsSeqNum, ")\n");
+                                                SLog("message length = ", len, ", ts = ", ts, "(", Date::ts_repr(Timings::Milliseconds::ToSeconds(ts)), " for (", msgAbsSeqNum, ")\n");
 
                                         if (msgAbsSeqNum > highWaterMark)
                                         {
