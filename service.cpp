@@ -16,6 +16,9 @@
 #include <thread>
 #include <timings.h>
 #include <unistd.h>
+#ifndef LEAN_SWITCH
+#include <switch_debug.h>
+#endif
 
 // From SENDFILE(2): The original Linux sendfile() system call was not designed to handle large file offsets.
 // Consequently, Linux 2.4 added sendfile64(), with a wider type for the offset argument.
@@ -2713,6 +2716,11 @@ int Service::start(int argc, char **argv)
         struct stat64 st;
         size_t totalPartitions{0};
         Switch::endpoint listenAddr;
+
+#ifndef LEAN_SWITCH
+	// See: https://github.com/markpapadakis/BacktraceResolver
+	Switch::trapCommonUnexpectedSignals();
+#endif
 
 	if (argc > 1 && !strcmp(argv[1], "verify"))
         {

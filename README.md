@@ -1,4 +1,4 @@
-Tank is a high performance distributed log, inspired in part by Kafka, and other similar services and technologies.
+Tank is [a very high performance distributed log](https://github.com/phaistos-networks/TANK/wiki/Why-Tank-and-Tank-vs-X), inspired in part by Kafka, and other similar services and technologies.
 
 You should begin by [reading about the core concepts](https://github.com/phaistos-networks/TANK/wiki/Core-Concepts) and the [client API](https://github.com/phaistos-networks/TANK/wiki/Client-API).
 
@@ -19,7 +19,7 @@ It will eventually support, among other features:
 - compactions based on message key (will retain the last published message for each key)
 
 Features include:
-- Very high performance
+- [Very high performance](https://github.com/phaistos-networks/TANK/wiki/Why-Tank-and-Tank-vs-X)
 - Very tight encoding of messages(into bundles)
 - Simple design (Simple is Beautiful; [Convenience is Key](https://medium.com/@markpapadakis/convenience-is-key-2aad97d531cd#.47eyjv6xt))
  
