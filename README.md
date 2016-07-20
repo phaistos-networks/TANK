@@ -6,7 +6,7 @@ It is a work in progress. The core functionality is implemented and tested, and 
 It depends on our Switch library, so a lean/stripped-down Switch is included in the repo. 
 Please see [building instructions](https://github.com/phaistos-networks/TANK/wiki/Building-Tank). You may also want to [run Tank using its Docker image](https://github.com/phaistos-networks/TANK/wiki/Docker).
 
-This is our first major open source release as a company, and we plan to accelerate our OSS release efforts in the future.
+This is [our](http://phaistosnetworks.gr/) first major open source release as a company, and we plan to accelerate our OSS release efforts in the future.
 
 It will eventually support, among other features:
 - [clusters via leader/followers arrangement](https://github.com/phaistos-networks/TANK/wiki/Operation-Modes) using etcd, similar in semantics to Kafka (but no single controller, and simpler configuration and operation)
@@ -24,7 +24,7 @@ Features include:
 - Simple design (Simple is Beautiful; [Convenience is Key](https://medium.com/@markpapadakis/convenience-is-key-2aad97d531cd#.47eyjv6xt))
  
 You should probably use Kafka (the Confluent folk are particularly great ), or Google Pub/Sub, or any other open source broker/queue instead of Tank - they are all perfectly fine, some more than other. 
-Tank's goal is highest performance and simplicity. If you need very high performance, operation simplicity and no reliance on other services (when running Tank in standalonemode), consider Tank.
+Tank's goal is highest performance and simplicity. If you need very high performance, operation simplicity and no reliance on other services (when running Tank in stand-alone mode), consider Tank.
 
 Please see the [wiki](https://github.com/phaistos-networks/TANK/wiki) for more information.
 

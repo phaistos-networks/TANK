@@ -370,6 +370,11 @@ class TankClient
         std::priority_queue<broker *, std::vector<broker *>, reschedule_queue_entry_cmp> rescheduleQueue;
 
       private:
+      	inline void update_time_cache()
+        {
+                nowMS = Timings::Milliseconds::Tick();
+        }
+
         broker *broker_state(const Switch::endpoint e);
 
         static uint8_t choose_compression_codec(const msg *const, const size_t);

@@ -82,6 +82,11 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
                 if (indexFd == -1)
                         throw Switch::system_error("Failed to rebuild index file:", strerror(errno));
 
+		if (haveWideEntries)
+		{
+			IMPLEMENT_ME();
+		}
+
                 Service::rebuild_index(fdh->fd, indexFd);
         }
 
@@ -1144,6 +1149,7 @@ bool Service::parse_partition_config(const char *const path, partition_config *c
         return true;
 }
 
+// TODO: respect configuration
 void Service::rebuild_index(int logFd, int indexFd)
 {
         const auto fileSize = lseek64(logFd, 0, SEEK_END);

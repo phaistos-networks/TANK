@@ -676,6 +676,9 @@ void TankClient::track_na_broker(broker *const bs)
 
         if (bs->reachability != broker::Reachability::Blocked)
         {
+		if (trace)
+			SLog("Now set to blocked\n");
+
                 ctx->prevSleep = 400;
                 ctx->retries = 0;
                 ctx->naSince = nowMS;
@@ -692,7 +695,7 @@ void TankClient::track_na_broker(broker *const bs)
         rescheduleQueue.push(bs);
 
         if (trace)
-                SLog(ansifmt::color_blue, "retries = ", ctx->retries, ", until = ", ctx->until, ", rescheduleQueue.size() = ", rescheduleQueue.size(), ansifmt::reset, "\n");
+                SLog(ansifmt::color_blue, "retries = ", ctx->retries, ", until = ", ctx->until, " (nowMS = ", nowMS, "), rescheduleQueue.size() = ", rescheduleQueue.size(), ansifmt::reset, "\n");
 }
 
 bool TankClient::shutdown(connection *const c, const uint32_t ref, const bool fault)
@@ -1679,13 +1682,16 @@ void TankClient::poll(uint32_t timeoutMS)
         capturedFaults.clear();
         produceAcks.clear();
 
+
+	// it is important that we update_time_cache() here before we invoke reschedule_any() and right after Poll()
+	update_time_cache();
+
         reschedule_any();
 
         // Adjust timeout if we have any ongoing connection attempts
         if (connectionAttempts.size())
         {
                 const auto first = connectionAttempts.front()->state.lastInputTS + 256;
-                const auto nowMS = Timings::Milliseconds::Tick();
 
                 timeoutMS = first >= nowMS ? first - nowMS : 0;
         }
@@ -1704,7 +1710,7 @@ void TankClient::poll(uint32_t timeoutMS)
                         throw Switch::system_error("epoll_wait(): ", strerror(errno));
         }
 
-        nowMS = Timings::Milliseconds::Tick();
+	update_time_cache();
 
         for (const auto *it = poller.Events(), *const e = it + r; it != e; ++it)
         {
@@ -1795,6 +1801,7 @@ uint32_t TankClient::produce_to(const topic_partition &to, std::vector<msg> &msg
 	ctx.msgs = msgs.data();
 	ctx.msgsCnt = msgs.size();
 
+	update_time_cache();
         if (!produce_to_leader(clientReqId, leader, &ctx, 1))
 		return 0;
 	else
@@ -1829,6 +1836,7 @@ uint32_t TankClient::produce(const std::vector<
         const auto cnt = out.size();
         const auto clientReqId = ids_tracker.client.produce.next++;
 
+	update_time_cache();
         for (uint32_t i{0}; i != cnt;)
         {
                 auto it = all + i;
@@ -1890,6 +1898,7 @@ uint32_t TankClient::consume_from(const topic_partition &from, const uint64_t se
 	ctx.absSeqNum = seqNum;
 	ctx.fetchSize = minFetchSize;
 
+	update_time_cache();
         if (!consume_from_leader(clientReqId, leader, &ctx, 1, maxWait, minSize))
 		return 0;
 	else
@@ -1923,6 +1932,7 @@ uint32_t TankClient::consume(const std::vector<
         auto *const all = out.values();
         const auto clientReqId = ids_tracker.client.consume.next++;
 
+	update_time_cache();
         for (uint32_t i{0}; i != n;)
         {
                 const auto leader = all[i].leader;
