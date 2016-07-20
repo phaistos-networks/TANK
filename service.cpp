@@ -601,7 +601,9 @@ void topic_partition_log::consider_ro_segments()
 
 bool topic_partition_log::should_roll(const uint32_t now) const
 {
-        if (cur.fileSize)
+        if (cur.fileSize == UINT32_MAX)
+                return true;
+        else if (cur.fileSize)
         {
                 if (trace)
                         SLog(ansifmt::color_green, basePath, " Consider roll:cur.fileSize(", cur.fileSize, "), config.maxSegmentSize(", config.maxSegmentSize, "), skipList.size(", cur.index.skipList.size(), "), config.curSegmentMaxAge (", config.curSegmentMaxAge, "), ", Timings::Seconds::SysTime() - cur.createdTS, " old,  cur.rollJitterSecs = ", cur.rollJitterSecs, ansifmt::reset, "\n");
@@ -647,6 +649,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
         const auto absSeqNum = lastAssignedSeqNum + 1;
         const auto now = Timings::Seconds::SysTime();
 
+	Drequire(bundleMsgsCnt);
         lastAssignedSeqNum += bundleMsgsCnt;
 
         if (should_roll(now))
@@ -936,7 +939,7 @@ void topic_partition::consider_append_res(append_res &res, Switch::vector<wait_c
         }
 }
 
-append_res topic_partition::append_bundle_to_leader(const uint8_t *const bundle, const size_t bundleLen, const uint8_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL)
+append_res topic_partition::append_bundle_to_leader(const uint8_t *const bundle, const size_t bundleLen, const uint32_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL)
 {
         // TODO: route to leader
         try
@@ -1225,17 +1228,27 @@ void Service::verify_index(int fd)
 	for (const auto *p = reinterpret_cast<const uint32_t *>(fileData), 
 		*const e = p + (fileSize / sizeof(uint32_t)), *const b = p; p != e; p+=2)
         {
-		//SLog(p[0], " ", p[1], "\n");
-
                 if (p != b)
                 {
-                        expect(p[0] > p[-2]);
-                        expect(p[1] > p[-1]);
+                        if (unlikely(p[0] <= p[-2]))
+			{
+				Print("Unexpected rel.seq.num ", p[0], ", should have been > ", p[-2], ", at entry ", dotnotation_repr((p  - (uint32_t *)fileData) / 2), " of index of ", dotnotation_repr(fileSize / (sizeof(uint32_t) + sizeof(uint32_t))), " entries\n");
+				throw Switch::system_error("Corrupt Index");
+			}
+
+                        if (unlikely(p[1] <= p[-1]))
+			{
+				Print("Unexpected file offset ", p[0], ", should have been > ", p[-2], ", at entry ", dotnotation_repr((p  - (uint32_t *)fileData) / 2), " of index of ", dotnotation_repr(fileSize / (sizeof(uint32_t) + sizeof(uint32_t))), " entries\n");
+				throw Switch::system_error("Corrupt Index");
+			}
                 }
 		else
 		{
-			expect(p[0] == 0);
-			expect(p[1] == 0);
+			if (p[0] != 0 || p[1] != 0)
+			{
+				Print("Expected first entry to be (0, 0)\n");
+				throw Switch::system_error("Corrupt Index");
+			}
 		}
         }
 }
@@ -1583,6 +1596,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                 uint8_t *const data = (uint8_t *)malloc(span);
                                 // first message in the first bundle we 'll parse
                                 uint64_t next = l->cur.index.ondisk.lastRecorded.relSeqNum + l->cur.baseSeqNum;
+				const auto savedNext{next};
                                 int fd = l->cur.fdh->fd;
 
                                 if (trace)
@@ -1611,13 +1625,17 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                         const auto bundleLen = Compression::UnpackUInt32(p);
                                         const auto *const bundleEnd = p + bundleLen;
 
-                                        require(bundleLen);
+                                        Drequire(bundleLen);
 
                                         const auto bundleFlags = *p++;
                                         uint32_t msgSetSize = (bundleFlags >> 2) & 0xf;
 
                                         if (!msgSetSize)
+					{
                                                 msgSetSize = Compression::UnpackUInt32(p);
+
+						Drequire(msgSetSize);
+					}
 
                                         if (trace)
                                                 SLog("bundle msgSetSize = ", msgSetSize, "\n");
@@ -1627,6 +1645,9 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                         Drequire(p <= e);
                                 }
 
+
+				Drequire(next > savedNext);
+				Drequire(l->cur.sinceLastUpdate == 0); 	// not an empty current segment log
 
                                 l->lastAssignedSeqNum = next - 1;
 
@@ -1672,7 +1693,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         if (l->roSegments && l->roSegments->size())
                         {
                                 // We can still use the last immutable segment
-                                Print("Looks like someone deleted the active segment from ", bp, "\n");
+                                Print(ansifmt::bold, ansifmt::color_red, "Looks like someone deleted the active segment from ", bp, ansifmt::reset, "\n");
                                 l->lastAssignedSeqNum = l->roSegments->back()->lastAvailSeqNum;
                         }
                 }
@@ -2094,7 +2115,7 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                         // BEGIN: bundle header
                         const auto bundleFlags = *p++;
                         const auto codec = bundleFlags & 3;
-                        auto msgSetSize = uint32_t((bundleFlags >> 2) & 0xf);
+                        uint32_t msgSetSize = uint32_t((bundleFlags >> 2) & 0xf);
 
                         if (!msgSetSize)
                         {

@@ -647,7 +647,6 @@ void TankClient::track_na_broker(broker *const bs)
         {
                 bs->set_reachability(broker::Reachability::Unreachable);
                 bs->block_ctx.until = nowMS + Timings::Seconds::ToMillis(8);
-        	rescheduleQueue.push(bs);
                 return;
         }
 
@@ -658,7 +657,6 @@ void TankClient::track_na_broker(broker *const bs)
                         // Give up - try again in 1 minute, and reject all new requests until then
                         bs->set_reachability(broker::Reachability::Unreachable);
                         bs->block_ctx.until = nowMS + Timings::Seconds::ToMillis(60);
-        		rescheduleQueue.push(bs);
 
                         if (trace)
                                 SLog(ansifmt::color_blue, "Now set to unreachable", ansifmt::reset, "\n");
@@ -1411,6 +1409,7 @@ bool TankClient::try_recv(connection *const c)
 
                                 require(c->bs);
                                 c->bs->set_reachability(broker::Reachability::Reachable);
+				c->bs->block_ctx.retries = 0;
                                 c->state.flags &= ~(1u << uint8_t(connection::State::Flags::ConnectionAttempt));
                                 deregister_connection_attempt(c);
                         }
