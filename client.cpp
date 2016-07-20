@@ -652,11 +652,11 @@ void TankClient::track_na_broker(broker *const bs)
 
         if (bs->reachability == broker::Reachability::MaybeReachable)
         {
-                if (ctx->retries >= 4)
+                if (ctx->retries >= 5)
                 {
                         // Give up - try again in 1 minute, and reject all new requests until then
                         bs->set_reachability(broker::Reachability::Unreachable);
-                        bs->block_ctx.until = nowMS + Timings::Seconds::ToMillis(60);
+                        bs->block_ctx.until = nowMS + Timings::Seconds::ToMillis(20);
 
                         if (trace)
                                 SLog(ansifmt::color_blue, "Now set to unreachable", ansifmt::reset, "\n");
@@ -685,7 +685,7 @@ void TankClient::track_na_broker(broker *const bs)
 
         ++(ctx->retries);
 
-        const auto delay = SwitchAlgorithms::ComputeExponentialBackoffWithDeccorelatedJitter(Timings::Seconds::ToMillis(8), 720, ctx->prevSleep);
+        const auto delay = SwitchAlgorithms::ComputeExponentialBackoffWithDeccorelatedJitter(Timings::Seconds::ToMillis(7), 720, ctx->prevSleep);
 
         ctx->prevSleep = delay;
         ctx->until = nowMS + delay;
