@@ -652,7 +652,7 @@ void TankClient::track_na_broker(broker *const bs)
 
         if (bs->reachability == broker::Reachability::MaybeReachable)
         {
-                if (ctx->retries >= 5)
+                if (ctx->retries >= 7)
                 {
                         // Give up - try again in 1 minute, and reject all new requests until then
                         bs->set_reachability(broker::Reachability::Unreachable);
@@ -677,7 +677,7 @@ void TankClient::track_na_broker(broker *const bs)
 		if (trace)
 			SLog("Now set to blocked\n");
 
-                ctx->prevSleep = 400;
+                ctx->prevSleep = 600;
                 ctx->retries = 0;
                 ctx->naSince = nowMS;
                 bs->set_reachability(broker::Reachability::Blocked);
@@ -1733,6 +1733,12 @@ void TankClient::poll(uint32_t timeoutMS)
 
                                 if (unlikely(ioctl(fd, FIONREAD, &n) == -1))
                                         throw Switch::system_error("ioctl() failed:", strerror(errno));
+				else if (unlikely(!n))
+				{
+					// Just in case we get 0; if we do, read() will fail with EAGAIN anyway
+					// We shouldn't get n == 0 but let's be on the safe side
+					n = sizeof(buf);
+				}
 
                                 do
                                 {

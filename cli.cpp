@@ -5,6 +5,7 @@
 #include <sys/types.h>
 #include <set>
 #include <text.h>
+#include <sysexits.h>
 
 int main(int argc, char *argv[])
 {
@@ -293,10 +294,11 @@ int main(int argc, char *argv[])
         {
 		char path[PATH_MAX];
 		size_t bundleSize{1};
+		bool asSingleMsg{false};
 
                 optind = 0;
 		path[0] = '\0';
-                while ((r = getopt(argc, argv, "s:f:h")) != -1)
+                while ((r = getopt(argc, argv, "s:f:F:h")) != -1)
                 {
                         switch (r)
                         {
@@ -309,6 +311,7 @@ int main(int argc, char *argv[])
 					}
 					break;
 
+				case 'F':
 				case 'f':
 					{
 						const auto l = strlen(optarg);
@@ -316,7 +319,9 @@ int main(int argc, char *argv[])
 						require(l < sizeof(path));
 						memcpy(path, optarg, l);
 						path[l] = '\0';
-					}
+
+                                                asSingleMsg = r == 'F';
+                                        }
 					break;
 
                                 case 'h':
@@ -324,6 +329,7 @@ int main(int argc, char *argv[])
                                         Print("Options include:\n");
                                         Print("-s number: The bundle size; how many messages to be grouped into a bundle before producing that to the broker. Default is 1, which means each new message is published as a single bundle\n");
                                         Print("-f file: The messages are read from `file`, which is expected to contain the mesasges in every new line. The `file` can be \"-\" for stdin. If this option is provided, the messages list is ignored\n");
+                                        Print("-F file: Like '-f file', except that the contents of the file will be stored as a single message\n");
                                         return 1;
 
                                 default:
@@ -473,30 +479,72 @@ int main(int argc, char *argv[])
                         };
 
                         range.Unset();
-			for (;;)
+
+			if (asSingleMsg)
 			{
-				const auto capacity = bufSize - range.End();
-				auto r = read(fd, buf + range.offset, capacity);
+				IOBuffer content;
 
-				if (r == -1)
+				for (;;)
 				{
-					Print("Failed to read data:", strerror(errno), "\n");
-					return 1;
+					if (content.Capacity() < 8192)
+						content.reserve(65536);
+					
+					const auto r = read(fd, content.End(), content.Capacity());
+
+					if (r == -1)
+					{
+						Print("Failed to read data:", strerror(errno), "\n");
+						return 1;
+					}
+					else if (!r)
+						break;
+					else
+						content.AdvanceLength(r);
 				}
-				else if (!r)
-					break;
-				else
-				{
-					range.len += r;
-                                        if (!consider_input(false))
-						return false;
+
+				if (verbose)
+                                        Print("Publishing message of size ", size_repr(content.length()), "\n");
+
+                                msgs.push_back({content.AsS32(), Timings::Milliseconds::SysTime(), {}});
+
+                                const auto reqId = tankClient.produce(
+                                    {{topicPartition, msgs}});
+
+                                if (!reqId)
+                                {
+                                        Print("Failed to schedule messages to broker\n");
+                                        return false;
                                 }
+                                else
+                                        pendingResps.insert(reqId);
                         }
+			else
+			{
+				for (;;)
+				{
+					const auto capacity = bufSize - range.End();
+					auto r = read(fd, buf + range.offset, capacity);
 
-                        if (!consider_input(true))
-				return false;
+					if (r == -1)
+					{
+						Print("Failed to read data:", strerror(errno), "\n");
+						return 1;
+					}
+					else if (!r)
+						break;
+					else
+					{
+						range.len += r;
+						if (!consider_input(false))
+							return false;
+					}
+				}
 
-                        while (tankClient.should_poll())
+				if (!consider_input(true))
+					return false;
+			}
+
+			while (tankClient.should_poll())
 			{
 				if (!poll())
 					return 1;
@@ -751,5 +799,5 @@ int main(int argc, char *argv[])
 		return 1;
 	}	
 
-        return 0;
+        return EX_OK;
 }
