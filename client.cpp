@@ -360,7 +360,10 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
         auto ctx = (uint8_t *)malloc(produceCtx.length());
 
         if (unlikely(!ctx))
+	{
+		put_payload(payload);
                 throw Switch::system_error("out of memory");
+	}
 
 	// it is _not_ an idempotent request, but we 'll track it anyway in pendingProduceReqs, because if the broker tells us that is no longer the
 	// leader for the (topic, partition) and we need to connect to another broker and reschedule the payload to it, we can do so by looking up
@@ -1548,13 +1551,14 @@ bool TankClient::try_send(connection *const c)
                         {
                                 size_t len;
                                 iovec *ptr;
-                                auto next = it->next;
 
                                 while (r >= (len = (ptr = it->iov + it->iovIdx)->iov_len))
                                 {
                                         r -= len;
                                         if (++(it->iovIdx) == it->iovCnt)
                                         {
+                                		auto *const next = it->next;
+
                                                 bs->outgoing_content.pop_front();
 
 						if (it->flags & (1u << uint8_t(outgoing_payload::Flags::ReqIsIdempotent)))

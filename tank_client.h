@@ -287,8 +287,13 @@ class TankClient
 			{
 				if (auto it = front_)
 				{
+					require(it->__id);
+
 					for (auto prev = it; (it = it->next); )
+					{
+						require(it->__id);
 						require(it->__id > prev->__id);
+					}
 				}
 			}
 
@@ -488,6 +493,8 @@ class TankClient
 
                 p->b = nullptr;
                 p->b2 = nullptr;
+
+		p->__id = 0; // so that validate() will catch it if e.g we re-use a payload without put_payload() first
 
                 payloadsPool.push_back(p);
         }
