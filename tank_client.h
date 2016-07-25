@@ -54,12 +54,10 @@ class TankClient
         {
                 outgoing_payload *next;
                 switch_dlist pendingRespList;
-
-                IOBuffer *b{nullptr}, *b2{nullptr};
-
+                IOBuffer *b, *b2;
                 struct iovec iov[64];
-                uint8_t iovCnt{0};
-                uint8_t iovIdx{0};
+                uint8_t iovCnt;
+                uint8_t iovIdx;
 
 		enum class Flags : uint8_t 
 		{
@@ -68,9 +66,17 @@ class TankClient
 			// may lead to problems. If this is set, it means rescheduling, even if the original request was processes, won't affect state
 			//
 			ReqIsIdempotent = 0,
+
+			// If the broker report it is no longer the leader for a (topic, partition), we may need to retry the same request
+			ReqMaybeRetried = 1
 		};
 		uint8_t flags;
                 uint32_t __id;
+
+		inline bool should_retain_after_dispatch() const
+		{
+			return flags & ((1u << uint8_t(Flags::ReqIsIdempotent)) | (1u << uint8_t(Flags::ReqMaybeRetried)));
+		}
         };
 
         struct consume_ctx
@@ -466,12 +472,16 @@ class TankClient
         {
                 auto res = payloadsPool.size() ? payloadsPool.Pop() : new outgoing_payload();
 
+                res->iovCnt = res->iovIdx = 0;
+                res->next = nullptr;
+		res->flags = 0;
                 res->b = get_buffer();
                 res->b2 = get_buffer();
 
 		{
 			// See broker::outgoing_content::validate()
 			res->__id = ++__nextPayloadId;
+			require(res->__id);
 		}
 
 		switch_dlist_init(&res->pendingRespList);
@@ -482,17 +492,19 @@ class TankClient
 
         void put_payload(outgoing_payload *const p)
         {
-                p->iovCnt = p->iovIdx = 0;
-                p->next = nullptr;
-		p->flags = 0;
+		require(p->__id);
 
                 if (p->b)
+		{
                         put_buffer(p->b);
+			p->b = nullptr;
+		}
                 if (p->b2)
+		{
                         put_buffer(p->b2);
+			p->b2 = nullptr;
+		}
 
-                p->b = nullptr;
-                p->b2 = nullptr;
 
 		p->__id = 0; // so that validate() will catch it if e.g we re-use a payload without put_payload() first
 

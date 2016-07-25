@@ -368,7 +368,8 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
 	// it is _not_ an idempotent request, but we 'll track it anyway in pendingProduceReqs, because if the broker tells us that is no longer the
 	// leader for the (topic, partition) and we need to connect to another broker and reschedule the payload to it, we can do so by looking up
 	// the payload in pendingProduceReqs
-	payload->flags = 0; 
+	payload->flags = 1u << uint8_t(outgoing_payload::Flags::ReqMaybeRetried);
+	Drequire(payload->should_retain_after_dispatch());
         memcpy(ctx, produceCtx.data(), produceCtx.length());
 
         bs->reqs_tracker.pendingProduce.insert(reqId);
@@ -563,7 +564,8 @@ bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::e
         payload->iov[payload->iovCnt++] = {(void *)b.data(), b.length()};
 
         bs->reqs_tracker.pendingConsume.insert(reqId);
-        payload->flags = 1u << uint8_t(outgoing_payload::Flags::ReqIsIdempotent);
+        payload->flags = (1u << uint8_t(outgoing_payload::Flags::ReqIsIdempotent)) | (1u << uint8_t(outgoing_payload::Flags::ReqMaybeRetried));
+	Drequire(payload->should_retain_after_dispatch());
         bs->outgoing_content.push_back(payload);
 
 	// See comments about tracking payload in pendingProduceReqs.
@@ -639,6 +641,7 @@ void TankClient::track_na_broker(broker *const bs)
 
         if (retryStrategy == RetryStrategy::RetryNever)
         {
+		// circuit breaker tripped immediately
                 bs->set_reachability(broker::Reachability::Unreachable);
                 bs->block_ctx.until = nowMS + Timings::Seconds::ToMillis(8);
                 return;
@@ -648,7 +651,8 @@ void TankClient::track_na_broker(broker *const bs)
         {
                 if (ctx->retries >= 7)
                 {
-                        // Give up - try again in 1 minute, and reject all new requests until then
+                        // Curcuit breaker tripped
+			// Give up - try again in 1 minute, and reject all new requests until then
                         bs->set_reachability(broker::Reachability::Unreachable);
                         bs->block_ctx.until = nowMS + Timings::Seconds::ToMillis(20);
 
@@ -740,6 +744,8 @@ void TankClient::ack_payload(broker *const bs, outgoing_payload *const p)
 {
         if (trace)
                 SLog(ansifmt::color_magenta, "ACKnowledgeing payload for broker", ansifmt::reset, "\n");
+	
+	Drequire(p->should_retain_after_dispatch());
 
 	// In case it's here
         switch_dlist_del_and_reset(&p->pendingRespList);
@@ -1561,11 +1567,13 @@ bool TankClient::try_send(connection *const c)
 
                                                 bs->outgoing_content.pop_front();
 
-						if (it->flags & (1u << uint8_t(outgoing_payload::Flags::ReqIsIdempotent)))
+						if (it->should_retain_after_dispatch())
                                                 {
                                                         // We are going to keep this around
                                                         // until we get a response for the request for this payload. That is, we have scheduled the whole request to the socket via
-							// write(), so we can safely retry if this request is not idempotent, and this is not so we 'll keep it around and retry on failure.
+							// write(), so we can safely retry if this request is not idempotent, and/or we weill be told to try another broker
+							//
+							// ack_payload() will be used to retire the payload
                                                         retain_for_resp(bs, it);
                                                 }
                                                 else
