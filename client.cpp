@@ -744,10 +744,10 @@ void TankClient::ack_payload(broker *const bs, outgoing_payload *const p)
 {
         if (trace)
                 SLog(ansifmt::color_magenta, "ACKnowledgeing payload for broker", ansifmt::reset, "\n");
-	
-	Drequire(p->should_retain_after_dispatch());
 
-	// In case it's here
+        Drequire(p->should_retain_after_dispatch());
+
+        // In case it's here (almost always only when we retain_for_resp(), for payloads of idempotent requests)
         switch_dlist_del_and_reset(&p->pendingRespList);
 
         put_payload(p);
@@ -1564,18 +1564,23 @@ bool TankClient::try_send(connection *const c)
                                         if (++(it->iovIdx) == it->iovCnt)
                                         {
                                 		auto *const next = it->next;
+						const auto flags = it->flags;
 
                                                 bs->outgoing_content.pop_front();
 
-						if (it->should_retain_after_dispatch())
+						if (flags & (1u << uint8_t(outgoing_payload::Flags::ReqIsIdempotent)))
                                                 {
-                                                        // We are going to keep this around
-                                                        // until we get a response for the request for this payload. That is, we have scheduled the whole request to the socket via
-							// write(), so we can safely retry if this request is not idempotent, and/or we weill be told to try another broker
-							//
-							// ack_payload() will be used to retire the payload
+							// Payload for an idempotent request.
+							// We are going to retain the payload and we will reschedule it to the same broker if need be
                                                         retain_for_resp(bs, it);
                                                 }
+						else if (flags & (1u << uint8_t(outgoing_payload::Flags::ReqMaybeRetried)))
+						{
+							// Not an idempotent request, but broker may request that we
+							// retry the request with another broker, a new leader for a (topic, partition)
+							// so we need to keep the payload around, and not reuse it via put_payload()
+							// we won't reschedule this to the same broker though
+						}
                                                 else
                                                         put_payload(it);
 

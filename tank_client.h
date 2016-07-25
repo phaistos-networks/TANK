@@ -61,10 +61,9 @@ class TankClient
 
 		enum class Flags : uint8_t 
 		{
-			// if set, it means the payload must be retained if it has been sent via write(), until the response for the request of this payload is received
+			// if set, it means the payload must be retained if it has been sent via writev(), until the response for the request of this payload is received
 			// That is, after we write() to the socket buffer, we can't know if the broker has gotten the chance to process the request or not, so retrying it
 			// may lead to problems. If this is set, it means rescheduling, even if the original request was processes, won't affect state
-			//
 			ReqIsIdempotent = 0,
 
 			// If the broker report it is no longer the leader for a (topic, partition), we may need to retry the same request
