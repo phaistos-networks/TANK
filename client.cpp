@@ -101,6 +101,7 @@ TankClient::~TankClient()
                         const auto res = pendingConsumeReqs.detach(id);
                         auto info = res.value();
 
+			put_payload(info.reqPayload);
                         free(info.seqNums);
                 }
 
@@ -109,6 +110,7 @@ TankClient::~TankClient()
                         const auto res = pendingProduceReqs.detach(id);
                         const auto info = res.value();
 
+			put_payload(info.reqPayload);
                         free(info.ctx);
                 }
 
@@ -610,7 +612,9 @@ void TankClient::flush_broker(broker *const bs)
                 const auto res = pendingConsumeReqs.detach(id);
                 auto info = res.value();
 
+		put_payload(info.reqPayload);
                 free(info.seqNums);
+
                 capturedFaults.push_back({info.clientReqId, fault::Type::Network, fault::Req::Consume, {}, 0});
         }
         bs->reqs_tracker.pendingConsume.clear();
@@ -622,7 +626,9 @@ void TankClient::flush_broker(broker *const bs)
                 const auto res = pendingProduceReqs.detach(id);
                 const auto info = res.value();
 
+		put_payload(info.reqPayload);
                 free(info.ctx);
+
                 capturedFaults.push_back({info.clientReqId, fault::Type::Network, fault::Req::Produce, {}, 0});
         }
         bs->reqs_tracker.pendingProduce.clear();
@@ -745,6 +751,7 @@ void TankClient::ack_payload(broker *const bs, outgoing_payload *const p)
         if (trace)
                 SLog(ansifmt::color_magenta, "ACKnowledgeing payload for broker", ansifmt::reset, "\n");
 
+	Drequire(p);
         Drequire(p->should_retain_after_dispatch());
 
         // In case it's here (almost always only when we retain_for_resp(), for payloads of idempotent requests)
@@ -762,7 +769,7 @@ void TankClient::prepare_retransmission(broker *const bs)
         for (auto it = bs->outgoing_content.front(); it && it->iovIdx; it = it->next)
                 it->iovIdx = 0;
 
-        // insert all retained payloads to front
+        // insert all retained payloads for idempotent requests to the front of the outgoing content queue
         for (auto it = bs->retainedPayloadsList.next; it != &bs->retainedPayloadsList; it = it->next)
         {
                 auto payload = switch_list_entry(outgoing_payload, pendingRespList, it);
