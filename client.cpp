@@ -362,27 +362,15 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
         if (unlikely(!ctx))
                 throw Switch::system_error("out of memory");
 
+	// it is _not_ an idempotent request, but we 'll track it anyway in pendingProduceReqs, because if the broker tells us that is no longer the
+	// leader for the (topic, partition) and we need to connect to another broker and reschedule the payload to it, we can do so by looking up
+	// the payload in pendingProduceReqs
+	payload->flags = 0; 
         memcpy(ctx, produceCtx.data(), produceCtx.length());
 
         bs->reqs_tracker.pendingProduce.insert(reqId);
         bs->outgoing_content.push_back(payload);
-#if 0
-	payload->retainForAck = true;
         pendingProduceReqs.Add(reqId, {clientReqId, payload, nowMS, ctx, produceCtx.length()});
-#else
-        // This not an idempotent request
-	//
-        // If we have managed to write _all_ data of the request to the socket buffer, then we can't tell if
-        // the request has reached the broker, the broker has processed the request, the broker sent a response but we never got it, etc
-	//
-        // So if we reschedule the request like we do with idempotent requests if retryStrategy == RetryStrategy::RetryAlways, it is possible
-        // we 'll publish the same messages twice, or more.
-        //
-        // In the future, we 'll need a tunable for those kind of requests. For now, the selected retryStrategy does not apply
-        // to publish requests.
-        pendingProduceReqs.Add(reqId, {clientReqId, nullptr, nowMS, ctx, produceCtx.length()});
-#endif
-
         track_inflight_req(reqId, nowMS, TankAPIMsgType::Produce);
 
         if (trace)
@@ -565,9 +553,6 @@ bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::e
                 throw Switch::system_error("out of memory");
 
         memcpy(seqsNumsData, absSeqNums, sizeof(uint64_t) * absSeqNumsCnt);
-        pendingConsumeReqs.Add(reqId, {clientReqId, payload, nowMS, seqsNumsData, absSeqNumsCnt});
-
-        track_inflight_req(reqId, nowMS, TankAPIMsgType::Consume);
 
         // patch request length
         *(uint32_t *)b.At(reqSizeOffset) = b.length() - reqSizeOffset - sizeof(uint32_t);
@@ -575,8 +560,14 @@ bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::e
         payload->iov[payload->iovCnt++] = {(void *)b.data(), b.length()};
 
         bs->reqs_tracker.pendingConsume.insert(reqId);
-        payload->retainForAck = true;
+        payload->flags = 1u << uint8_t(outgoing_payload::Flags::ReqIsIdempotent);
         bs->outgoing_content.push_back(payload);
+
+	// See comments about tracking payload in pendingProduceReqs.
+	// If the broker tells us that it is no longer the leader for this (topic, partition) we should be
+	// able to reschedule to that new leader.
+        pendingConsumeReqs.Add(reqId, {clientReqId, payload, nowMS, seqsNumsData, absSeqNumsCnt});
+        track_inflight_req(reqId, nowMS, TankAPIMsgType::Consume);
 
         if (trace)
                 SLog(ansifmt::color_green, "About to transmit", ansifmt::reset, "\n");
@@ -747,10 +738,7 @@ void TankClient::ack_payload(broker *const bs, outgoing_payload *const p)
         if (trace)
                 SLog(ansifmt::color_magenta, "ACKnowledgeing payload for broker", ansifmt::reset, "\n");
 
-        require(p->retainForAck);
-        require(p->pendingRespList.next != &p->pendingRespList);
-
-        p->retainForAck = false;
+	// In case it's here
         switch_dlist_del_and_reset(&p->pendingRespList);
 
         put_payload(p);
@@ -818,18 +806,17 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
         const auto reqInfo = res.value();
         const auto clientReqId = reqInfo.clientReqId;
 
-        if (auto payload = reqInfo.reqPayload)
-                ack_payload(bs, payload);
-
+	// TODO:
+	// if broker reports that it is no longer the leader for (topic, broker), we need to retain
+	// reqInfo.payload and reqInfo.ctx, and retry with that node instead
+        ack_payload(bs, reqInfo.reqPayload);
         Defer({ free(reqInfo.ctx); });
 
         c->state.flags |= (1u << uint8_t(connection::State::Flags::LockedInputBuffer));
 
-        if (trace)
-                SLog("got produce resp\n");
-
         bs->reqs_tracker.pendingProduce.erase(reqId);
         forget_inflight_req(reqId, TankAPIMsgType::Produce);
+
 
         for (const auto *ctx = reqInfo.ctx, *const ctxEnd = ctx + reqInfo.ctxLen; p != e;)
         {
@@ -924,11 +911,15 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
         uint8_t reqOffsetIdx{0};
         strwlen8_t key;
 
+	// TODO:
+	// if broker reports that it is no longer the leader for (topic, broker), we need to retain
+	// reqInfo.payload and reqInfo.ctx, and retry with that node instead
         ack_payload(bs, reqInfo.reqPayload);
         Defer({ free(reqInfo.seqNums); });
 
         bs->reqs_tracker.pendingConsume.erase(reqId);
         forget_inflight_req(reqId, TankAPIMsgType::Consume);
+
 
         for (uint32_t i{0}; i != topicsCnt; ++i)
         {
@@ -1566,10 +1557,11 @@ bool TankClient::try_send(connection *const c)
                                         {
                                                 bs->outgoing_content.pop_front();
 
-                                                if (it->retainForAck)
+						if (it->flags & (1u << uint8_t(outgoing_payload::Flags::ReqIsIdempotent)))
                                                 {
                                                         // We are going to keep this around
-                                                        // until we get a response for the request for this payload
+                                                        // until we get a response for the request for this payload. That is, we have scheduled the whole request to the socket via
+							// write(), so we can safely retry if this request is not idempotent, and this is not so we 'll keep it around and retry on failure.
                                                         retain_for_resp(bs, it);
                                                 }
                                                 else

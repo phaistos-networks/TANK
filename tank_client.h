@@ -49,7 +49,7 @@ class TankClient
 
 	// there is one such payload per request
 	// we are going to keep them around even after we have dispatched them 
-	// in case we want to retry them; that is the purprose of the pendingRespList and retainForAck
+	// in case we want to retry them; that is the purprose of the pendingRespList and RetainForAck flag
         struct outgoing_payload
         {
                 outgoing_payload *next;
@@ -61,10 +61,15 @@ class TankClient
                 uint8_t iovCnt{0};
                 uint8_t iovIdx{0};
 
-		// if this set, it means this payload must be retained if it has been sent via write()
-		// until the response for the request of this payload is received
-		bool retainForAck{false};
-
+		enum class Flags : uint8_t 
+		{
+			// if set, it means the payload must be retained if it has been sent via write(), until the response for the request of this payload is received
+			// That is, after we write() to the socket buffer, we can't know if the broker has gotten the chance to process the request or not, so retrying it
+			// may lead to problems. If this is set, it means rescheduling, even if the original request was processes, won't affect state
+			//
+			ReqIsIdempotent = 0,
+		};
+		uint8_t flags;
                 uint32_t __id;
         };
 
@@ -464,6 +469,7 @@ class TankClient
 			res->__id = ++__nextPayloadId;
 		}
 
+		switch_dlist_init(&res->pendingRespList);
                 return res;
         }
 
@@ -473,7 +479,7 @@ class TankClient
         {
                 p->iovCnt = p->iovIdx = 0;
                 p->next = nullptr;
-		p->retainForAck = false;
+		p->flags = 0;
 
                 if (p->b)
                         put_buffer(p->b);
