@@ -84,7 +84,8 @@ TankClient::~TankClient()
                 while (auto p = bs->outgoing_content.front())
                 {
                         bs->outgoing_content.pop_front();
-                        put_payload(p, __LINE__);
+			if (!p->tracked_by_reqs_tracker())
+                                put_payload(p, __LINE__);
                 }
 
                 for (auto it = bs->retainedPayloadsList.next; it != &bs->retainedPayloadsList;)
