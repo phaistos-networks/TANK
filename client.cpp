@@ -84,7 +84,7 @@ TankClient::~TankClient()
                 while (auto p = bs->outgoing_content.front())
                 {
                         bs->outgoing_content.pop_front();
-                        put_payload(p);
+                        put_payload(p, __LINE__);
                 }
 
                 for (auto it = bs->retainedPayloadsList.next; it != &bs->retainedPayloadsList;)
@@ -92,7 +92,9 @@ TankClient::~TankClient()
                         auto next = it->next;
                         auto payload = switch_list_entry(outgoing_payload, pendingRespList, it);
 
-                        put_payload(payload);
+			if (!payload->tracked_by_reqs_tracker())
+                        	put_payload(payload, __LINE__);
+
                         it = next;
                 }
 
@@ -101,7 +103,7 @@ TankClient::~TankClient()
                         const auto res = pendingConsumeReqs.detach(id);
                         auto info = res.value();
 
-			put_payload(info.reqPayload);
+			put_payload(info.reqPayload, __LINE__);
                         free(info.seqNums);
                 }
 
@@ -110,7 +112,7 @@ TankClient::~TankClient()
                         const auto res = pendingProduceReqs.detach(id);
                         const auto info = res.value();
 
-			put_payload(info.reqPayload);
+			put_payload(info.reqPayload, __LINE__);
                         free(info.ctx);
                 }
 
@@ -309,7 +311,7 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
 
                                 if (unlikely(!Compression::Compress(Compression::Algo::SNAPPY, b.At(msgSetOffset), msgSetLen, &cmpBuf)))
                                 {
-                                        put_payload(payload);
+                                        put_payload(payload, __LINE__);
                                         throw Switch::exception("Failed to compress content");
                                 }
 
@@ -363,7 +365,7 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
 
         if (unlikely(!ctx))
 	{
-		put_payload(payload);
+		put_payload(payload, __LINE__);
                 throw Switch::system_error("out of memory");
 	}
 
@@ -371,7 +373,7 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
 	// leader for the (topic, partition) and we need to connect to another broker and reschedule the payload to it, we can do so by looking up
 	// the payload in pendingProduceReqs
 	payload->flags = 1u << uint8_t(outgoing_payload::Flags::ReqMaybeRetried);
-	Drequire(payload->should_retain_after_dispatch());
+	Drequire(payload->tracked_by_reqs_tracker());
         memcpy(ctx, produceCtx.data(), produceCtx.length());
 
         bs->reqs_tracker.pendingProduce.insert(reqId);
@@ -567,7 +569,7 @@ bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::e
 
         bs->reqs_tracker.pendingConsume.insert(reqId);
         payload->flags = (1u << uint8_t(outgoing_payload::Flags::ReqIsIdempotent)) | (1u << uint8_t(outgoing_payload::Flags::ReqMaybeRetried));
-	Drequire(payload->should_retain_after_dispatch());
+	Drequire(payload->tracked_by_reqs_tracker());
         bs->outgoing_content.push_back(payload);
 
 	// See comments about tracking payload in pendingProduceReqs.
@@ -591,7 +593,9 @@ void TankClient::flush_broker(broker *const bs)
         {
                 auto next = it->next;
 
-                put_payload(it);
+		if (!it->tracked_by_reqs_tracker())
+                	put_payload(it, __LINE__);
+
                 it = next;
         }
         bs->outgoing_content.front_ = bs->outgoing_content.back_ = nullptr;
@@ -601,7 +605,9 @@ void TankClient::flush_broker(broker *const bs)
                 auto next = it->next;
                 auto payload = switch_list_entry(outgoing_payload, pendingRespList, it);
 
-                put_payload(payload);
+		if (!payload->tracked_by_reqs_tracker())
+                	put_payload(payload, __LINE__);
+
                 it = next;
         }
 
@@ -612,7 +618,7 @@ void TankClient::flush_broker(broker *const bs)
                 const auto res = pendingConsumeReqs.detach(id);
                 auto info = res.value();
 
-		put_payload(info.reqPayload);
+		put_payload(info.reqPayload, __LINE__);
                 free(info.seqNums);
 
                 capturedFaults.push_back({info.clientReqId, fault::Type::Network, fault::Req::Consume, {}, 0});
@@ -626,7 +632,7 @@ void TankClient::flush_broker(broker *const bs)
                 const auto res = pendingProduceReqs.detach(id);
                 const auto info = res.value();
 
-		put_payload(info.reqPayload);
+		put_payload(info.reqPayload, __LINE__);
                 free(info.ctx);
 
                 capturedFaults.push_back({info.clientReqId, fault::Type::Network, fault::Req::Produce, {}, 0});
@@ -752,12 +758,12 @@ void TankClient::ack_payload(broker *const bs, outgoing_payload *const p)
                 SLog(ansifmt::color_magenta, "ACKnowledgeing payload for broker", ansifmt::reset, "\n");
 
 	Drequire(p);
-        Drequire(p->should_retain_after_dispatch());
+        Drequire(p->tracked_by_reqs_tracker());
 
         // In case it's here (almost always only when we retain_for_resp(), for payloads of idempotent requests)
         switch_dlist_del_and_reset(&p->pendingRespList);
 
-        put_payload(p);
+        put_payload(p, __LINE__);
 }
 
 void TankClient::prepare_retransmission(broker *const bs)
@@ -1589,7 +1595,7 @@ bool TankClient::try_send(connection *const c)
 							// we won't reschedule this to the same broker though
 						}
                                                 else
-                                                        put_payload(it);
+                                                        put_payload(it, __LINE__);
 
                                                 bs->outgoing_content.front_ = next;
                                                 goto next;
@@ -1810,7 +1816,7 @@ void TankClient::poll(uint32_t timeoutMS)
         }
 }
 
-uint32_t TankClient::produce_to(const topic_partition &to, std::vector<msg> &msgs)
+uint32_t TankClient::produce_to(const topic_partition &to, const std::vector<msg> &msgs)
 {
         const auto clientReqId = ids_tracker.client.produce.next++;
 	const auto leader = leader_for(to.first, to.second);

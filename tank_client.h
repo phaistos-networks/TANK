@@ -1,7 +1,9 @@
 #pragma once
 #include "common.h"
+#include <atomic>
 #include <compress.h>
 #include <network.h>
+#include <queue>
 #include <set>
 #include <switch.h>
 #include <switch_dictionary.h>
@@ -9,8 +11,6 @@
 #include <switch_mallocators.h>
 #include <switch_vector.h>
 #include <vector>
-#include <atomic>
-#include <queue>
 
 // Tank, because its a large container of liquid or gas
 // and data flow (as in, liquid), and also, this is a Trinity character name
@@ -25,18 +25,18 @@ class TankClient
 
         };
 
-	enum class RetryStrategy : uint8_t
-	{
-		RetryNever = 0,
-		RetryAlways
-	};
+        enum class RetryStrategy : uint8_t
+        {
+                RetryNever = 0,
+                RetryAlways
+        };
 
-	enum class CompressionStrategy : uint8_t
-	{
-		CompressNever =0,
-		CompressAlways,
-		CompressIntelligently
-	};
+        enum class CompressionStrategy : uint8_t
+        {
+                CompressNever = 0,
+                CompressAlways,
+                CompressIntelligently
+        };
 
         struct msg
         {
@@ -47,9 +47,9 @@ class TankClient
 
         using topic_partition = std::pair<strwlen8_t, uint16_t>;
 
-	// there is one such payload per request
-	// we are going to keep them around even after we have dispatched them 
-	// in case we want to retry them; that is the purprose of the pendingRespList and RetainForAck flag
+        // there is one such payload per request
+        // we are going to keep them around even after we have dispatched them
+        // in case we want to retry them; that is the purprose of the pendingRespList and RetainForAck flag
         struct outgoing_payload
         {
                 outgoing_payload *next;
@@ -59,22 +59,26 @@ class TankClient
                 uint8_t iovCnt;
                 uint8_t iovIdx;
 
-		enum class Flags : uint8_t 
-		{
-			// if set, it means the payload must be retained if it has been sent via writev(), until the response for the request of this payload is received
-			// That is, after we write() to the socket buffer, we can't know if the broker has gotten the chance to process the request or not, so retrying it
-			// may lead to problems. If this is set, it means rescheduling, even if the original request was processes, won't affect state
-			ReqIsIdempotent = 0,
+                enum class Flags : uint8_t
+                {
+                        // if set, it means the payload must be retained if it has been sent via writev(), until the response for the request of this payload is received
+                        // That is, after we write() to the socket buffer, we can't know if the broker has gotten the chance to process the request or not, so retrying it
+                        // may lead to problems. If this is set, it means rescheduling, even if the original request was processes, won't affect state
+                        ReqIsIdempotent = 0,
 
-			// If the broker report it is no longer the leader for a (topic, partition), we may need to retry the same request
-			ReqMaybeRetried = 1
-		};
-		uint8_t flags;
+                        // If the broker report it is no longer the leader for a (topic, partition), we may need to retry the same request
+                        // XXX: However, a request may include multiple distinct (topic, partition)s, so we may not
+                        // be able to reschedule it as-is, and so we 'd need to account for that.
+                        ReqMaybeRetried = 1
+                };
+                uint8_t flags;
                 uint32_t __id;
 
-		inline bool should_retain_after_dispatch() const
+		// If the payload is tracked by reqs_tracker.pendingConsume or reqs_tracker.pendingProduce, then
+		// we shouldn't try to put_payload() if it's registered with outgoing_content (either in pendingRespList or in outgoing payloads list)
+		inline bool tracked_by_reqs_tracker() const
 		{
-			return flags & ((1u << uint8_t(Flags::ReqIsIdempotent)) | (1u << uint8_t(Flags::ReqMaybeRetried)));
+                        return flags & ((1u << uint8_t(Flags::ReqIsIdempotent)) | (1u << uint8_t(Flags::ReqMaybeRetried)));
 		}
         };
 
@@ -115,13 +119,13 @@ class TankClient
                                 ConnectionAttempt = 0,
                                 NeedOutAvail,
                                 RetryingConnection,
-				ConsideredReqHeader,
+                                ConsideredReqHeader,
 
-				// Consume responses, produce acks, and errors almost all derefence in connection input buffer
-				// once we dereference it, we can't reallocate the buffer internal memory, so this is set.
-				// This flag is unset when we read data, and may be set by various process_() methods, and considered
-				// when we process the ingested input
-				LockedInputBuffer
+                                // Consume responses, produce acks, and errors almost all derefence in connection input buffer
+                                // once we dereference it, we can't reallocate the buffer internal memory, so this is set.
+                                // This flag is unset when we read data, and may be set by various process_() methods, and considered
+                                // when we process the ingested input
+                                LockedInputBuffer
                         };
 
                         uint8_t flags;
@@ -142,7 +146,7 @@ class TankClient
         struct active_consume_req
         {
                 uint32_t clientReqId;
-		outgoing_payload *reqPayload;
+                outgoing_payload *reqPayload;
                 uint64_t ts;
                 uint64_t *seqNums;
                 uint8_t seqNumsCnt;
@@ -151,7 +155,7 @@ class TankClient
         struct active_produce_req
         {
                 uint32_t clientReqId;
-		outgoing_payload *reqPayload;
+                outgoing_payload *reqPayload;
                 uint64_t ts;
                 uint8_t *ctx;
                 uint32_t ctxLen;
@@ -251,14 +255,14 @@ class TankClient
                 struct connection *con{nullptr};
                 const Switch::endpoint endpoint;
 
-		switch_dlist retainedPayloadsList;
+                switch_dlist retainedPayloadsList;
 
                 enum class Reachability : uint8_t
                 {
-                        Reachable = 0, 	// Definitely reachable, or we just don't know yet for we haven't tried to connect
-                        Unreachable, 	// Definitely unreachable; can't retry connection until block_ctx.until
-			MaybeReachable, // Was blocked, and will now retry the connection in case it is now possible
-                        Blocked 	// Blocked; will retry the connection at block_ctx.until 
+                        Reachable = 0,  // Definitely reachable, or we just don't know yet for we haven't tried to connect
+                        Unreachable,    // Definitely unreachable; can't retry connection until block_ctx.until
+                        MaybeReachable, // Was blocked, and will now retry the connection in case it is now possible
+                        Blocked         // Blocked; will retry the connection at block_ctx.until
                 } reachability{Reachability::Reachable};
 
                 struct
@@ -269,7 +273,7 @@ class TankClient
                         uint16_t retries;
                 } block_ctx;
 
-		void set_reachability(const Reachability r);
+                void set_reachability(const Reachability r);
 
                 // outgoing content will be associated with a leader state, not its connection
                 // and the connection will drain this outgoing_content
@@ -277,30 +281,30 @@ class TankClient
                 {
                         outgoing_payload *front_{nullptr}, *back_{nullptr};
 
-			void push_front(outgoing_payload *const p)
-			{
-				p->iovIdx = 0;
-				p->next = front_;
-				front_ = p;
-				if (!back_)
-					back_ = front_;
-			}
+                        void push_front(outgoing_payload *const p)
+                        {
+                                p->iovIdx = 0;
+                                p->next = front_;
+                                front_ = p;
+                                if (!back_)
+                                        back_ = front_;
+                        }
 
-			// this will be a no-op a few revisions later
-			// just need to make sure ordering is preserved
-			void validate()
-			{
-				if (auto it = front_)
-				{
-					require(it->__id);
+                        // this will be a no-op a few revisions later
+                        // just need to make sure ordering is preserved
+                        void validate()
+                        {
+                                if (auto it = front_)
+                                {
+                                        require(it->__id);
 
-					for (auto prev = it; (it = it->next); )
-					{
-						require(it->__id);
-						require(it->__id > prev->__id);
-					}
-				}
-			}
+                                        for (auto prev = it; (it = it->next);)
+                                        {
+                                                require(it->__id);
+                                                require(it->__id > prev->__id);
+                                        }
+                                }
+                        }
 
                         void push_back(outgoing_payload *const p)
                         {
@@ -329,23 +333,22 @@ class TankClient
 
                 } outgoing_content;
 
-
-		struct
+                struct
                 {
                         std::set<uint32_t> pendingConsume;
                         std::set<uint32_t> pendingProduce;
                 } reqs_tracker;
 
                 broker(const Switch::endpoint e)
-			: endpoint{e}
-		{
-			switch_dlist_init(&retainedPayloadsList);
-		}
+                    : endpoint{e}
+                {
+                        switch_dlist_init(&retainedPayloadsList);
+                }
         };
 
-	uint64_t nextInflightReqsTimeoutCheckTs{0};
-	RetryStrategy retryStrategy{RetryStrategy::RetryAlways};
-	CompressionStrategy compressionStrategy{CompressionStrategy::CompressIntelligently};
+        uint64_t nextInflightReqsTimeoutCheckTs{0};
+        RetryStrategy retryStrategy{RetryStrategy::RetryAlways};
+        CompressionStrategy compressionStrategy{CompressionStrategy::CompressIntelligently};
         Switch::unordered_map<Switch::endpoint, broker *> bsMap;
         Switch::unordered_map<strwlen8_t, Switch::endpoint> leadersMap;
         Switch::endpoint defaultLeader{};
@@ -370,7 +373,7 @@ class TankClient
         Switch::vector<connection *> connectionsPool;
         Switch::vector<outgoing_payload *> payloadsPool;
         Switch::vector<IOBuffer *> buffersPool;
-	size_t buffersPoolPressure{0};
+        size_t buffersPoolPressure{0};
         Switch::vector<range32_t> ranges;
         IOBuffer produceCtx;
         Switch::unordered_map<uint32_t, active_consume_req> pendingConsumeReqs;
@@ -379,13 +382,13 @@ class TankClient
         {
                 bool operator()(const broker *const b1, const broker *const b2)
                 {
-			return b1->block_ctx.until > b2->block_ctx.until;
+                        return b1->block_ctx.until > b2->block_ctx.until;
                 }
         };
         std::priority_queue<broker *, std::vector<broker *>, reschedule_queue_entry_cmp> rescheduleQueue;
 
       private:
-      	inline void update_time_cache()
+        inline void update_time_cache()
         {
                 nowMS = Timings::Milliseconds::Tick();
         }
@@ -410,13 +413,13 @@ class TankClient
 
         bool is_unreachable(const Switch::endpoint) const;
 
-	bool consider_retransmission(broker *);
+        bool consider_retransmission(broker *);
 
-	void track_inflight_req(const uint32_t, const uint64_t, const TankAPIMsgType);
+        void track_inflight_req(const uint32_t, const uint64_t, const TankAPIMsgType);
 
-	void consider_inflight_reqs(const uint64_t);
+        void consider_inflight_reqs(const uint64_t);
 
-	void forget_inflight_req(const uint32_t, const TankAPIMsgType);
+        void forget_inflight_req(const uint32_t, const TankAPIMsgType);
 
         bool shutdown(connection *const c, const uint32_t ref, const bool fault = false);
 
@@ -430,15 +433,15 @@ class TankClient
 
         auto get_buffer()
         {
-		if (buffersPool.size())
-		{
-			auto b = buffersPool.Pop();
+                if (buffersPool.size())
+                {
+                        auto b = buffersPool.Pop();
 
-			buffersPoolPressure-=b->Reserved();
-			return b;
-		}
-		else
-			return new IOBuffer();
+                        buffersPoolPressure -= b->Reserved();
+                        return b;
+                }
+                else
+                        return new IOBuffer();
         }
 
         void ack_payload(broker *, outgoing_payload *);
@@ -455,17 +458,17 @@ class TankClient
         {
                 require(b);
 
-		if (buffersPoolPressure + b->Reserved() > 4 * 1024 * 1024 || buffersPool.size() > 128)
-			delete b;
+                if (buffersPoolPressure + b->Reserved() > 4 * 1024 * 1024 || buffersPool.size() > 128)
+                        delete b;
                 else
                 {
-			buffersPoolPressure -= b->Reserved();
+                        buffersPoolPressure -= b->Reserved();
                         b->clear();
                         buffersPool.push_back(b);
                 }
         }
 
-	uint32_t __nextPayloadId{0};
+        uint32_t __nextPayloadId{0};
 
         auto get_payload()
         {
@@ -473,39 +476,38 @@ class TankClient
 
                 res->iovCnt = res->iovIdx = 0;
                 res->next = nullptr;
-		res->flags = 0;
+                res->flags = 0;
                 res->b = get_buffer();
                 res->b2 = get_buffer();
 
-		{
-			// See broker::outgoing_content::validate()
-			res->__id = ++__nextPayloadId;
-			require(res->__id);
-		}
+                {
+                        // See broker::outgoing_content::validate()
+                        res->__id = ++__nextPayloadId;
+                        require(res->__id);
+                }
 
-		switch_dlist_init(&res->pendingRespList);
+                switch_dlist_init(&res->pendingRespList);
                 return res;
         }
 
         outgoing_payload *get_payload_for(connection *, const size_t);
 
-        void put_payload(outgoing_payload *const p)
+        void put_payload(outgoing_payload *const p, const uint32_t ref)
         {
-		require(p->__id);
+                require(p->__id);
 
                 if (p->b)
-		{
+                {
                         put_buffer(p->b);
-			p->b = nullptr;
-		}
+                        p->b = nullptr;
+                }
                 if (p->b2)
-		{
+                {
                         put_buffer(p->b2);
-			p->b2 = nullptr;
-		}
+                        p->b2 = nullptr;
+                }
 
-
-		p->__id = 0; // so that validate() will catch it if e.g we re-use a payload without put_payload() first
+                p->__id = 0; // so that validate() will catch it if e.g we re-use a payload without put_payload() first
 
                 payloadsPool.push_back(p);
         }
@@ -525,9 +527,9 @@ class TankClient
 
         void bind_fd(connection *const c, int fd);
 
-	bool try_transmit(broker *);
+        bool try_transmit(broker *);
 
-	void flush_broker(broker *bs);
+        void flush_broker(broker *bs);
 
       public:
         TankClient(const strwlen32_t defaultLeader = {});
@@ -552,8 +554,8 @@ class TankClient
         void poll(uint32_t timeoutMS);
 
         uint32_t produce(const std::vector<std::pair<topic_partition, std::vector<msg>>> &req);
-	
-	uint32_t produce_to(const topic_partition &to, std::vector<msg> &msgs);
+
+        uint32_t produce_to(const topic_partition &to, const std::vector<msg> &msgs);
 
         Switch::endpoint leader_for(const strwlen8_t topic, const uint16_t partition);
 
@@ -566,15 +568,15 @@ class TankClient
                 clientId.Set(p, len);
         }
 
-	void set_retry_strategy(const RetryStrategy r)
-	{
-		retryStrategy = r;
-	}
+        void set_retry_strategy(const RetryStrategy r)
+        {
+                retryStrategy = r;
+        }
 
-	void set_compression_strategy(const CompressionStrategy c)
-	{
-		compressionStrategy = c;
-	}
+        void set_compression_strategy(const CompressionStrategy c)
+        {
+                compressionStrategy = c;
+        }
 
         void set_default_leader(const Switch::endpoint e)
         {
