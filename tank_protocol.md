@@ -137,7 +137,7 @@ msgReq is `0x2`
 
 		bundle
 		{
-			length:varint 		The lenght of the bundle
+			length:varint 		The length of the bundle
 			bundle:... 			See tank_encoding.md for bundle encoding scheme
 		}...
 	}...
