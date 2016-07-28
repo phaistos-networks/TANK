@@ -68,7 +68,10 @@ class TankClient
 
                         // If the broker report it is no longer the leader for a (topic, partition), we may need to retry the same request
                         // XXX: However, a request may include multiple distinct (topic, partition)s, so we may not
-                        // be able to reschedule it as-is, and so we 'd need to account for that.
+                        // be able to reschedule it as-is, and so we 'd need to account for that - that is, we should either set ReqMaybeRetried and
+			// track it in pendingConsumeReqs and pendingProduceReqs iff number of partitions involved in the request == 1, or we should
+			// set another flag, set another flag, and when we are told to try another node, either unpack the tracked payload to send
+			// the data to where we need to send them, or do something else.
                         ReqMaybeRetried = 1
                 };
                 uint8_t flags;
@@ -121,8 +124,9 @@ class TankClient
                                 RetryingConnection,
                                 ConsideredReqHeader,
 
-                                // Consume responses, produce acks, and errors almost all derefence in connection input buffer
-                                // once we dereference it, we can't reallocate the buffer internal memory, so this is set.
+                                // Consume responses, produce acks, and errors almost all derefence the connection input buffer data.
+                                // Once we dereference it, we can't reallocate the buffer internal memory, so this is set.
+				//
                                 // This flag is unset when we read data, and may be set by various process_() methods, and considered
                                 // when we process the ingested input
                                 LockedInputBuffer
@@ -352,6 +356,7 @@ class TankClient
         Switch::unordered_map<Switch::endpoint, broker *> bsMap;
         Switch::unordered_map<strwlen8_t, Switch::endpoint> leadersMap;
         Switch::endpoint defaultLeader{};
+	int sndBufSize{0}, rcvBufSize{0};
         strwlen8_t clientId{"c++"};
         switch_dlist connections;
         Switch::vector<std::pair<connection *, IOBuffer *>> connsBufs;
@@ -416,6 +421,8 @@ class TankClient
         bool consider_retransmission(broker *);
 
         void track_inflight_req(const uint32_t, const uint64_t, const TankAPIMsgType);
+
+	void abort_inflight_req(connection *, const uint32_t, const TankAPIMsgType);
 
         void consider_inflight_reqs(const uint64_t);
 
@@ -577,6 +584,16 @@ class TankClient
         {
                 compressionStrategy = c;
         }
+
+	void set_sock_sndbuf_size(const int v)
+	{
+		sndBufSize = v;
+	}
+
+	void set_sock_rcvbuf_size(const int v)
+	{
+		rcvBufSize = v;
+	}
 
         void set_default_leader(const Switch::endpoint e)
         {

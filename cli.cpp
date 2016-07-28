@@ -20,10 +20,18 @@ int main(int argc, char *argv[])
 		goto help;
 
 	tankClient.set_retry_strategy(TankClient::RetryStrategy::RetryNever);
-	while ((r = getopt(argc, argv, "+vb:t:p:hr")) != -1) 	// see GETOPT(3) for '+' initial character semantics
+	while ((r = getopt(argc, argv, "+vb:t:p:hrS:R:")) != -1) 	// see GETOPT(3) for '+' initial character semantics
         {
                 switch (r)
                 {
+			case 'S':
+				tankClient.set_sock_sndbuf_size(strwlen32_t(optarg).AsUint32());
+				break;
+
+			case 'R':
+				tankClient.set_sock_rcvbuf_size(strwlen32_t(optarg).AsUint32());
+				break;
+
 			case 'r':
 				retry = true;
 				tankClient.set_retry_strategy(TankClient::RetryStrategy::RetryAlways);
@@ -78,6 +86,8 @@ int main(int argc, char *argv[])
 				Print("-b broker endpoint: The endpoint of the Tank broker\n");
 				Print("-t topic: The topic to produce to or consume from\n");
 				Print("-p partition: The partition of the topic to produce to or consme from\n");
+				Print("-S bytes: set tank client's socket send buffer size\n");
+				Print("-R bytes: set tank client's socket receive buffer size\n");
 				Print("-v : Verbose output\n");
 				Print("Commands available: consume, produce, benchmark\n");
 				return 0;
@@ -160,13 +170,14 @@ int main(int argc, char *argv[])
                         TS
                 };
                 uint8_t displayFields{1u << uint8_t(Fields::Content)};
-                static constexpr size_t defaultMinFetchSize{48 * 1024 * 1024};
+                static constexpr size_t defaultMinFetchSize{128 * 1024 * 1024};
                 size_t minFetchSize{defaultMinFetchSize};
                 uint32_t pendingResp{0};
 		bool statsOnly{false};
+		IOBuffer buf;
 
 		optind = 0;
-                while ((r = getopt(argc, argv, "SF:h")) != -1)
+                while ((r = getopt(argc, argv, "SF:hB")) != -1)
                 {
                         switch (r)
                         {
@@ -280,8 +291,28 @@ int main(int argc, char *argv[])
                                 }
                                 else
                                 {
+					buf.clear();
                                         for (const auto m : it.msgs)
-                                                Print(m->content, "\n");
+					{
+						buf.append(m->content);
+						buf.append('\n');
+					}
+
+					if (auto s = buf.AsS32())
+					{
+						do
+						{
+							const auto r = write(STDOUT_FILENO, s.p, s.len);
+
+							if (r == -1)
+							{
+								Print("(Failed to output data to stdout:", strerror(errno), ". Exiting\n");
+								return 1;
+							}
+							else
+								s.StripPrefix(r);
+						} while (s);
+					}
                                 }
 
                                 minFetchSize = Max<size_t>(it.next.minFetchSize, defaultMinFetchSize);
@@ -312,6 +343,7 @@ int main(int argc, char *argv[])
 					break;
 
 				case 'F':
+					asSingleMsg = true;
 				case 'f':
 					{
 						const auto l = strlen(optarg);
@@ -319,8 +351,6 @@ int main(int argc, char *argv[])
 						require(l < sizeof(path));
 						memcpy(path, optarg, l);
 						path[l] = '\0';
-
-                                                asSingleMsg = r == 'F';
                                         }
 					break;
 

@@ -407,6 +407,12 @@ void TankClient::forget_inflight_req(const uint32_t reqId, const TankAPIMsgType 
                 SLog("Forgetting ", reqId, " of type ", uint8_t(reqMsg), "\n");
 }
 
+void TankClient::abort_inflight_req(connection *const c, const uint32_t reqId, const TankAPIMsgType reqMsg)
+{
+        // TODO: https://github.com/phaistos-networks/TANK/issues/21
+}
+
+
 // TODO: if too many outgoing messages in bs->outgoing_content, and in Reachability::Blocked reachability,
 // we need to flush_broker(bs); return false;  so that we won't use too much memory queuing up too much data
 bool TankClient::try_transmit(broker *const bs)
@@ -1490,6 +1496,9 @@ bool TankClient::try_recv(connection *const c)
                         // for the next Poll() call, because e.g process_consume() is going
                         // to point inside the buffer, and we don't want to free or otherwise modify the buffer until
                         // the caller had a chance to e.g go through all consumed messages.
+			//
+			// TODO: only defer if (c->state.flags & (1u << uint8_t(connection::State::Flags::LockedInputBuffer)))
+			// otherwise just clear or trim here
                         connsBufs.push_back({c, b});
                         return true;
                 }
@@ -1648,14 +1657,17 @@ int TankClient::init_connection_to(const Switch::endpoint e)
 
         Switch::SetNoDelay(fd, 1);
 
-#if 0
+	if (sndBufSize)
 	{
-		int sndBufSize{2*1024*1024};
-
 		if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (char *)&sndBufSize, sizeof(sndBufSize)) == -1)
 			Print("WARNING: unable to set socket send buffer size:", strerror(errno), "\n");
 	}
-#endif
+
+	if (rcvBufSize)
+	{
+		if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (char *)&rcvBufSize, sizeof(rcvBufSize)) == -1)
+			Print("WARNING: unable to set socket rcv buffer size:", strerror(errno), "\n");
+	}
 
         if (connect(fd, (sockaddr *)&sa, sizeof(sa)) == -1 && errno != EINPROGRESS)
         {

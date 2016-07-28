@@ -1725,7 +1725,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                 p += clientId.len + sizeof(uint8_t);
                 const auto maxWait = *(uint64_t *)p; // if we don't get any data within `maxWait`ms, we 'll return nothing for the requested partitions
                 p += sizeof(uint64_t);
-                const auto minBytes = Min<uint32_t>(*(uint32_t *)p, 64 * 1024 * 1024); // keep it sane
+                const auto minBytes = Min<uint32_t>(*(uint32_t *)p, 128 * 1024 * 1024); // keep it sane
                 p += sizeof(uint32_t);
                 const auto topicsCnt = *p++;
 
@@ -3139,21 +3139,26 @@ int Service::start(int argc, char **argv)
                                 }
                                 else
                                 {
+					static const auto rcvBufSize = strwlen32_t(getenv("TANK_BROKER_SOCKBUF_RCV_SIZE") ?: "0").AsUint32();
+                                        static const auto sndBufSize = strwlen32_t(getenv("TANK_BROKER_SOCKBUF_SND_SIZE") ?: "0").AsUint32();
+
                                         require(saLen == sizeof(sockaddr_in));
 
                                         auto c = get_connection();
 
-#if 0
+                                        // Kafka's default is 1mb for both buffers
+                                        if (rcvBufSize)
                                         {
-						// Default (socket.send.buffer and socket.receive.buffer) from Kafka
-                                                int rcvBufSize{102400}, sndBufSize{102400};
-
                                                 if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (char *)&rcvBufSize, sizeof(rcvBufSize)) == -1)
                                                         Print("WARNING: unable to set socket receive buffer size:", strerror(errno), "\n");
-                                                if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (char *)&sndBufSize, sizeof(sndBufSize)) == -1)
+                                        }
+				
+                                        if (sndBufSize)
+                                        {
+                                                if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (char *)&sndBufSize, sizeof(sndBufSize)) == -1)
                                                         Print("WARNING: unable to set socket send buffer size:", strerror(errno), "\n");
                                         }
-#endif
+
 
                                         c->fd = newFd;
                                         c->replicaId = 0;
