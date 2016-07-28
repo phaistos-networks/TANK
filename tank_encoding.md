@@ -39,7 +39,7 @@ bundle
 {
 	flags:u8		       The bundle flags. Currently, 6 out of 8 bits are used. See below
 				       (6, 8]: those 2 bits encode compression codec. 0 is for no compression, 1 is for Snappy compression. Other codecs may be supported in the future
-				       (2, 6): those 4 bits encode the total messages in message set, iff total number of messages in the message <= 15. If not, see below
+				       (2, 6]: those 4 bits encode the total messages in message set, iff total number of messages in the message <= 15. If not, see below
 				       (1): unused bit 	(maybe when set means that bundle encodes an absolute seq.num:u64 and msgs and each msg a delta:u32)
 				       (0): unused bit	(maybe when set means that each msg or bundle has a crc32 encoded in its header)
 
@@ -71,8 +71,7 @@ bundle
 
 		if (flags & TankFlags::BundleMsgFlags::HaveKey) 			// Most messages don't have a key. When they do, this bit is set
 		{
-			keyLen:u8 							// and we encode the length of the key as a u8 followed by the key in however many bytes long it is
-			key:...
+			key:str8
 		}
 
 		content length:varint 							// The payload(content) length of the message
