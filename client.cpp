@@ -1657,6 +1657,8 @@ int TankClient::init_connection_to(const Switch::endpoint e)
 
         Switch::SetNoDelay(fd, 1);
 
+	// On Linux, the default send buffer size is 16kb, and the default recv buffer size is 86k
+	// use getsockopt() to determine it
 	if (sndBufSize)
 	{
 		if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (char *)&sndBufSize, sizeof(sndBufSize)) == -1)

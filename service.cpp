@@ -3139,8 +3139,8 @@ int Service::start(int argc, char **argv)
                                 }
                                 else
                                 {
-					static const auto rcvBufSize = strwlen32_t(getenv("TANK_BROKER_SOCKBUF_RCV_SIZE") ?: "0").AsUint32();
-                                        static const auto sndBufSize = strwlen32_t(getenv("TANK_BROKER_SOCKBUF_SND_SIZE") ?: "0").AsUint32();
+					static const auto rcvBufSize = strwlen32_t(getenv("TANK_BROKER_SOCKBUF_RCV_SIZE") ?: "1048576").AsUint32();
+                                        static const auto sndBufSize = strwlen32_t(getenv("TANK_BROKER_SOCKBUF_SND_SIZE") ?: "1048576").AsUint32();
 
                                         require(saLen == sizeof(sockaddr_in));
 

@@ -356,7 +356,7 @@ class TankClient
         Switch::unordered_map<Switch::endpoint, broker *> bsMap;
         Switch::unordered_map<strwlen8_t, Switch::endpoint> leadersMap;
         Switch::endpoint defaultLeader{};
-	int sndBufSize{0}, rcvBufSize{0};
+	int sndBufSize{128 * 1024}, rcvBufSize{1 * 1024 * 1024};
         strwlen8_t clientId{"c++"};
         switch_dlist connections;
         Switch::vector<std::pair<connection *, IOBuffer *>> connsBufs;
