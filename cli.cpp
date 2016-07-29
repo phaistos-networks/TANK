@@ -6,6 +6,52 @@
 #include <set>
 #include <text.h>
 #include <sysexits.h>
+#include <date.h>
+
+
+static uint64_t parse_timestamp(strwlen32_t s)
+{
+        strwlen32_t c;
+        struct tm tm;
+
+        // for now, YYYYMMDDHH:MM:SS
+	// Eventually, will support more date/timeformats
+        if (s.len != 16)
+                return 0;
+
+        c = s.Prefix(4);
+        s.StripPrefix(4);
+        tm.tm_year = c.AsUint32() - 1900;
+        c = s.Prefix(2);
+        s.StripPrefix(2);
+        tm.tm_mon = c.AsUint32() - 1;
+        c = s.Prefix(2);
+        s.StripPrefix(2);
+        tm.tm_mday = c.AsUint32();
+
+        c = s.Prefix(2);
+        s.StripPrefix(2);
+
+        s.StripPrefix(1);
+        tm.tm_hour = c.AsUint32();
+        c = s.Prefix(2);
+        s.StripPrefix(2);
+        tm.tm_min = c.AsUint32();
+
+        s.StripPrefix(1);
+        c = s.Prefix(2);
+        s.StripPrefix(2);
+        tm.tm_sec = c.AsUint32();
+
+	tm.tm_isdst = -1;
+
+        const auto res = mktime(&tm);
+
+        if (res == -1)
+                return 0;
+        else
+                return Timings::Seconds::ToMillis(res);
+}
 
 int main(int argc, char *argv[])
 {
@@ -175,12 +221,41 @@ int main(int argc, char *argv[])
                 uint32_t pendingResp{0};
 		bool statsOnly{false};
 		IOBuffer buf;
+		range64_t timeRange{0, UINT64_MAX};
 
 		optind = 0;
-                while ((r = getopt(argc, argv, "SF:hB")) != -1)
+                while ((r = getopt(argc, argv, "SF:hBT:")) != -1)
                 {
                         switch (r)
                         {
+				case 'T':
+				{
+					const auto r = strwlen32_t(optarg).Divided(',');
+
+					timeRange.offset = parse_timestamp(r.first);
+					if (!timeRange.offset)
+					{
+						Print("Failed to parse ", r.first, "\n");
+						return 1;
+					}
+
+					if (r.second)
+                                        {
+                                                const auto end = parse_timestamp(r.second);
+
+                                                if (!end)
+                                                {
+                                                        Print("Failed to parse ", r.second, "\n");
+                                                        return 1;
+                                                }
+						else
+							timeRange.SetEnd(end + 1);
+                                        }
+					else
+						timeRange.len = UINT64_MAX - timeRange.offset;
+                                }
+				break;
+
 				case 'S':
 					statsOnly = true;
 					break;
@@ -210,6 +285,7 @@ int main(int argc, char *argv[])
 					Print("Options include:\n");
 					Print("-F display format: Specify a ',' separated list of message properties to be displayed. Properties include: \"seqnum\", \"key\", \"content\", \"ts\". By default, only the content is displayed\n");
 					Print("-S: statistics only\n");
+					Print("-T: optionally, filter all consumes messages by specifying a time range in either (from,to) or (from) format, where the first allows to specify a start and an end date/time and the later a start time and no end time. Currently, only one date-time format is supported (YYYMMDDHH:MM:SS)\n");
 					Print("\"from\" specifies the first message we are interested in.\n");
 					Print("If from is \"beginning\" or \"start\"," \
 						" it will start consuming from the first available message in the selected topic. If it is \"eof\" or \"end\", it will " \
@@ -291,12 +367,21 @@ int main(int argc, char *argv[])
                                 }
                                 else
                                 {
+					size_t sum{0};
+                                        for (const auto m : it.msgs)
+						sum += m->content.len;
+					sum+=it.msgs.len * 2;
+
 					buf.clear();
+					buf.reserve(sum);
                                         for (const auto m : it.msgs)
 					{
-						buf.append(m->content);
-						buf.append('\n');
-					}
+						if (timeRange.Contains(m->ts))
+                                                {
+                                                        buf.append(m->content);
+                                                        buf.append('\n');
+                                                }
+                                        }
 
 					if (auto s = buf.AsS32())
 					{

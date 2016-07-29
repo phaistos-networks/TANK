@@ -82,10 +82,10 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
                 if (indexFd == -1)
                         throw Switch::system_error("Failed to rebuild index file:", strerror(errno));
 
-		if (haveWideEntries)
-		{
-			IMPLEMENT_ME();
-		}
+                if (haveWideEntries)
+                {
+                        IMPLEMENT_ME();
+                }
 
                 Service::rebuild_index(fdh->fd, indexFd);
         }
@@ -570,30 +570,30 @@ void topic_partition_log::consider_ro_segments()
 
                 basePath.append("/", segment->baseSeqNum, "-", segment->lastAvailSeqNum, "_", segment->createdTS, ".ilog");
                 if (unlink(basePath.data()) == -1)
-			Print("Failed to unlink ", basePath, ": ", strerror(errno), "\n");
-		else if (trace)
-			SLog("Removed ", basePath, "\n");
+                        Print("Failed to unlink ", basePath, ": ", strerror(errno), "\n");
+                else if (trace)
+                        SLog("Removed ", basePath, "\n");
 
                 basePath.SetLength(basePathLen);
                 basePath.append("/", segment->baseSeqNum, ".index");
                 if (unlink(basePath.data()) == -1)
-			Print("Failed to unlink ", basePath, ": ", strerror(errno), "\n");
-		else if (trace)
-			SLog("Removed ", basePath, "\n");
+                        Print("Failed to unlink ", basePath, ": ", strerror(errno), "\n");
+                else if (trace)
+                        SLog("Removed ", basePath, "\n");
 
                 basePath.SetLength(basePathLen);
 
                 segment->fdh.reset(nullptr);
 
                 sum -= segment->fileSize;
-		delete segment;
+                delete segment;
                 roSegments->pop_front();
         }
 
-	if (roSegments->size())
-        	firstAvailableSeqNum = roSegments->front()->baseSeqNum;
-	else
-		firstAvailableSeqNum = cur.baseSeqNum;
+        if (roSegments->size())
+                firstAvailableSeqNum = roSegments->front()->baseSeqNum;
+        else
+                firstAvailableSeqNum = cur.baseSeqNum;
 
         if (trace)
                 SLog("firstAvailableSeqNum now = ", firstAvailableSeqNum, "\n");
@@ -616,13 +616,13 @@ bool topic_partition_log::should_roll(const uint32_t now) const
                         return true;
                 }
 
-                const size_t skipListCapacity = Min<size_t>(65536, config.maxIndexSize / (sizeof(uint32_t) + sizeof(uint32_t)));
+                const size_t curIndexSizeBytes = cur.index.ondisk.span + (cur.index.skipList.size() * (sizeof(uint32_t) + sizeof(uint32_t)));
 
-                if (cur.index.skipList.size() > skipListCapacity)
+                if (curIndexSizeBytes > config.maxIndexSize)
                 {
                         // index is full
                         if (trace)
-                                SLog(ansifmt::bold, "cur.index.skipList.size(", cur.index.skipList.size(), ") > skipListCapacity(", skipListCapacity, ")", ansifmt::reset, "\n");
+                                SLog(ansifmt::bold, "curIndexSizeBytes(", curIndexSizeBytes, ") > config.maxIndexSize(", config.maxIndexSize, ")", ansifmt::reset, "\n");
 
                         return true;
                 }
@@ -649,7 +649,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
         const auto absSeqNum = lastAssignedSeqNum + 1;
         const auto now = Timings::Seconds::SysTime();
 
-	Drequire(bundleMsgsCnt);
+        Drequire(bundleMsgsCnt);
         lastAssignedSeqNum += bundleMsgsCnt;
 
         if (should_roll(now))
@@ -732,7 +732,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 cur.nameEncodesTS = true;
 
                 cur.index.skipList.clear();
-		fdatasync(cur.index.fd);
+                fdatasync(cur.index.fd);
                 close(cur.index.fd);
 
                 if (cur.index.ondisk.data != nullptr && cur.index.ondisk.data != MAP_FAILED)
@@ -743,7 +743,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 
                 basePath.append(cur.baseSeqNum, "_", cur.createdTS, ".log");
 
-                cur.fdh.reset(new fd_handle(open(basePath.data(), O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME|O_APPEND, 0775)));
+                cur.fdh.reset(new fd_handle(open(basePath.data(), O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND, 0775)));
                 require(cur.fdh->use_count() == 2);
                 cur.fdh->Release();
 
@@ -775,7 +775,23 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 if (trace)
                         SLog("Switched\n");
         }
+        else if (unlikely(cur.index.skipList.size() > 65536))
+        {
+                // Impleemnts https://github.com/phaistos-networks/TANK/issues/27
+                if (trace)
+                        SLog(ansifmt::bold, ansifmt::color_red, "Emptying skiplist", ansifmt::reset, "\n");
 
+                if (cur.index.ondisk.data != nullptr && cur.index.ondisk.data != MAP_FAILED)
+                        munmap((void *)cur.index.ondisk.data, cur.index.ondisk.span);
+
+                cur.index.ondisk.span = lseek64(cur.index.fd, 0, SEEK_END);
+                cur.index.ondisk.data = static_cast<const uint8_t *>(mmap(nullptr, cur.index.ondisk.span, PROT_READ, MAP_SHARED, cur.index.fd, 0));
+
+                if (cur.index.ondisk.data == MAP_FAILED)
+                        throw Switch::system_error("mmap() failed:", strerror(errno));
+
+                cur.index.skipList.clear();
+        }
 
         require(cur.fdh.use_count() >= 1);
 
@@ -798,7 +814,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
         if (unlikely(writev(fd, iov, sizeof_array(iov)) != entryLen))
         {
                 RFLog("Failed to writev():", strerror(errno), "\n");
-		lastAssignedSeqNum = savedLastAssignedSeqNum;
+                lastAssignedSeqNum = savedLastAssignedSeqNum;
                 return {nullptr, {}, {}};
         }
         else
@@ -806,8 +822,8 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 if (trace)
                         SLog("writev() took ", duration_repr(Timings::Microseconds::Since(b)), "\n");
 
-		// Even if we fail to update the index, that's not a big deal because
-		// 1. we can always rebuild the index 2. we use the index to locate the closest bundle to the target sequence number
+                // Even if we fail to update the index, that's not a big deal because
+                // 1. we can always rebuild the index 2. we use the index to locate the closest bundle to the target sequence number
                 if (cur.sinceLastUpdate > config.indexInterval)
                 {
                         const uint32_t out[] = {uint32_t(absSeqNum - cur.baseSeqNum), cur.fileSize};
@@ -815,13 +831,13 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                         cur.index.skipList.push_back({out[0], out[1]});
 
                         if (trace)
-                                SLog(">> ", out[0], ", ", out[1], "\n");
+                                SLog(">> ", out[0], ", ", out[1], " ", cur.index.skipList.size(), "\n");
 
                         if (unlikely(write(cur.index.fd, out, sizeof(out)) != sizeof(out)))
                         {
                                 RFLog("Failed to write():", strerror(errno), "\n");
-				// don't restore neither lastAssignedSeqNum from savedLastAssignedSeqNum,  nor fileSize
-				// because this has been accepted
+                                // don't restore neither lastAssignedSeqNum from savedLastAssignedSeqNum,  nor fileSize
+                                // because this has been accepted
                                 return {nullptr, {}, {}};
                         }
 
@@ -1167,14 +1183,14 @@ void Service::rebuild_index(int logFd, int indexFd)
         Defer({ munmap(fileData, fileSize); });
         madvise(fileData, fileSize, MADV_SEQUENTIAL);
 
-	Print("Rebuilding index of log of size ", size_repr(fileSize), " ..\n");
+        Print("Rebuilding index of log of size ", size_repr(fileSize), " ..\n");
         for (const auto *p = reinterpret_cast<const uint8_t *>(fileData), *const e = p + fileSize, *const base = p, *next = p; p != e;)
         {
                 const auto bundleBase = p;
                 const auto bundleLen = Compression::UnpackUInt32(p);
                 const auto nextBundle = p + bundleLen;
 
-		expect(p < e);
+                expect(p < e);
 
                 const auto bundleFlags = *p++;
                 uint32_t msgsSetSize = (bundleFlags >> 2) & 0xf;
@@ -1182,7 +1198,7 @@ void Service::rebuild_index(int logFd, int indexFd)
                 if (!msgsSetSize)
                         msgsSetSize = Compression::UnpackUInt32(p);
 
-		expect(p <= e);
+                expect(p <= e);
 
                 if (p >= next)
                 {
@@ -1194,7 +1210,7 @@ void Service::rebuild_index(int logFd, int indexFd)
                 relSeqNum += msgsSetSize;
                 p = nextBundle;
 
-		expect(p <= e);
+                expect(p <= e);
         }
 
         if (trace)
@@ -1212,10 +1228,10 @@ void Service::verify_index(int fd)
 {
         const auto fileSize = lseek64(fd, 0, SEEK_END);
 
-	if (!fileSize)
-		return;
-	else if (fileSize & 7)
-		throw Switch::system_error("Unexpected index filesize");
+        if (!fileSize)
+                return;
+        else if (fileSize & 7)
+                throw Switch::system_error("Unexpected index filesize");
 
         auto *const fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, fd, 0);
 
@@ -1225,31 +1241,32 @@ void Service::verify_index(int fd)
         Defer({ munmap(fileData, fileSize); });
         madvise(fileData, fileSize, MADV_SEQUENTIAL);
 
-	for (const auto *p = reinterpret_cast<const uint32_t *>(fileData), 
-		*const e = p + (fileSize / sizeof(uint32_t)), *const b = p; p != e; p+=2)
+        for (const auto *p = reinterpret_cast<const uint32_t *>(fileData),
+                        *const e = p + (fileSize / sizeof(uint32_t)), *const b = p;
+             p != e; p += 2)
         {
                 if (p != b)
                 {
                         if (unlikely(p[0] <= p[-2]))
-			{
-				Print("Unexpected rel.seq.num ", p[0], ", should have been > ", p[-2], ", at entry ", dotnotation_repr((p  - (uint32_t *)fileData) / 2), " of index of ", dotnotation_repr(fileSize / (sizeof(uint32_t) + sizeof(uint32_t))), " entries\n");
-				throw Switch::system_error("Corrupt Index");
-			}
+                        {
+                                Print("Unexpected rel.seq.num ", p[0], ", should have been > ", p[-2], ", at entry ", dotnotation_repr((p - (uint32_t *)fileData) / 2), " of index of ", dotnotation_repr(fileSize / (sizeof(uint32_t) + sizeof(uint32_t))), " entries\n");
+                                throw Switch::system_error("Corrupt Index");
+                        }
 
                         if (unlikely(p[1] <= p[-1]))
-			{
-				Print("Unexpected file offset ", p[0], ", should have been > ", p[-2], ", at entry ", dotnotation_repr((p  - (uint32_t *)fileData) / 2), " of index of ", dotnotation_repr(fileSize / (sizeof(uint32_t) + sizeof(uint32_t))), " entries\n");
-				throw Switch::system_error("Corrupt Index");
-			}
+                        {
+                                Print("Unexpected file offset ", p[0], ", should have been > ", p[-2], ", at entry ", dotnotation_repr((p - (uint32_t *)fileData) / 2), " of index of ", dotnotation_repr(fileSize / (sizeof(uint32_t) + sizeof(uint32_t))), " entries\n");
+                                throw Switch::system_error("Corrupt Index");
+                        }
                 }
-		else
-		{
-			if (p[0] != 0 || p[1] != 0)
-			{
-				Print("Expected first entry to be (0, 0)\n");
-				throw Switch::system_error("Corrupt Index");
-			}
-		}
+                else
+                {
+                        if (p[0] != 0 || p[1] != 0)
+                        {
+                                Print("Expected first entry to be (0, 0)\n");
+                                throw Switch::system_error("Corrupt Index");
+                        }
+                }
         }
 }
 
@@ -1257,14 +1274,14 @@ uint32_t Service::verify_log(int fd)
 {
         const auto fileSize = lseek64(fd, 0, SEEK_END);
 
-	if (!fileSize)
-		return 0;
+        if (!fileSize)
+                return 0;
 
         auto *const fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, fd, 0);
-	strwlen8_t key;
-	strwlen32_t msgContent;
+        strwlen8_t key;
+        strwlen32_t msgContent;
         uint32_t relSeqNum{0};
-	IOBuffer cb;
+        IOBuffer cb;
         range_base<const uint8_t *, size_t> msgSetContent;
 
         if (fileData == MAP_FAILED)
@@ -1275,36 +1292,36 @@ uint32_t Service::verify_log(int fd)
 
         for (const auto *p = (uint8_t *)fileData, *const e = p + fileSize, *const base = p; p != e;)
         {
-		const auto *const bundleBase = p;
+                const auto *const bundleBase = p;
                 const auto bundleLen = Compression::UnpackUInt32(p);
                 const auto nextBundle = p + bundleLen;
 
-		expect(p < e);
-		expect(bundleLen);
+                expect(p < e);
+                expect(bundleLen);
 
                 const auto bundleFlags = *p++;
-		const auto codec = bundleFlags & 3;
+                const auto codec = bundleFlags & 3;
                 uint32_t msgsSetSize = (bundleFlags >> 2) & 0xf;
 
                 if (!msgsSetSize)
                         msgsSetSize = Compression::UnpackUInt32(p);
 
-		expect(p <= e);
-		expect(msgsSetSize);
-		expect(codec == 0 || codec == 1);
+                expect(p <= e);
+                expect(msgsSetSize);
+                expect(codec == 0 || codec == 1);
 
-		if (0)
-			Print(relSeqNum, " => OFFSET ", bundleBase - base, "\n");
+                if (0)
+                        Print(relSeqNum, " => OFFSET ", bundleBase - base, "\n");
 
-		if (codec)
-		{
-			cb.clear();
-			if (!Compression::UnCompress(Compression::Algo::SNAPPY, p, nextBundle - p, &cb))
-				throw Switch::system_error("Failed to decompress content");
-			msgSetContent.Set((uint8_t *)cb.data(), cb.length());
-		}
-		else
-			msgSetContent.Set(p, nextBundle - p);
+                if (codec)
+                {
+                        cb.clear();
+                        if (!Compression::UnCompress(Compression::Algo::SNAPPY, p, nextBundle - p, &cb))
+                                throw Switch::system_error("Failed to decompress content");
+                        msgSetContent.Set((uint8_t *)cb.data(), cb.length());
+                }
+                else
+                        msgSetContent.Set(p, nextBundle - p);
 
                 uint64_t msgTs{0};
 
@@ -1336,11 +1353,11 @@ uint32_t Service::verify_log(int fd)
                 relSeqNum += msgsSetSize;
                 p = nextBundle;
 
-		expect(p <= e);
+                expect(p <= e);
         }
 
-	return relSeqNum;
-} 
+        return relSeqNum;
+}
 
 Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint16_t idx, const char *const bp, const partition_config &partitionConf)
 {
@@ -1534,8 +1551,8 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         Snprint(basePath, sizeof(basePath), b, curLogSeqNum, ".index");
                         fd = open(basePath, O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND, 0775);
 
-			if (trace)
-				SLog("Considering ", basePath, "\n");
+                        if (trace)
+                                SLog("Considering ", basePath, "\n");
 
                         if (fd == -1)
                                 throw Switch::system_error("open(", basePath_, ") failed:", strerror(errno), ". Cannot open current segment index");
@@ -1566,20 +1583,18 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                         SLog("Have cur.index.ondisk.span = ", l->cur.index.ondisk.span, " lastRecorded =  ( relSeqNum = ", l->cur.index.ondisk.lastRecorded.relSeqNum, ", absPhysical = ", l->cur.index.ondisk.lastRecorded.absPhysical, ")\n");
 
 #if 1
-                                        for (const auto *it = (uint32_t *)l->cur.index.ondisk.data, *const base = it, *const e = it + l->cur.index.ondisk.span / sizeof(uint32_t); it != e; it+=2)
+                                        for (const auto *it = (uint32_t *)l->cur.index.ondisk.data, *const base = it, *const e = it + l->cur.index.ondisk.span / sizeof(uint32_t); it != e; it += 2)
                                         {
-						//SLog(it[0], " => ", it[1], "\n");
-						if (it != base)
-						{
-							Drequire(it[0] != it[-2]);
-						}
+                                                //SLog(it[0], " => ", it[1], "\n");
+                                                if (it != base)
+                                                {
+                                                        Drequire(it[0] != it[-2]);
+                                                }
                                         }
 
 #endif
                                 }
                         }
-
-
 
                         l->lastAssignedSeqNum = 0;
 
@@ -1591,12 +1606,12 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                 // keeping track of offsets as we go.
                                 const auto span = s - o;
 
-				Drequire(span);
+                                Drequire(span);
 
                                 uint8_t *const data = (uint8_t *)malloc(span);
                                 // first message in the first bundle we 'll parse
                                 uint64_t next = l->cur.index.ondisk.lastRecorded.relSeqNum + l->cur.baseSeqNum;
-				const auto savedNext{next};
+                                const auto savedNext{next};
                                 int fd = l->cur.fdh->fd;
 
                                 if (trace)
@@ -1631,11 +1646,11 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                         uint32_t msgSetSize = (bundleFlags >> 2) & 0xf;
 
                                         if (!msgSetSize)
-					{
+                                        {
                                                 msgSetSize = Compression::UnpackUInt32(p);
 
-						Drequire(msgSetSize);
-					}
+                                                Drequire(msgSetSize);
+                                        }
 
                                         if (trace)
                                                 SLog("bundle msgSetSize = ", msgSetSize, "\n");
@@ -1645,9 +1660,8 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                         Drequire(p <= e);
                                 }
 
-
-				Drequire(next > savedNext);
-				Drequire(l->cur.sinceLastUpdate == 0); 	// not an empty current segment log
+                                Drequire(next > savedNext);
+                                Drequire(l->cur.sinceLastUpdate == 0); // not an empty current segment log
 
                                 l->lastAssignedSeqNum = next - 1;
 
@@ -1908,6 +1922,9 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
 
                 if (trace)
                         SLog("respondNow = ", respondNow, ", maxWait = ", maxWait, "\n");
+
+                // TODO: https://github.com/phaistos-networks/TANK/issues/17#issuecomment-236106945
+                // (don't respond even if we have any data, amount >= minBytes)
                 if (respondNow || maxWait == 0)
                 {
                         // - fetch request does not want to wait
@@ -2013,6 +2030,10 @@ bool Service::process_replica_reg(connection *const c, const uint8_t *p, const s
 
 bool Service::process_produce(connection *const c, const uint8_t *p, const size_t len)
 {
+        if (unlikely(len < sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint8_t)))
+                return shutdown(c, __LINE__);
+
+        const auto *const __end = p + len;
         const uint64_t processBegin = trace ? Timings::Microseconds::Tick() : 0;
         auto *const respHeader = get_buffer();
         auto q = c->outQ;
@@ -2020,6 +2041,10 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
         p += sizeof(uint16_t);
         const auto requestId = *(uint32_t *)p;
         p += sizeof(uint32_t);
+
+        if (unlikely(p + (*p) + sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint8_t) >= __end))
+                return shutdown(c, __LINE__);
+
         const strwlen8_t clientId((char *)(p + 1), *p);
         p += clientId.len + sizeof(uint8_t);
         const auto requiredAcks = *p++;
@@ -2059,6 +2084,9 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
 
         for (uint32_t i{0}; i != topicsCnt; ++i)
         {
+                if (unlikely(p + (*p) >= __end))
+                        return shutdown(c, __LINE__);
+
                 topicName.Set((char *)p + 1, *p);
                 p += sizeof(uint8_t) + topicName.len;
 
@@ -2123,11 +2151,11 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                                 // in flags; so that's encoded as a varint here
                                 msgSetSize = Compression::UnpackUInt32(p);
 
-				if (unlikely(msgSetSize == 0))
-				{
-					// This is absolutely unacceptable
-					return shutdown(c, __LINE__);
-				}
+                                if (unlikely(msgSetSize == 0))
+                                {
+                                        // This is absolutely unacceptable
+                                        return shutdown(c, __LINE__);
+                                }
                         }
 
                         if (trace)
@@ -2232,7 +2260,7 @@ bool Service::process_msg(connection *const c, const uint8_t msg, const uint8_t 
                         return process_consume(c, data, len);
 
                 case TankAPIMsgType::Ping:
-			return true;
+                        return true;
 
                 case TankAPIMsgType::RegReplica:
                         return process_replica_reg(c, data, len);
@@ -2486,8 +2514,8 @@ bool Service::try_send(connection *const c)
         {
                 uint8_t b[sizeof(uint8_t) + sizeof(uint32_t)];
 
-                b[0] = uint8_t(TankAPIMsgType::Ping);          // msg = ping
-                *(uint32_t *)(b + sizeof(uint8_t)) = 0; 	// no payload
+                b[0] = uint8_t(TankAPIMsgType::Ping);   // msg = ping
+                *(uint32_t *)(b + sizeof(uint8_t)) = 0; // no payload
 
                 if (trace)
                         SLog("PINGING\n");
@@ -2587,10 +2615,10 @@ bool Service::try_send(connection *const c)
                                 if (r != range.len)
                                 {
                                         // if we didn't get to write() all the data we wanted to write
-					// it means that the socket buffer is now full, and it will almost definitely
-					// not be drained by the time we call write() again in this loop; we 'd insted
-					// get EAGAIN.
-					// So we 'll just consider the socket buffer full now and execute the EAGAIN logic
+                                        // it means that the socket buffer is now full, and it will almost definitely
+                                        // not be drained by the time we call write() again in this loop; we 'd insted
+                                        // get EAGAIN.
+                                        // So we 'll just consider the socket buffer full now and execute the EAGAIN logic
                                         goto set_need_outavail;
                                 }
                         }
@@ -2598,11 +2626,11 @@ bool Service::try_send(connection *const c)
                 else
                 {
                         // https://github.com/phaistos-networks/TANK/issues/14
-			// if only FreeBSD's great sendfile() syscall was available on Linux, with support for the
-			// extra flags based on NGINX's and Netflix's work, that'd make everything so much simpler.
-			// We 'd just use the SF_NODISKIO flag and the SF_READAHEAD macro, and check for EBUSY
-			// and optionally use readahead() and try again later(we could also mmap() the log and use mincore() to determine if
-			// all pages are cached)
+                        // if only FreeBSD's great sendfile() syscall was available on Linux, with support for the
+                        // extra flags based on NGINX's and Netflix's work, that'd make everything so much simpler.
+                        // We 'd just use the SF_NODISKIO flag and the SF_READAHEAD macro, and check for EBUSY
+                        // and optionally use readahead() and try again later(we could also mmap() the log and use mincore() to determine if
+                        // all pages are cached)
                         for (;;)
                         {
                                 auto &range = it.file_range.range;
@@ -2629,10 +2657,10 @@ bool Service::try_send(connection *const c)
                                                 continue;
                                         else if (errno == EAGAIN)
                                         {
-                                        set_need_outavail2:
                                                 if (trace)
                                                         SLog("EAGAIN (haveCork = ", haveCork, ", needOutAvail = ", (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))), ")\n");
 
+                                        set_need_outavail2:
                                                 if (haveCork)
                                                 {
                                                         if (trace)
@@ -2666,6 +2694,9 @@ bool Service::try_send(connection *const c)
                                                 q->pop_front();
                                                 break;
                                         }
+
+                                        if (trace)
+                                                SLog("r = ", r, ", outLen = ", outLen, "\n");
 
                                         if (r != outLen)
                                         {
@@ -2745,11 +2776,11 @@ int Service::start(int argc, char **argv)
         Switch::endpoint listenAddr;
 
 #ifndef LEAN_SWITCH
-	// See: https://github.com/markpapadakis/BacktraceResolver
-	Switch::trapCommonUnexpectedSignals();
+        // See: https://github.com/markpapadakis/BacktraceResolver
+        Switch::trapCommonUnexpectedSignals();
 #endif
 
-	if (argc > 1 && !strcmp(argv[1], "verify"))
+        if (argc > 1 && !strcmp(argv[1], "verify"))
         {
                 // https://github.com/phaistos-networks/TANK/wiki/Managing-Segments-files
                 size_t n{0}, tot{0};
@@ -2782,7 +2813,7 @@ int Service::start(int argc, char **argv)
                                                 const auto r = Service::verify_log(fd);
 
                                                 Print("> ", dotnotation_repr(r), " msgs\n");
-						tot+=r;
+                                                tot += r;
                                         }
                                         else if (ext.Eq(_S("index")))
                                         {
@@ -3139,7 +3170,7 @@ int Service::start(int argc, char **argv)
                                 }
                                 else
                                 {
-					static const auto rcvBufSize = strwlen32_t(getenv("TANK_BROKER_SOCKBUF_RCV_SIZE") ?: "1048576").AsUint32();
+                                        static const auto rcvBufSize = strwlen32_t(getenv("TANK_BROKER_SOCKBUF_RCV_SIZE") ?: "1048576").AsUint32();
                                         static const auto sndBufSize = strwlen32_t(getenv("TANK_BROKER_SOCKBUF_SND_SIZE") ?: "1048576").AsUint32();
 
                                         require(saLen == sizeof(sockaddr_in));
@@ -3152,13 +3183,12 @@ int Service::start(int argc, char **argv)
                                                 if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (char *)&rcvBufSize, sizeof(rcvBufSize)) == -1)
                                                         Print("WARNING: unable to set socket receive buffer size:", strerror(errno), "\n");
                                         }
-				
+
                                         if (sndBufSize)
                                         {
                                                 if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (char *)&sndBufSize, sizeof(sndBufSize)) == -1)
                                                         Print("WARNING: unable to set socket send buffer size:", strerror(errno), "\n");
                                         }
-
 
                                         c->fd = newFd;
                                         c->replicaId = 0;
