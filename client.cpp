@@ -1735,7 +1735,7 @@ void TankClient::poll(uint32_t timeoutMS)
 	if (const auto n = usedBufs.size())
 	{
 		put_buffers(usedBufs.values(), n);
-		usedBufs.SetTotal(0);
+		usedBufs.clear();
 	}
 
 
@@ -2044,12 +2044,15 @@ void TankClient::broker::set_reachability(const Reachability r)
         reachability = r;
 }
 
+#define _BUFFERS_PRESSURE_THRESHOLD (4 * 1024 * 1024)
+#define _BUFFERS_POOL_THRESHOLD 512
+
 void TankClient::put_buffer(IOBuffer *const b)
 {
         require(b);
         const size_t newValue = buffersPoolPressure + b->Reserved();
 
-        if (newValue > 4 * 1024 * 1024 || buffersPool.size() > 384)
+        if (newValue > _BUFFERS_PRESSURE_THRESHOLD || buffersPool.size() > _BUFFERS_POOL_THRESHOLD)
                 delete b;
         else
         {
@@ -2065,7 +2068,8 @@ void TankClient::put_buffers(IOBuffer **const list, const size_t n)
         IOBuffer *b;
         size_t newValue;
 
-        for (; i != n && (newValue = buffersPoolPressure + (b = list[i])->Reserved()) < 4 * 1024 * 1024 && buffersPool.size() < 384; ++i)
+        for (; i != n && (newValue = buffersPoolPressure + (b = list[i])->Reserved()) < _BUFFERS_PRESSURE_THRESHOLD 
+		&& buffersPool.size() < _BUFFERS_POOL_THRESHOLD; ++i)
         {
                 buffersPoolPressure = newValue;
                 b->clear();
