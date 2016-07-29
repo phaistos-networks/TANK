@@ -1492,14 +1492,34 @@ bool TankClient::try_recv(connection *const c)
                                 }
                         }
 
-                        // We need to defer this
-                        // for the next Poll() call, because e.g process_consume() is going
-                        // to point inside the buffer, and we don't want to free or otherwise modify the buffer until
-                        // the caller had a chance to e.g go through all consumed messages.
-			//
-			// TODO: only defer if (c->state.flags & (1u << uint8_t(connection::State::Flags::LockedInputBuffer)))
-			// otherwise just clear or trim here
-                        connsBufs.push_back({c, b});
+
+
+			if (0 == (c->state.flags & (1u << uint8_t(connection::State::Flags::LockedInputBuffer))))
+			{
+				if (auto b = c->inB)
+                                {
+                                        if (b->IsAtEnd())
+                                        {
+                                                put_buffer(b);
+                                                c->inB = nullptr;
+                                        }
+                                        else if (b->Offset() > 1 * 1024 * 1024)
+                                        {
+                                                b->DeleteChunk(0, b->Offset());
+                                                b->SetOffset(uint64_t(0));
+                                        }
+                                }
+                        }
+			else
+                        {
+                                // We need to defer this
+                                // for the next Poll() call, because e.g process_consume() is going
+                                // to point inside the buffer, and we don't want to free or otherwise modify the buffer until
+                                // the caller had a chance to e.g go through all consumed messages.
+                                connsBufs.push_back({c, b});
+                        }
+
+
                         return true;
                 }
         }
@@ -1683,15 +1703,17 @@ int TankClient::init_connection_to(const Switch::endpoint e)
 
 void TankClient::poll(uint32_t timeoutMS)
 {
-        // Reset state / buffers used for tracking collected content and responses in last poll() call
         // if this client has joined a consumer group, it is important that the application poll()s giving chances to
         // the tank client to send H/Bs to the broker so that it won't remove the client from the consumer group. See Kafka Consumer Groups
+
+
+        // Reset state / buffers used for tracking collected content and responses in last poll() call
         for (auto &it : connsBufs)
         {
                 auto c = it.first;
                 auto b = it.second;
 
-                if (c->inB == b)
+                if (c->inB == b) 	// make sure they are still paired together
                 {
                         if (b->IsAtEnd())
                         {
@@ -1707,9 +1729,16 @@ void TankClient::poll(uint32_t timeoutMS)
         }
         connsBufs.clear();
 
+
+
         // TODO: https://github.com/phaistos-networks/TANK/issues/6
-        while (usedBufs.size())
-                put_buffer(usedBufs.Pop());
+	if (const auto n = usedBufs.size())
+	{
+		put_buffers(usedBufs.values(), n);
+		usedBufs.SetTotal(0);
+	}
+
+
 
         // Reset prior to reschedule_any() not after we have called it
         // because it may push to capturedFaults[] so we don't want to clear it after we called it
@@ -2013,4 +2042,36 @@ void TankClient::broker::set_reachability(const Reachability r)
                 SLog(ansifmt::bold, ansifmt::color_green, "Reachability from ", uint8_t(reachability), " to ", uint8_t(r), ansifmt::reset, "\n");
 
         reachability = r;
+}
+
+void TankClient::put_buffer(IOBuffer *const b)
+{
+        require(b);
+        const size_t newValue = buffersPoolPressure + b->Reserved();
+
+        if (newValue > 4 * 1024 * 1024 || buffersPool.size() > 384)
+                delete b;
+        else
+        {
+                buffersPoolPressure = newValue;
+                b->clear();
+                buffersPool.push_back(b);
+        }
+}
+
+void TankClient::put_buffers(IOBuffer **const list, const size_t n)
+{
+        uint32_t i{0};
+        IOBuffer *b;
+        size_t newValue;
+
+        for (; i != n && (newValue = buffersPoolPressure + (b = list[i])->Reserved()) < 4 * 1024 * 1024 && buffersPool.size() < 384; ++i)
+        {
+                buffersPoolPressure = newValue;
+                b->clear();
+                buffersPool.push_back(b);
+        }
+
+        while (i != n)
+                delete list[i++];
 }

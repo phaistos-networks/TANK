@@ -2565,6 +2565,7 @@ bool Service::try_send(connection *const c)
                         {
                                 if (trace)
                                         SLog("Enabling cork\n");
+
                                 haveCork = true;
                                 Switch::SetTCPCork(fd, 1);
                         }

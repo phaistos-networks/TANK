@@ -461,19 +461,9 @@ class TankClient
 
         void retain_for_resp(broker *, outgoing_payload *);
 
-        void put_buffer(IOBuffer *const b)
-        {
-                require(b);
+        void put_buffer(IOBuffer *const b);
 
-                if (buffersPoolPressure + b->Reserved() > 4 * 1024 * 1024 || buffersPool.size() > 128)
-                        delete b;
-                else
-                {
-                        buffersPoolPressure -= b->Reserved();
-                        b->clear();
-                        buffersPool.push_back(b);
-                }
-        }
+        void put_buffers(IOBuffer **const list, const size_t n);
 
         uint32_t __nextPayloadId{0};
 

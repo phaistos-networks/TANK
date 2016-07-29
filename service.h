@@ -494,24 +494,28 @@ struct topic
 // TODO: Maybe we should just use a linked list instead
 struct outgoing_queue
 {
+        struct content_file_range
+        {
+                fd_handle *fdh;
+                range32_t range;
+
+                content_file_range &operator=(const content_file_range &o)
+                {
+                        fdh = o.fdh;
+                        range = o.range;
+                        return *this;
+                }
+
+        };
+
         struct payload
         {
                 bool payloadBuf;
-                IOBuffer *buf;
 
-                struct content_file_range
-                {
-                        fd_handle *fdh;
-                        range32_t range;
-
-                        content_file_range &operator=(const content_file_range &o)
-                        {
-                                fdh = o.fdh;
-                                range = o.range;
-                                return *this;
-                        }
-
-                } file_range;
+                union {
+                        IOBuffer *buf;
+                        content_file_range file_range;
+                };
 
                 payload()
                     : payloadBuf{false}
