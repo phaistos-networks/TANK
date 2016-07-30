@@ -71,8 +71,7 @@ bundle
 
 		if (flags & TankFlags::BundleMsgFlags::HaveKey) 			// Most messages don't have a key. When they do, this bit is set
 		{
-			keyLen:u8 							// and we encode the length of the key as a u8 followed by the key in however many bytes long it is
-			key:...
+			key:str8
 		}
 
 		content length:varint 							// The payload(content) length of the message
