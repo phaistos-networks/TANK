@@ -2145,6 +2145,7 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                         const auto codec = bundleFlags & 3;
                         uint32_t msgSetSize = uint32_t((bundleFlags >> 2) & 0xf);
 
+
                         if (!msgSetSize)
                         {
                                 // more than 15 messages in the message set; were not able to encode that in the 4 bits reserved
@@ -2161,6 +2162,12 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                         if (trace)
                                 SLog("bundleFlags = ", bundleFlags, ", codec= ", codec, ", message set messages cnt: ", msgSetSize, "\n");
                         // END: bundle header
+
+
+			// TODO:
+			// we may need to scan the provided bundle and the messages in the message set
+			// to determine the (first, last) sequence numbers, and wether they are monotonically increasing
+			// This is needed in order to support compactions and mirroring functionality
 
                         if (trace)
                         {

@@ -708,10 +708,10 @@ int main(int argc, char *argv[])
                         {
 
                                 case 'h':
-                                        Print("BENCHMARK [options] type\n");
+                                        Print("BENCHMARK [options] type [options]\n");
 					Print("Type can be:\n");
-					Print("- p2c:  Measures latency when producing from client to broker and consuming(tailing) the broker that message\n");
-					Print("- p2b:  Measures latency when producing from client to broker\n");
+					Print("p2c:  Measures latency when producing from client to broker and consuming(tailing) the broker that message\n");
+					Print("p2b:  Measures latency when producing from client to broker\n");
                                         Print("Options include:\n");
                                         return 0;
 
@@ -756,7 +756,7 @@ int main(int argc, char *argv[])
                                         case 'h':
 						Print("Performs a produce to consumer via Tank latency test. It will produce messages while also 'tailing' the selected topic and will measure how long it takes for the messages to reach the broker, stored, forwarded to the client and received\n");
 						Print("Options include:\n");
-						Print("-s message contrent length: by default 11bytes\n");
+						Print("-s message content length: by default 11bytes\n");
 						Print("-c total messages to publish: by default 1 message\n");
 						Print("-R: do not compress bundle\n");
 						return 0;

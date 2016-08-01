@@ -40,7 +40,7 @@ bundle
 	flags:u8		       The bundle flags. Currently, 6 out of 8 bits are used. See below
 				       (6, 8]: those 2 bits encode compression codec. 0 is for no compression, 1 is for Snappy compression. Other codecs may be supported in the future
 				       (2, 6]: those 4 bits encode the total messages in message set, iff total number of messages in the message <= 15. If not, see below
-				       (1): unused bit 	(maybe when set means that bundle encodes an absolute seq.num:u64 and msgs and each msg a delta:u32)
+				       (1): SPARSE bundle bit - see later
 				       (0): unused bit	(maybe when set means that each msg or bundle has a crc32 encoded in its header)
 
 	if total messages in message set > 15
@@ -51,6 +51,18 @@ bundle
 	}
 
 
+	if SPARSE bit is set
+	{
+		first message absolute sequence number:u64
+
+		if (total messages in message set > 1)
+		{
+			last messsage in this message set seqNumber - first message seqNum(delta):u32
+		}
+	}
+
+
+
 	We now store message set, one message after the other. The message set as
 	a whole may be compressed using the codec encoded in flags.
 	See below for encoding of messages. 
@@ -58,6 +70,18 @@ bundle
 	msg
 	{
 		flags:u8 								// The individual message flags
+
+		if (SPARSE bit is set)
+		{
+			if (this is neither the first nor the last message in the message set)
+			{
+				message.seqNum - firstMsg.seqNum:u32 	 		// encoeded in the bundle header
+			}
+			else
+			{
+				// encoded in the bundle header
+			}
+		}
 
 		if ((flags & TankFlags::BundleMsgFlags::UseLastSpecifiedTS) == 0)
 		{
