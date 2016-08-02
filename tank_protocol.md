@@ -11,7 +11,6 @@ This document describes the encoding and semantics of requests and responds exch
 
 
 
-
 ### BASICS
 All requests and responses begin with
 
@@ -24,11 +23,12 @@ All requests and responses begin with
 
 where msgId the type of request or response, and payload size is the size of the content for the request/response.
 The payload is described below, for each different request or response supported.
+See common.h for the message IDs of all support requests/responses.
 
 
 
 ### FetchReq
-msgId is ``0x2``
+msgId is `0x2`
 
 ```
 {
@@ -46,10 +46,10 @@ msgId is ``0x2``
 
 			partition 		
 			{
-				partition id:u16 			The partition ID
+				partition id:u16 		The partition ID
 				abs. sequence number: u64 	The absolute sequence number of the first message in this (topic, partition) we are interested in
-												See Wait and MinBytes semantics for more.
-				fetch size:u32 				Please see below for fetch size semantics
+									See Wait and MinBytes semantics for more.
+				fetch size:u32 			Please see below for fetch size semantics
 
 		} ..
 }
@@ -82,15 +82,15 @@ msgReq is `0x2`
 {
 	header length:u32 		The length of the header that follows
 
-	header 				    The header encodes information for all requested (topic, partition)s. 
+	header 			    	The header encodes information for all requested (topic, partition)s. 
 	{
 		request id:u32 		When clients issue requests, they specify a request id for them. 
-		                    The broker encodes that here so that the client will know what this is for
+		                    	The broker encodes that here so that the client will know what this is for
 		topics count:u8 	How many topics are encoded below, based on the original request
 
 		topic 	
 		{
-			name:str8 			 	    Name of the topic
+			name:str8 			Name of the topic
 			total partitions:u8 		Total partitions encoded for this topic
 
 
@@ -102,22 +102,32 @@ msgReq is `0x2`
 			partition
 			{
 				partitionid:u16 		Partition ID
-				error: u8 			Error, 0 means no error
+				errorOrFlags: u8 		Error or flags(0 means no error or any special flags are set)
 
+				if (errorOrFlags == 0xff)
 				{
-					if (error == 0xff) then this partition is unknown,
+ 					the specified partition is unknown
 					and following fields are not encoded in this response/topic/partition
 				}
 
+				if (errorOrFlags != 0xfe)
+				{
+					base absolute sequence number of the first message in the first bundle returned:u64
+				}
+				ese
+				{
+					The first bundle has the SPARSE bit set so
+					instead of storing the abs.seqNum of the first bundle's message here and in the bundle header
+					we will only deserialize from the bundle header in order to save 8 bytes
+				}
 
-				base absolute sequence number of the first message in the first bundle returned:u64
 				high water mark:u64 		absolute sequence number of the latest committed message for this (topic, partition):u64
-				chunk length:u32 			See later for chunk encoding semantics
+				chunk length:u32 		See later for chunk encoding semantics
 
 				{
-					if (error == 0x1) this is a boundary check failure, and 
+					if (errorOrFlags == 0x1) this is a boundary check failure, and 
 					firstAvailSeqNum:u64 is serialized here
-				 	chunk length is also encoded is 0, along with the base abs.sequence number
+				 	chunk length is also encoded as 0, along with the base abs.sequence number
 				}
 
 			} ..
@@ -137,8 +147,8 @@ msgReq is `0x2`
 
 		bundle
 		{
-			length:varint 		The lenght of the bundle
-			bundle:... 			See tank_encoding.md for bundle encoding scheme
+			length:varint 	The lenght of the bundle
+			bundle:... 	See tank_encoding.md for bundle encoding scheme
 		}...
 	}...
 }
@@ -150,7 +160,7 @@ msgReq is `0x2`
 
 
 ### Publish Req   
-msgId `0x1`  
+msgId `0x1`  or `0x5`
 
 
 ```
@@ -159,18 +169,26 @@ msgId `0x1`
 	request id:u32
 	client id:str8
 	required acks:u8				This will be considered in clustered mode setups. For standalone setup, this is ignored.
-	ack. timeout:u32 			This will be considered in clustered mode setups. For standalone setup, this is ignored.
+	ack. timeout:u32 				This will be considered in clustered mode setups. For standalone setup, this is ignored.
 	topics cnt:u8			 		How many distinct topics to publish to
 
 		topic
 		{
-			topic name:str8 			Name of the topic
+			topic name:str8 		Name of the topic
 			partitions cnt:u8		Total distinct partitions from this topic to publush to
 
 			partition 					
 			{
 				partition id:u16 		
 				bundle length:varint  	The length of the bundle
+
+				if (msg == TankAPIMsgType::ProduceWithBaseSeqNum)
+				{
+					// this is for specific tools and broker interchange
+					// clients should never issue this request
+					baseSeqNum:u64
+				}
+
 				bundle:... 				See "tank_encoding.md" for bundle semantics
 			} ..
 

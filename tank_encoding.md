@@ -37,13 +37,14 @@ See below for the encoding:
 ```
 bundle
 {
-	flags:u8		       The bundle flags. Currently, 6 out of 8 bits are used. See below
-				       (6, 8]: those 2 bits encode compression codec. 0 is for no compression, 1 is for Snappy compression. Other codecs may be supported in the future
-				       (2, 6]: those 4 bits encode the total messages in message set, iff total number of messages in the message <= 15. If not, see below
-				       (1): SPARSE bundle bit - see later
-				       (0): unused bit	(maybe when set means that each msg or bundle has a crc32 encoded in its header)
+	flags:u8		       The bundle flags. Currently, 7 out of 8 bits are used. See below
+				       (7) 	: unused bit	(maybe when set means that each msg or bundle has a crc32 encoded in its header)
+				       (6) 	: SPARSE bundle bit - see later
+				       (2, 6] 	: those 4 bits encode the total messages in message set, iff total number of messages in the message <= 15. If not, see below
+				       (0, 2] 	: compression codec. 0 for no compression, 1 for Snappy compression. Other codecs may be supported in the future
 
-	if total messages in message set > 15
+
+	if (total messages in message set > 15)
 	{
 		total messages in messages set:varint 	Very often, clients will publish no more than 15 messages/time and encoding that number in
 							some bits in flags means we won't need to encode that value individually, and even when we do, because
@@ -51,15 +52,16 @@ bundle
 	}
 
 
-	if SPARSE bit is set
+	if (SPARSE bit is set)
 	{
 		first message absolute sequence number:u64
 
 		if (total messages in message set > 1)
 		{
-			last messsage in this message set seqNumber - first message seqNum(delta):u32
+			last messsage in this message set seqNumber - first message seqNum(delta):varint
 		}
 	}
+
 
 
 
@@ -69,23 +71,24 @@ bundle
 	
 	msg
 	{
-		flags:u8 								// The individual message flags
+		flags:u8 									// The individual message flags
 
 		if (SPARSE bit is set)
 		{
-			if (this is neither the first nor the last message in the message set)
+			if (this is neither the first NOR the last message in the message set)
 			{
-				message.seqNum - firstMsg.seqNum:u32 	 		// encoeded in the bundle header
+				message.seqNum - firstMsg.seqNum:varint 	 		// firstMsg.seqNumber is encoded in the bundle header
 			}
 			else
 			{
-				// encoded in the bundle header
+				// first and last message sequence numbers of this message set
+				// are encoded in the bundle header
 			}
 		}
 
 		if ((flags & TankFlags::BundleMsgFlags::UseLastSpecifiedTS) == 0)
 		{
-			creation ts in milliseconds:u64 				// See later for message timestamp assignment semantics
+			creation ts in milliseconds:u64 					// See later for message timestamp assignment semantics
 		}
 		else
 		{
@@ -93,14 +96,14 @@ bundle
 		}
 
 
-		if (flags & TankFlags::BundleMsgFlags::HaveKey) 			// Most messages don't have a key. When they do, this bit is set
+		if (flags & TankFlags::BundleMsgFlags::HaveKey) 				// Most messages don't have a key. When they do, this bit is set
 		{
-			keyLen:u8 							// and we encode the length of the key as a u8 followed by the key in however many bytes long it is
+			keyLen:u8 								// and we encode the length of the key as a u8 followed by the key in however many bytes long it is
 			key:...
 		}
 
-		content length:varint 							// The payload(content) length of the message
-		data: ... 								// The payload, in however many bytes long it is (sequnece of characters)
+		content length:varint 								// The payload(content) length of the message
+		data: ... 									// The payload, in however many bytes long it is (sequnece of characters)
 	}
 }
 ```
@@ -115,15 +118,22 @@ it means the message has an explicitly specified timestamp, and that timestamp i
 That means that in practice we will be encoding the timestamp only for the first message in the bundle, and every message in the bundle which has a different timestamp than the one before it.
 
 #### Messages Sequence Numbers
-You will notice that the sequence number for the invidual bundle messages are not encoded in bundle message set.
+You will notice that the sequence number for the invidual bundle messages are not encoded in bundle message set - although there is now support for 'sparse' bundles. See later.
 This is because for the common case where each message's sequence number is set to the last assigned sequence number + 1, we don't need to do that.
 We consider the `base sequence number` of the segment log that holds the bundle, as well as the sparse segment index which maps from sequence numbers to segment log file offsets, and from
 there we can compute the sequence numbers of all messages indirectly. See tank_protocol.md for more.
 By not having to encode that value in the bundle we can safe 4 or 8 bytes we 'd otherwise need to spend to store it.
 
-However, please note, that in the future, we may extend the encoding semantics so that we will either encode a base sequence number for the bundle, or the absolute sequence number for each message, or
-a combination of deltas and absolute sequence numbers, in order to support compaction semantics. This will not complicate further the encoding scheme, except that it will likely require the use of one bit
-of the bundle and/or messages flags, and the encoding of another value. 
+##### Sparse Bundles
+We now support 'sparse bundles', where we encode information in the bundle header and the bundle message headers(if necessary) so that messages in the set are explicitly identified
+with a sequence number, as opposed to being implicitly identified based on a relative base sequence number(see above).
+This is required in order to support compactions and mirroring (a tank-cli feature). Regular applications should never produce sparse bundles (via TankClient::produce_with_base() method)
+and sparse bundlesa are properly handled by the client.
+Support for sparse bundles increased the complexity of the encoding and the client, but I think it's worth it, considering one only need to write the client one(and make sure
+she's got it right), while reaping the benefits of the tight encoding forever.
+
+
+
 We will ammend this document to reflect those requirements. This will likely not happen soon because there is no immediate need for it, and
 from an informal survey, we found out that users of Kafka and other such systems overwhelmingly do not need nor take advantage of compactions. It will be support though eventually.
 

@@ -131,7 +131,11 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
 
 std::pair<uint32_t, uint32_t> ro_segment::snapDown(const uint64_t absSeqNum) const
 {
-        require(haveWideEntries == false); // not implemented yet
+	if (haveWideEntries)
+	{
+		IMPLEMENT_ME();
+	}
+		
         const auto relSeqNum = uint32_t(absSeqNum - baseSeqNum);
         const auto *const all = reinterpret_cast<const index_record *>(index.data);
         const auto *const end = all + index.fileSize / sizeof(index_record);
@@ -151,7 +155,11 @@ std::pair<uint32_t, uint32_t> ro_segment::snapDown(const uint64_t absSeqNum) con
 
 std::pair<uint32_t, uint32_t> ro_segment::snapUp(const uint64_t absSeqNum) const
 {
-        require(haveWideEntries == false); // not implemented yet
+	if (haveWideEntries)
+	{
+		IMPLEMENT_ME();
+	}
+
         const auto relSeqNum = uint32_t(absSeqNum - baseSeqNum);
         const auto *const all = reinterpret_cast<const index_record *>(index.data);
         const auto *const end = all + index.fileSize / sizeof(index_record);
@@ -175,9 +183,10 @@ std::pair<uint32_t, uint32_t> ro_segment::snapUp(const uint64_t absSeqNum) const
 // TODO: read in 4k chunks/time or something more appropriate
 static uint32_t search_before_offset(uint64_t baseSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum, int fd, const uint32_t fileSize, uint32_t fileOffset)
 {
-        uint8_t buf[64];
+        uint8_t buf[128];
         auto o = fileOffset;
         const auto limit = maxSize != UINT32_MAX ? Min<uint32_t>(fileSize, fileOffset + maxSize) : fileSize;
+        uint64_t lastMsgSeqNum;
 
         if (trace)
                 SLog("Searching for offset ", maxAbsSeqNum, ", limit = ", limit, "(maxSize = ", maxSize, ", baseSeqNum = ", baseSeqNum, ", fileOffset = ", fileOffset, ")\n");
@@ -193,10 +202,25 @@ static uint32_t search_before_offset(uint64_t baseSeqNum, const uint32_t maxSize
                 const auto bundleLen = Compression::UnpackUInt32(p);
                 const auto encodedBundleLenLen = p - buf;
                 const auto bundleFlags = *p++;
+                const bool sparseBundleBitSet = bundleFlags & (1u << 6);
                 uint32_t msgSetSize = (bundleFlags >> 2) & 0xf;
 
                 if (!msgSetSize)
                         msgSetSize = Compression::UnpackUInt32(p);
+
+                if (sparseBundleBitSet)
+                {
+                        const auto firstMsgSeqNum = *(uint64_t *)p;
+                        p += sizeof(uint64_t);
+
+                        if (msgSetSize != 1)
+                                lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p);
+                        else
+                                lastMsgSeqNum = firstMsgSeqNum;
+
+			if (trace)
+				SLog("sparseBundleBitSet is set, firstMsgSeqNum = ", firstMsgSeqNum, ", lastMsgSeqNum = ", lastMsgSeqNum, "\n");
+                }
 
                 if (trace)
                         SLog("abs = ", baseSeqNum, "(msgSetSize = ", msgSetSize, ") VS ", maxAbsSeqNum, " at ", o, "\n");
@@ -205,13 +229,21 @@ static uint32_t search_before_offset(uint64_t baseSeqNum, const uint32_t maxSize
                         break;
                 else
                 {
-                        baseSeqNum += msgSetSize;
+                        if (sparseBundleBitSet)
+                        {
+                                baseSeqNum = lastMsgSeqNum + 1;
+                        }
+                        else
+                        {
+                                baseSeqNum += msgSetSize;
+                        }
+
                         fileOffset += bundleLen + encodedBundleLenLen;
                 }
         }
 
         if (trace)
-                SLog("Returnign fileOffset = ", fileOffset, "\n");
+                SLog("Returning fileOffset = ", fileOffset, "\n");
 
         return fileOffset;
 }
@@ -227,19 +259,22 @@ static uint32_t search_before_offset(uint64_t baseSeqNum, const uint32_t maxSize
 // If we don't adjust_range_start(), we 'll avoid the scanning I/O cost, which should be minimal anyway, but we can potentially send
 // more data at the expense of network I/O and transfer costs
 //
-// This will require some effort once we support sparse logs (e.g due to compaction), but we 'll figure out the appropriate impl. then
-// XXX: make sure this reflects the latest encoding scheme
-static void adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
+// it returns true if it parsed the first bundle to stream, and that bundle is a sparse bundle (which means
+// it encodes the sequence number of its first message in its header)
+static bool adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
 {
         uint64_t baseSeqNum = res.absBaseSeqNum;
 
-        if (baseSeqNum == absSeqNum || absSeqNum <= 1)
+	if (trace == false) 	// explicitly allow so that we can verify it does the right thing when tracing
         {
-                // No need for any ajustements
-                if (trace)
-                        SLog("No need for any adjustments\n");
+                if (baseSeqNum == absSeqNum || absSeqNum <= 1)
+                {
+                        // No need for any ajustements
+                        if (trace)
+                                SLog("No need for any adjustments\n");
 
-                return;
+                        return false;
+                }
         }
 
         int fd = res.fdh->fd;
@@ -247,7 +282,8 @@ static void adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
         const auto baseOffset = res.fileOffset;
         auto o = baseOffset;
         const auto fileOffsetCeiling = res.fileOffsetCeiling;
-        uint64_t before = trace ? Timings::Microseconds::Tick() : 0;
+        uint64_t before = trace ? Timings::Microseconds::Tick() : 0, lastMsgSeqNum;
+	bool firstBundleIsSparse{false};
 
         if (trace)
                 SLog(ansifmt::bold, ansifmt::color_brown, "About to adjust range fileOffset ", baseOffset, ", absBaseSeqNum(", baseSeqNum, "), absSeqNum(", absSeqNum, ")", ansifmt::reset, "\n");
@@ -267,15 +303,35 @@ static void adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
 
                 const auto encodedBundleLenLen = p - baseBuf;
                 const auto bundleFlags = *p++;
+                const bool sparseBundleBitSet = bundleFlags & (1u << 6);
                 uint32_t msgSetSize = (bundleFlags >> 2) & 0xf;
 
                 if (!msgSetSize)
                         msgSetSize = Compression::UnpackUInt32(p);
 
-                if (trace)
-                        SLog("Now at bundle(", baseSeqNum, "), msgSetSize(", msgSetSize, "), bundleFlags(", bundleFlags, ")\n");
+		if (sparseBundleBitSet)
+                {
+                        const auto firstMsgSeqNum = *(uint64_t *)p;
+                        p += sizeof(uint64_t);
 
-                const auto nextBundleBaseSeqNum = baseSeqNum + msgSetSize;
+                        if (msgSetSize != 1)
+                                lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p);
+                        else
+                                lastMsgSeqNum = firstMsgSeqNum;
+
+			if (trace)
+				SLog("sparseBundleBitSet, firstMsgSeqNum = ", firstMsgSeqNum, ", lastMsgSeqNum, ", lastMsgSeqNum, "\n");
+
+			firstBundleIsSparse = true;
+                }
+		else
+			firstBundleIsSparse = false;
+
+                const auto nextBundleBaseSeqNum = sparseBundleBitSet ? lastMsgSeqNum + 1 : baseSeqNum + msgSetSize;
+
+                if (trace)
+                        SLog("Now at bundle(", baseSeqNum, "), msgSetSize(", msgSetSize, "), bundleFlags(", bundleFlags, "), nextBundleBaseSeqNum = ", nextBundleBaseSeqNum, "\n");
+
 
                 if (absSeqNum >= nextBundleBaseSeqNum)
                 {
@@ -300,12 +356,20 @@ static void adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
 
         if (trace)
                 SLog(ansifmt::color_blue, "After adjustement, fileOffset ", res.fileOffset, ", absBaseSeqNum(", res.absBaseSeqNum, "), took  ", duration_repr(Timings::Microseconds::Since(before)), ansifmt::reset, "\n");
+
+	return firstBundleIsSparse;
 }
 
 lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum)
 {
         // lock is expected to be locked
         require(absSeqNum >= cur.baseSeqNum);
+
+	if (cur.index.haveWideEntries)
+	{
+		// need to use the appropriate skipList64 and a different index encodig format
+		IMPLEMENT_ME();
+	}
 
         lookup_res res;
         const auto highWatermark = lastAssignedSeqNum;
@@ -406,6 +470,261 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
 
         res.highWatermark = highWatermark;
         return res;
+}
+
+// Will remove duplicate msgs from ro segments
+// A message with key K and offset O is obsolete, if there exists a message with key K and offset O2, such that O < O2
+// 
+// See Kafka's log/LogCleaner.scala - cleanInto() is where this logic's implemented
+// See also log/Log.scala#replaceSegments()
+//
+// This is a first implementation; we can and we will do better later
+void topic_partition_log::compact()
+{
+#if 0
+        auto prevSegments = roSegments;
+        uint64_t firstMsgSeqNum, lastMsgSeqNum, msgSeqNum;
+        IOBuffer cb;
+        range_base<const uint8_t *, size_t> msgSetContent;
+        strwlen8_t key;
+        strwlen32_t msgContent;
+
+	struct msg
+	{
+		strwlen8_t key;
+		uint64_t seqNum;
+		uint64_t ts;
+		strwlen32_t content;
+        };
+
+        const auto compact = [](Switch::vector<msg> &msgs) {
+
+                std::sort(msgs.begin(), msgs.end(), [](const auto &a, const auto &b) {
+                        return a.key.Cmp(b.key) < 0;
+                });
+
+                auto *out = msgs.values();
+
+                for (const auto *it = out, *const e = it + msgs.size(); it != e;)
+                {
+                        const auto k = it->key;
+
+                        if (!k)
+                        {
+                                do
+                                {
+                                        *out++ = *it++;
+                                } while (it != e && !it->key);
+                        }
+                        else
+                        {
+                                auto last = it->seqNum;
+                                auto sel = it;
+
+                                for (++it; it != e && it->key == k; ++it)
+                                {
+                                        if (it->seqNum > last)
+                                        {
+                                                last = it->seqNum;
+                                                sel = it;
+                                        }
+                                }
+
+                                *out++ = *sel;
+                        }
+                }
+
+		const auto n = out - msgs.data();
+
+		if (n == msgs.size())
+		{
+			// Nothing to do here, no compaction necessary
+			return false;
+		}
+		else
+                {
+                        msgs.resize(n);
+
+                        std::sort(msgs.begin(), msgs.end(), [](const auto &a, const auto &b) {
+                                return a.seqNum - b.seqNum;
+                        });
+
+			return true;
+                }
+        };
+
+	Switch::vector<msg> msgs;
+
+        for (auto it : *roSegments)
+        {
+                int fd = it->fdh->fd;
+                const auto fileSize = it->fileSize;
+                const auto baseSeqNum = it->baseSeqNum;
+                auto *const fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, fd, 0);
+
+                msgSeqNum = baseSeqNum;
+                for (const auto *p = static_cast<const uint8_t *>(fileData), *const e = p + fileSize; p != e;)
+                {
+                        const auto bundleLen = Compression::UnpackUInt32(p);
+                        const auto nextBundle = p + bundleLen;
+                        const auto bundleFlags = *p++;
+                        const auto codec = bundleFlags & 3;
+                        const bool sparseBundleBitSet = bundleFlags & (1u << 6);
+                        uint32_t msgsSetSize = (bundleFlags >> 2) & 0xf;
+
+                        if (!msgsSetSize)
+                                msgsSetSize = Compression::UnpackUInt32(p);
+
+                        if (sparseBundleBitSet)
+                        {
+                                firstMsgSeqNum = *(uint64_t *)p;
+                                p += sizeof(uint64_t);
+
+                                if (msgsSetSize != 1)
+                                        lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p);
+                                else
+                                        lastMsgSeqNum = firstMsgSeqNum;
+                        }
+
+                        if (codec)
+                        {
+                                cb.clear();
+                                if (!Compression::UnCompress(Compression::Algo::SNAPPY, p, nextBundle - p, &cb))
+                                        throw Switch::system_error("failed to decompress message set");
+                                msgSetContent.Set(reinterpret_cast<const uint8_t *>(cb.data()), cb.length());
+                        }
+                        else
+                                msgSetContent.Set(p, nextBundle - p);
+
+                        uint64_t msgTs{0};
+                        uint32_t msgIdx{0};
+
+                        for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.len; p != e; ++msgIdx, ++msgSeqNum)
+                        {
+                                const auto flags = *p++;
+
+                                if (sparseBundleBitSet)
+                                {
+                                        if (msgIdx == 0)
+                                                msgSeqNum = firstMsgSeqNum;
+                                        else if (msgIdx == msgsSetSize - 1)
+                                                msgSeqNum = lastMsgSeqNum;
+                                        else
+                                                msgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p);
+                                }
+
+                                if (!(flags & uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS)))
+                                {
+                                        msgTs = *(uint64_t *)p;
+                                        p += sizeof(uint64_t);
+                                }
+
+                                if (flags & uint8_t(TankFlags::BundleMsgFlags::HaveKey))
+                                {
+                                        key.Set((char *)p + 1, *p);
+                                        p += key.len + sizeof(uint8_t);
+                                }
+                                else
+                                        key.Unset();
+
+                                const auto msgLen = Compression::UnpackUInt32(p);
+
+                                msgContent.Set((char *)p, msgLen);
+                                p += msgLen;
+
+				msgs.push_back({key, msgSeqNum, msgTs, msgContent});
+                        }
+                }
+        }
+
+	if (!msgs.size())
+	{
+		IMPLEMENT_ME();
+	}
+
+	if (!compact(msgs))
+	{
+		IMPLEMENT_ME();
+	}
+
+	const auto n = msgs.size();
+	const auto *const all = msgs.data();
+	auto expected = all[0].seqNum;
+	uint8_t bundleFlags;
+	IOBuffer out;
+	uint16_t msgIdx;
+	struct iovec iov[1024];
+	Switch::vector<uint64_t, uint32_t> index;
+	size_t sinceLastUpdate{0};
+	size_t outFileSize{0};
+
+	index.push_back({expected, 0});
+	for (uint32_t i{0}; i != n; )
+        {
+                // new bundle
+                const auto base{i};
+                const auto upto = Min<size_t>(n, i + 250);
+		bool asSparse{false};
+		size_t sum{0};
+
+                out.clear();
+                do
+                {
+			if (!asSparse)
+			{
+				if (all[i].seqNum != expected)
+				{
+					asSparse = true;
+				}
+			}
+			expected = all[i].seqNum + 1;
+			sum+=all[i].key.len + all[i].content.len + 8;
+                } while (++i != upto && sum < 65536);
+
+		if (sinceLastUpdate > 1000)
+		{
+			index.push_back({all[base].seqNum, outFileSize});
+			sinceLastUpdate = 0;
+		}
+
+                const uint32_t msgSetSize = i - base;
+		uint8_t codec{1};
+
+		if (asSparse)
+		{
+			bundleFlags = 2 | codec;
+			if (msgSetSize < 16)
+			{
+                                bundleFlags |= (msgSetSize << 2);
+				out.Serialize(bundleFlags);
+			}
+			else
+			{
+				out.Serialize(bundleFlags);
+				out.SerializeVarUInt32(msgSetSize);
+			}
+
+			const auto first = all[base].seqNum, last = all[i - 1].seqNum - first;
+
+			out.Serialize<uint64_t>(first);
+			out.Serialize<uint32_t>(last - first);
+                }
+		else
+		{
+			bundleFlags = codec;
+			if (msgSetSize < 16)
+			{
+                                bundleFlags = (msgSetSize << 2);
+				out.Serialize(bundleFlags);
+			}
+			else
+			{
+				out.Serialize(bundleFlags);
+				out.SerializeVarUInt32(msgSetSize);
+			}
+		}
+        }
+#endif
 }
 
 // Aligns to indices boundaries
@@ -643,14 +962,41 @@ bool topic_partition_log::should_roll(const uint32_t now) const
         return false;
 }
 
-append_res topic_partition_log::append_bundle(const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt)
+bool topic_partition_log::may_switch_index_wide(const uint64_t lastMsgSeqNum)
+{
+	// This is required for proper support for sparse segments
+	// maybe instead of transforming the index we should instead roll?
+	if (trace)
+		SLog("considering switch to wide index, lastMsgSeqNum = ", lastMsgSeqNum, ", cur.baseSeqNum = ", cur.baseSeqNum, "\n");
+
+	if (unlikely(lastMsgSeqNum - cur.baseSeqNum > INT32_MAX)) // arbitrary
+	{
+		IMPLEMENT_ME();
+		cur.index.haveWideEntries = true;
+	}
+
+	return false;
+}
+
+// if (firstMsgSeqNum != 0 && lastMsgSeqNum != 0), we have expicitly specified message sequence numbers for the bundle first/last message
+append_res topic_partition_log::append_bundle(const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt, const uint64_t firstMsgSeqNum, const uint64_t lastMsgSeqNum)
 {
         const auto savedLastAssignedSeqNum = lastAssignedSeqNum;
-        const auto absSeqNum = lastAssignedSeqNum + 1;
+        const auto absSeqNum = firstMsgSeqNum ?: lastAssignedSeqNum + 1;
         const auto now = Timings::Seconds::SysTime();
 
         Drequire(bundleMsgsCnt);
-        lastAssignedSeqNum += bundleMsgsCnt;
+
+
+	if (lastMsgSeqNum)
+		lastAssignedSeqNum = lastMsgSeqNum;
+	else if (firstMsgSeqNum)
+	        lastAssignedSeqNum = firstMsgSeqNum + bundleMsgsCnt - 1;
+	else
+	        lastAssignedSeqNum += bundleMsgsCnt;
+
+	if (trace)
+		SLog("firstMsgSeqNum(", firstMsgSeqNum, "), lastMsgSeqNum(", lastMsgSeqNum, "), bundleMsgsCnt(", bundleMsgsCnt, ") => ", lastAssignedSeqNum, "\n");
 
         if (should_roll(now))
         {
@@ -663,7 +1009,6 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 {
                         auto newROFiles = std::make_unique<Switch::vector<ro_segment *>>();
                         auto newROFile = std::make_unique<ro_segment>(cur.baseSeqNum, savedLastAssignedSeqNum, cur.createdTS);
-
                         const auto n = cur.fdh.use_count();
 
                         require(n >= 1);
@@ -673,6 +1018,11 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 
                         newROFile->index.fileSize = lseek64(cur.index.fd, 0, SEEK_END);
                         newROFile->index.lastRecorded.relSeqNum = newROFile->index.lastRecorded.absPhysical = 0;
+
+			if (cur.index.haveWideEntries)
+			{
+				IMPLEMENT_ME();
+			}
 
                         // We now encode the [first,last] range into the filename for simplicity and future-proofing; we 'd like to
                         // support sparse sequence numbers space
@@ -730,6 +1080,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 cur.sinceLastUpdate = UINT32_MAX;
                 cur.createdTS = Timings::Seconds::SysTime();
                 cur.nameEncodesTS = true;
+		cur.index.haveWideEntries = false;
 
                 cur.index.skipList.clear();
                 fdatasync(cur.index.fd);
@@ -775,22 +1126,32 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 if (trace)
                         SLog("Switched\n");
         }
-        else if (unlikely(cur.index.skipList.size() > 65536))
+	else
         {
-                // Impleemnts https://github.com/phaistos-networks/TANK/issues/27
-                if (trace)
-                        SLog(ansifmt::bold, ansifmt::color_red, "Emptying skiplist", ansifmt::reset, "\n");
+		if (lastMsgSeqNum && !cur.index.haveWideEntries)
+		{
+			// This may be necessary
+			may_switch_index_wide(lastMsgSeqNum);
+		}
+		
+                if (unlikely(cur.index.skipList.size() > 65536))
+                {
+                        // Implements https://github.com/phaistos-networks/TANK/issues/27
+                        if (trace)
+                                SLog(ansifmt::bold, ansifmt::color_red, "Emptying skiplist", ansifmt::reset, "\n");
 
-                if (cur.index.ondisk.data != nullptr && cur.index.ondisk.data != MAP_FAILED)
-                        munmap((void *)cur.index.ondisk.data, cur.index.ondisk.span);
+                        if (cur.index.ondisk.data != nullptr && cur.index.ondisk.data != MAP_FAILED)
+                                munmap((void *)cur.index.ondisk.data, cur.index.ondisk.span);
 
-                cur.index.ondisk.span = lseek64(cur.index.fd, 0, SEEK_END);
-                cur.index.ondisk.data = static_cast<const uint8_t *>(mmap(nullptr, cur.index.ondisk.span, PROT_READ, MAP_SHARED, cur.index.fd, 0));
+                        cur.index.ondisk.span = lseek64(cur.index.fd, 0, SEEK_END);
+                        cur.index.ondisk.data = static_cast<const uint8_t *>(mmap(nullptr, cur.index.ondisk.span, PROT_READ, MAP_SHARED, cur.index.fd, 0));
+			cur.index.haveWideEntries = false;
 
-                if (cur.index.ondisk.data == MAP_FAILED)
-                        throw Switch::system_error("mmap() failed:", strerror(errno));
+                        if (cur.index.ondisk.data == MAP_FAILED)
+                                throw Switch::system_error("mmap() failed:", strerror(errno));
 
-                cur.index.skipList.clear();
+                        cur.index.skipList.clear();
+                }
         }
 
         require(cur.fdh.use_count() >= 1);
@@ -955,12 +1316,37 @@ void topic_partition::consider_append_res(append_res &res, Switch::vector<wait_c
         }
 }
 
-append_res topic_partition::append_bundle_to_leader(const uint8_t *const bundle, const size_t bundleLen, const uint32_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL)
+append_res topic_partition::append_bundle_to_leader(const uint8_t *const bundle, const size_t bundleLen, const uint32_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL, const uint64_t firstMsgSeqNum, const uint64_t lastMsgSeqNum)
 {
         // TODO: route to leader
         try
         {
-                auto res = log_->append_bundle(bundle, bundleLen, bundleMsgsCnt);
+		if (lastMsgSeqNum)
+                {
+                        if (unlikely(lastMsgSeqNum < firstMsgSeqNum))
+                        {
+				if (trace)
+					SLog("Unexpected, lastMsgSeqNum(", lastMsgSeqNum, ") < firstMsgSeqNum(", firstMsgSeqNum, ")\n");
+
+				return {nullptr, {}, {}};
+                        }
+                        else if (unlikely(firstMsgSeqNum <= log_->lastAssignedSeqNum))
+                        {
+				if (trace)
+                                        SLog("Unexpected, firstMsgSeqNum(", firstMsgSeqNum, ") <= lastAssignedSeqNum(", log_->lastAssignedSeqNum, ")\n");
+
+                                return {nullptr, {}, {}};
+                        }
+                }
+                else if (unlikely(firstMsgSeqNum && firstMsgSeqNum <= log_->lastAssignedSeqNum))
+                {
+                        if (trace)
+                                SLog("Unexpected, firstMsgSeqNum(", firstMsgSeqNum, ") <= lastAssignedSeqNum(", log_->lastAssignedSeqNum, ")\n");
+
+                        return {nullptr, {}, {}};
+                }
+
+                auto res = log_->append_bundle(bundle, bundleLen, bundleMsgsCnt, firstMsgSeqNum, lastMsgSeqNum);
 
                 if (trace)
                         SLog("Appended to ", ptr_repr(this), "\n");
@@ -1224,7 +1610,7 @@ void Service::rebuild_index(int logFd, int indexFd)
         fdatasync(indexFd);
 }
 
-void Service::verify_index(int fd)
+void Service::verify_index(int fd, const bool wideEntries)
 {
         const auto fileSize = lseek64(fd, 0, SEEK_END);
 
@@ -1240,6 +1626,11 @@ void Service::verify_index(int fd)
 
         Defer({ munmap(fileData, fileSize); });
         madvise(fileData, fileSize, MADV_SEQUENTIAL);
+
+	if (wideEntries)
+	{
+		IMPLEMENT_ME();
+	}
 
         for (const auto *p = reinterpret_cast<const uint32_t *>(fileData),
                         *const e = p + (fileSize / sizeof(uint32_t)), *const b = p;
@@ -1301,10 +1692,26 @@ uint32_t Service::verify_log(int fd)
 
                 const auto bundleFlags = *p++;
                 const auto codec = bundleFlags & 3;
+                const bool sparseBundleBitSet = bundleFlags & (1u << 6);
                 uint32_t msgsSetSize = (bundleFlags >> 2) & 0xf;
 
                 if (!msgsSetSize)
                         msgsSetSize = Compression::UnpackUInt32(p);
+
+		if (sparseBundleBitSet)
+                {
+                        const auto firstMsgSeqNum = *(uint64_t *)p;
+			uint64_t lastMsgSeqNum;
+
+                        p += sizeof(uint64_t);
+
+                        if (msgsSetSize != 1)
+                                lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p);
+                        else
+                                lastMsgSeqNum = firstMsgSeqNum;
+
+                        expect(firstMsgSeqNum && lastMsgSeqNum >= firstMsgSeqNum);
+                }
 
                 expect(p <= e);
                 expect(msgsSetSize);
@@ -1324,11 +1731,25 @@ uint32_t Service::verify_log(int fd)
                         msgSetContent.Set(p, nextBundle - p);
 
                 uint64_t msgTs{0};
+		uint32_t msgIdx{0};
 
-                for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.len; p != e;)
+                for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.len; p != e; ++msgIdx)
                 {
                         // Next message set message
                         const auto flags = *p++;
+
+			if (sparseBundleBitSet)
+			{
+				if (msgIdx == 0 || msgIdx == msgsSetSize - 1)
+				{
+
+				}
+				else
+				{
+					// delta from first
+					Compression::UnpackUInt32(p);
+				}
+			}
 
                         if (!(flags & uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS)))
                         {
@@ -1406,6 +1827,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                 l->roSegments = nullptr;
                 l->cur.index.ondisk.data = nullptr;
                 l->cur.index.ondisk.span = 0;
+		l->cur.index.haveWideEntries = false;
                 l->cur.index.ondisk.lastRecorded.relSeqNum = 0;
                 l->cur.index.ondisk.lastRecorded.absPhysical = 0;
 
@@ -1438,6 +1860,13 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         {
                                 // TODO:
                         }
+			else if (r.second.Eq(_S("tmp")))
+			{
+				auto fullPath = Buffer::build(basePath, "/", name);
+
+				if (unlink(fullPath.data()) == -1)
+					throw Switch::system_error("Failed to unlink(", fullPath, "):", strerror(errno));
+			}
                         else if (r.second.Eq(_S("ilog")))
                         {
                                 // Immutable log
@@ -1548,6 +1977,8 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         l->cur.baseSeqNum = curLogSeqNum;
                         l->cur.fileSize = lseek64(fd, 0, SEEK_END);
 
+			// TODO: check if index has wideEntries
+			// and set l->cur.index.haveWideEntries accordingly
                         Snprint(basePath, sizeof(basePath), b, curLogSeqNum, ".index");
                         fd = open(basePath, O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND, 0775);
 
@@ -1573,22 +2004,36 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                 if (unlikely(l->cur.index.ondisk.data == MAP_FAILED))
                                         throw Switch::system_error("mmap() failed:", strerror(errno));
 
-                                const auto *const p = (uint32_t *)(l->cur.index.ondisk.data + l->cur.index.ondisk.span - sizeof(uint32_t) - sizeof(uint32_t));
+				if (l->cur.index.haveWideEntries)
+				{
+					IMPLEMENT_ME();
+				}
+				else
+                                {
+                                        const auto *const p = (uint32_t *)(l->cur.index.ondisk.data + l->cur.index.ondisk.span - sizeof(uint32_t) - sizeof(uint32_t));
 
-                                l->cur.index.ondisk.lastRecorded.relSeqNum = p[0];
-                                l->cur.index.ondisk.lastRecorded.absPhysical = p[1];
+                                        l->cur.index.ondisk.lastRecorded.relSeqNum = p[0];
+                                        l->cur.index.ondisk.lastRecorded.absPhysical = p[1];
+                                }
 
                                 if (trace)
                                 {
                                         SLog("Have cur.index.ondisk.span = ", l->cur.index.ondisk.span, " lastRecorded =  ( relSeqNum = ", l->cur.index.ondisk.lastRecorded.relSeqNum, ", absPhysical = ", l->cur.index.ondisk.lastRecorded.absPhysical, ")\n");
 
 #if 1
-                                        for (const auto *it = (uint32_t *)l->cur.index.ondisk.data, *const base = it, *const e = it + l->cur.index.ondisk.span / sizeof(uint32_t); it != e; it += 2)
+                                        if (l->cur.index.haveWideEntries)
                                         {
-                                                //SLog(it[0], " => ", it[1], "\n");
-                                                if (it != base)
+                                                IMPLEMENT_ME();
+                                        }
+                                        else
+                                        {
+                                                for (const auto *it = (uint32_t *)l->cur.index.ondisk.data, *const base = it, *const e = it + l->cur.index.ondisk.span / sizeof(uint32_t); it != e; it += 2)
                                                 {
-                                                        Drequire(it[0] != it[-2]);
+                                                        //SLog(it[0], " => ", it[1], "\n");
+                                                        if (it != base)
+                                                        {
+                                                                Drequire(it[0] != it[-2]);
+                                                        }
                                                 }
                                         }
 
@@ -1643,6 +2088,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                         Drequire(bundleLen);
 
                                         const auto bundleFlags = *p++;
+			                const bool sparseBundleBitSet = bundleFlags & (1u << 6);
                                         uint32_t msgSetSize = (bundleFlags >> 2) & 0xf;
 
                                         if (!msgSetSize)
@@ -1652,10 +2098,25 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                                 Drequire(msgSetSize);
                                         }
 
+					if (sparseBundleBitSet)
+                                        {
+                                                const auto firstMsgSeqNum = *(uint64_t *)p;
+						uint64_t lastMsgSeqNum;
+                                                p += sizeof(uint64_t);
+
+                                                if (msgSetSize != 1)
+                                                        lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p);
+                                                else
+                                                        lastMsgSeqNum = firstMsgSeqNum;
+
+                                                next = lastMsgSeqNum + 1;
+                                        }
+                                        else
+	                                        next += msgSetSize;
+
                                         if (trace)
                                                 SLog("bundle msgSetSize = ", msgSetSize, "\n");
 
-                                        next += msgSetSize;
                                         p = bundleEnd;
                                         Drequire(p <= e);
                                 }
@@ -1703,6 +2164,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         l->cur.sinceLastUpdate = UINT32_MAX;
                         l->cur.baseSeqNum = UINT64_MAX;
                         l->lastAssignedSeqNum = 0;
+			l->cur.index.haveWideEntries = false;
 
                         if (l->roSegments && l->roSegments->size())
                         {
@@ -1836,20 +2298,35 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                                                               absSeqNum, fetchSize);
                                         const auto hwMark = res.highWatermark;
                                         range32_t range;
+					bool firstBundleIsSparse;
 
                                         switch (res.fault)
                                         {
                                                 case lookup_res::Fault::NoFault:
-                                                        adjust_range_start(res, absSeqNum);
+                                                        firstBundleIsSparse = adjust_range_start(res, absSeqNum);
                                                         range.Set(res.fileOffset, fetchSize);
                                                         if (range.End() > res.fileOffsetCeiling)
                                                                 range.SetEnd(res.fileOffsetCeiling);
 
                                                         if (trace)
-                                                                SLog(ansifmt::bold, "Response:(baseSeqNum = ", res.absBaseSeqNum, ", range ", range, ")", ansifmt::reset, "\n");
+                                                                SLog(ansifmt::bold, "Response:(baseSeqNum = ", res.absBaseSeqNum, ", range ", range, ", firstBundleIsSparse = ", firstBundleIsSparse, ")", ansifmt::reset, "\n");
 
-                                                        respHeader->Serialize(uint8_t(0));        // error
-                                                        respHeader->Serialize(res.absBaseSeqNum); // absolute first seq.num of the first message of the first bundle in the streamed chunk
+                                                        if (firstBundleIsSparse)
+                                                        {
+								// Set special errorOrFlags to let the client know that we are not going to encode here the seq.num of the first msg of the first bundle, because
+								// the first bundle we are streaming is a 'sparse bundle', which means it encodes the absolute sequence number of its first message
+								// in the bundle header anyway
+                                                                respHeader->Serialize(uint8_t(0xfe)); // errorOrFlags
+
+								if (trace)
+									SLog("Setting errorOrFlags to 0xfe\n");
+                                                        }
+                                                        else
+                                                        {
+                                                                respHeader->Serialize(uint8_t(0));        // errorOrFlags
+                                                                respHeader->Serialize(res.absBaseSeqNum); // absolute first seq.num of the first message of the first bundle in the streamed chunk
+                                                        }
+
                                                         respHeader->Serialize(hwMark);
                                                         respHeader->Serialize(range.len);
 
@@ -2015,6 +2492,61 @@ bool Service::register_consumer_wait(connection *const c, const uint32_t request
         return true;
 }
 
+bool Service::process_discover_partitions(connection *const c, const uint8_t *p, const size_t len)
+{
+        if (unlikely(len < sizeof(uint32_t) + sizeof(uint8_t) + sizeof(uint8_t)))
+	{
+		if (trace)
+			SLog("Unexpected len = ", len, "\n");
+
+                return shutdown(c, __LINE__);
+	}
+
+        auto q = c->outQ;
+        auto resp = get_buffer();
+        const auto requestId = *(uint32_t *)p;
+        p += sizeof(uint32_t);
+        const strwlen8_t topicName((char *)p + 1, *p);
+
+        p += topicName.len + sizeof(uint8_t);
+
+        if (!q)
+                q = c->outQ = get_outgoing_queue();
+	
+	resp->Serialize(uint8_t(TankAPIMsgType::DiscoverPartitions));
+	const auto sizeOffset = resp->length();
+
+	resp->MakeSpace(sizeof(uint32_t));
+	resp->Serialize(requestId);
+
+	auto topic = topic_by_name(topicName);
+
+	resp->Serialize(topicName.len);
+	resp->Serialize(topicName.p, topicName.len);
+
+	if (!topic)
+		resp->Serialize(uint16_t(0));
+	else
+	{
+		const auto n = topic->partitions_->size();
+
+		resp->Serialize(uint16_t(n));
+		resp->reserve(n * (sizeof(uint64_t) + sizeof(uint64_t)));
+
+		for (const auto it : *topic->partitions_)
+		{
+			auto log = it->log_.get();
+
+			resp->Serialize(log->firstAvailableSeqNum);
+			resp->Serialize(log->lastAssignedSeqNum);
+		}
+	}
+
+	*(uint32_t *)resp->At(sizeOffset) = resp->length() - sizeOffset - sizeof(uint32_t);
+        q->push_back(resp);
+        return try_send_ifnot_blocked(c);
+}
+
 bool Service::process_replica_reg(connection *const c, const uint8_t *p, const size_t len)
 {
         if (unlikely(len < sizeof(uint16_t)))
@@ -2028,7 +2560,7 @@ bool Service::process_replica_reg(connection *const c, const uint8_t *p, const s
         return true;
 }
 
-bool Service::process_produce(connection *const c, const uint8_t *p, const size_t len)
+bool Service::process_produce(const TankAPIMsgType msg, connection *const c, const uint8_t *p, const size_t len)
 {
         if (unlikely(len < sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint8_t)))
                 return shutdown(c, __LINE__);
@@ -2099,7 +2631,14 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
 
                         for (auto cnt = *p++; cnt; --cnt)
                         {
+				if (unlikely(p + sizeof(uint16_t) >= __end))
+					return shutdown(c, __LINE__);
+
                                 p += sizeof(uint16_t);             // skip partition ID
+
+				if (unlikely(!Compression::UnpackUInt32Check(p, __end)))
+					return shutdown(c, __LINE__);
+
                                 p += Compression::UnpackUInt32(p); // skip bundle
                         }
 
@@ -2118,9 +2657,33 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                         const auto partitionId = *(uint16_t *)p;
                         p += sizeof(uint16_t);
                         const auto bundleLen = Compression::UnpackUInt32(p);
+                        auto partition = topic->partition(partitionId);
+			uint64_t firstMsgSeqNum{0}, lastMsgSeqNum;
+
+                        if (unlikely(!bundleLen))
+                                return shutdown(c, __LINE__);
+
+			if (msg == TankAPIMsgType::ProduceWithBaseSeqNum)
+			{
+				// See common.h
+				firstMsgSeqNum = *(uint64_t *)p;
+				p+=sizeof(uint64_t);
+
+				if (trace)
+					SLog("ProduceWithBaseSeqNum request, firstMsgSeqNum = ", firstMsgSeqNum, "\n");
+			}
+
+
+
+                        // TODO: Reject appending to internal topics if not alowed
+
+                        if (trace)
+                                SLog("partitionId = ", partitionId, ",  bundleLen = ", bundleLen, "\n");
+
+                        // BEGIN: bundle header
+			// See tank_encoding.md
                         const auto *const bundle = p;
                         const auto *const e = p + bundleLen;
-                        auto partition = topic->partition(partitionId);
 
                         if (!partition)
                         {
@@ -2132,17 +2695,11 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                                 continue;
                         }
 
-                        if (unlikely(!bundleLen))
-                                return shutdown(c, __LINE__);
 
-                        // TODO: Reject appending to internal topics if not alowed
 
-                        if (trace)
-                                SLog("partitionId = ", partitionId, ",  bundleLen = ", bundleLen, "\n");
-
-                        // BEGIN: bundle header
                         const auto bundleFlags = *p++;
                         const auto codec = bundleFlags & 3;
+			const bool sparseBundleBitSet = bundleFlags & (1u << 6);
                         uint32_t msgSetSize = uint32_t((bundleFlags >> 2) & 0xf);
 
 
@@ -2159,15 +2716,41 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                                 }
                         }
 
+			if (sparseBundleBitSet)
+			{
+				// The abs.sequence number of the first message in the message set of this bundle
+				firstMsgSeqNum = *(uint64_t *)p;
+				p+=sizeof(uint64_t);
+
+				if (msgSetSize != 1)
+				{
+					// multiple messages in the bundle
+					// compute the last message in the bundle abs.seqNumber from
+					// the encoded delta
+					lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p);
+				}
+				else
+					lastMsgSeqNum = firstMsgSeqNum;
+
+				if (trace)
+					SLog("sparseBundleBitSet set: firstMsgSeqNum = ", firstMsgSeqNum, ", lastMsgSeqNum ", lastMsgSeqNum, "\n");
+
+				if (unlikely(lastMsgSeqNum < firstMsgSeqNum || !lastMsgSeqNum))
+				{
+					// Invalid; sequence number's base is (1)
+					return shutdown(c, __LINE__);
+				}
+			}
+			else
+			{
+				lastMsgSeqNum = 0;
+			}
+
+
                         if (trace)
                                 SLog("bundleFlags = ", bundleFlags, ", codec= ", codec, ", message set messages cnt: ", msgSetSize, "\n");
                         // END: bundle header
 
-
-			// TODO:
-			// we may need to scan the provided bundle and the messages in the message set
-			// to determine the (first, last) sequence numbers, and wether they are monotonically increasing
-			// This is needed in order to support compactions and mirroring functionality
 
                         if (trace)
                         {
@@ -2176,6 +2759,9 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
 
                                 if (codec)
                                 {
+					if (trace)
+						SLog("codec = ", codec, ", will decompress\n");
+
                                         decompressionBuf.clear();
                                         Compression::UnCompress(Compression::Algo::SNAPPY, p, e - p, &decompressionBuf);
                                         msgSetContent.Set(reinterpret_cast<const uint8_t *>(decompressionBuf.data()), decompressionBuf.length());
@@ -2185,17 +2771,57 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
 
                                 // iterate bundle's message set
                                 uint64_t msgTs{0};
+				uint64_t absMsgSeqNum, prevAbsMsgSeqNum;
+				bool monotonicallyIncreasing{true};
+				uint32_t msgIdx{0};
 
-                                for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.len; p != e;)
+				if (trace)
+					SLog("Iterating ", msgSetContent.len, "\n");
+
+
+                                for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.len; p != e; ++msgIdx, ++absMsgSeqNum)
                                 {
                                         // Next message set message
                                         const auto flags = *p++;
 
+					if (sparseBundleBitSet)
+                                        {
+                                                // this is _never_ set for the first nor the last message in the set
+                                                // because we already encode that in the bundle header
+                                                if (msgIdx == 0)
+                                                        absMsgSeqNum = firstMsgSeqNum;
+                                                else
+                                                {
+                                                        if (msgIdx == msgSetSize - 1)
+                                                                absMsgSeqNum = lastMsgSeqNum;
+                                                        else
+							{
+                                                                absMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p);
+							}
+
+                                                        if (absMsgSeqNum <= prevAbsMsgSeqNum)
+                                                        {
+                                                                // Yeah, this is wrong
+                                                                monotonicallyIncreasing = false;
+                                                        }
+                                                }
+
+						if (trace)
+							SLog("sparseBundleBitSet, absMsgSeqNum = ", absMsgSeqNum, "\n");
+
+                                                prevAbsMsgSeqNum = absMsgSeqNum;
+                                        }
+
                                         if (!(flags & uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS)))
                                         {
+						if (trace)
+							SLog("New msgTs\n");
+
                                                 msgTs = *(uint64_t *)p;
                                                 p += sizeof(uint64_t);
                                         }
+					else if (trace)
+						SLog("Using last set msgTs\n");
 
                                         if (flags & uint8_t(TankFlags::BundleMsgFlags::HaveKey))
                                         {
@@ -2212,15 +2838,29 @@ bool Service::process_produce(connection *const c, const uint8_t *p, const size_
                                         msgContent.Set((char *)p, msgLen);
                                         p += msgLen;
 
-                                        Print("[", key, "] = ", msgContent, "\n");
+                                        Print("[", key, "] = ", msgContent, " ", msgTs, "(", Date::ts_repr(Timings::Milliseconds::ToSeconds(msgTs)), ")\n");
                                 }
                         }
 
+			//
+			// XXX: TODO:
+			// If we append to a fresh segment log (i.e firstMsgSeqNum == 0) 2 msgs
+			// and right after that we append 2 more msgs to an explicit firstMsgSeqNum = 5112
+			// and then we try to e.g tank-cli get from that partition starting at 0
+			// thewn we 'll get 4 msgs, _but_ the client won't have a clue that the 2 later messages have a different
+			// id (starting from 5112), and instead will consider them to have ids 3 and 4 respectively, and so, it will
+			// set next.seqNum to 5. (which is wrong). Setting their ids to 3 and 4 is also wrong.
+			//
+			// If the client attempts to request again starting from 5 (because that's what next.seqNum was set to), it will get the same
+			// messages.
+			// So we need to either allow explicit firstMsgSeqNum > 0 only iff the partition is empty, or we need
+			// to explicitly use a sparse bundle if we need to do that (at least for the first bundle!)
                         const auto b = Timings::Microseconds::Tick();
-                        const auto res = partition->append_bundle_to_leader(bundle, bundleLen, msgSetSize, expiredCtxList);
+                        const auto res = partition->append_bundle_to_leader(bundle, bundleLen, msgSetSize, expiredCtxList, firstMsgSeqNum, lastMsgSeqNum);
 
                         if (unlikely(!res.fdh))
                         {
+				// TODO: https://github.com/phaistos-networks/TANK/issues/28
                                 Print("Failed; will shutdown\n");
                                 _exit(1);
                         }
@@ -2261,7 +2901,8 @@ bool Service::process_msg(connection *const c, const uint8_t msg, const uint8_t 
         switch (TankAPIMsgType(msg))
         {
                 case TankAPIMsgType::Produce:
-                        return process_produce(c, data, len);
+		case TankAPIMsgType::ProduceWithBaseSeqNum:
+                        return process_produce(TankAPIMsgType(msg), c, data, len);
 
                 case TankAPIMsgType::Consume:
                         return process_consume(c, data, len);
@@ -2271,6 +2912,9 @@ bool Service::process_msg(connection *const c, const uint8_t msg, const uint8_t 
 
                 case TankAPIMsgType::RegReplica:
                         return process_replica_reg(c, data, len);
+
+		case TankAPIMsgType::DiscoverPartitions:
+			return process_discover_partitions(c, data, len);
 
                 default:
                         return shutdown(c, __LINE__);
@@ -2825,7 +3469,12 @@ int Service::start(int argc, char **argv)
                                         }
                                         else if (ext.Eq(_S("index")))
                                         {
-                                                Service::verify_index(fd);
+                                                auto name = fullPath;
+
+                                                if (const auto p = name.SearchR('/'))
+                                                        name = name.SuffixFrom(p + 1);
+
+                                                Service::verify_index(fd, name.Divided('_').second.Eq(_S("64")));
                                         }
                                 }
                                 catch (const std::exception &e)

@@ -99,6 +99,7 @@ class TankClient
                 Switch::endpoint leader;
                 strwlen8_t topic;
                 uint16_t partitionId;
+		uint64_t baseSeqNum;
                 const msg *msgs;
                 size_t msgsCnt;
         };
@@ -156,6 +157,13 @@ class TankClient
                 uint8_t seqNumsCnt;
         };
 
+	struct active_discover_req
+	{
+                uint32_t clientReqId;
+                outgoing_payload *reqPayload;
+                uint64_t ts;
+	};
+
         struct active_produce_req
         {
                 uint32_t clientReqId;
@@ -163,6 +171,13 @@ class TankClient
                 uint64_t ts;
                 uint8_t *ctx;
                 uint32_t ctxLen;
+        };
+
+	struct discovered_topic_partitions
+        {
+                uint32_t clientReqId;
+                strwlen8_t topic;
+                range_base<std::pair<uint64_t, uint64_t> *, uint16_t> watermarks;
         };
 
         struct produce_ack
@@ -216,7 +231,8 @@ class TankClient
                 enum class Req : uint8_t
                 {
                         Consume = 1,
-                        Produce
+                        Produce,
+			DiscoverPartitions
                 } req;
 
                 strwlen8_t topic;
@@ -237,15 +253,7 @@ class TankClient
         {
                 struct
                 {
-                        struct
-                        {
-                                uint32_t next{1};
-                        } consume;
-
-                        struct
-                        {
-                                uint32_t next{1};
-                        } produce;
+			uint32_t next{1};
                 } client;
 
                 struct
@@ -341,6 +349,7 @@ class TankClient
                 {
                         std::set<uint32_t> pendingConsume;
                         std::set<uint32_t> pendingProduce;
+                        std::set<uint32_t> pendingDiscover;
                 } reqs_tracker;
 
                 broker(const Switch::endpoint e)
@@ -366,6 +375,7 @@ class TankClient
         Switch::vector<partition_content> consumedPartitionContent;
         Switch::vector<fault> capturedFaults;
         Switch::vector<produce_ack> produceAcks;
+        Switch::vector<discovered_topic_partitions> discoverPartitionsResults;
         Switch::vector<consumed_msg> consumptionList;
         Switch::vector<consume_ctx> consumeOut;
         Switch::vector<produce_ctx> produceOut;
@@ -383,6 +393,7 @@ class TankClient
         IOBuffer produceCtx;
         Switch::unordered_map<uint32_t, active_consume_req> pendingConsumeReqs;
         Switch::unordered_map<uint32_t, active_produce_req> pendingProduceReqs;
+        Switch::unordered_map<uint32_t, active_discover_req> pendingDiscoverReqs;
         struct reschedule_queue_entry_cmp
         {
                 bool operator()(const broker *const b1, const broker *const b2)
@@ -406,6 +417,8 @@ class TankClient
         // encode this efficiently (no copying or moving data across buffers)
         // so we construct payload->iov[] properly
         bool produce_to_leader(const uint32_t clientReqId, const Switch::endpoint leader, const produce_ctx *const produce, const size_t cnt);
+
+        bool produce_to_leader_with_base(const uint32_t clientReqId, const Switch::endpoint leader, const produce_ctx *const produce, const size_t cnt);
 
         // minSize: The minimum amount of data the server should return for a fetch request.
         // If insufficient data is available, the request will wait for >= that much data to accumlate before answering the request.
@@ -435,6 +448,8 @@ class TankClient
         bool process_produce(connection *const c, const uint8_t *const content, const size_t len);
 
         bool process_consume(connection *const c, const uint8_t *const content, const size_t len);
+
+        bool process_discover_partitions(connection *const c, const uint8_t *const content, const size_t len);
 
         bool process(connection *const c, const uint8_t msg, const uint8_t *const content, const size_t len);
 
@@ -548,9 +563,18 @@ class TankClient
                 return produceAcks;
         }
 
+	const auto &discovered_partitions() const noexcept
+	{
+		return discoverPartitionsResults;
+	}
+
         void poll(uint32_t timeoutMS);
 
         uint32_t produce(const std::vector<std::pair<topic_partition, std::vector<msg>>> &req);
+
+	// This is needed for some special tools -- applications should never need to use this
+	// e.g tank-ctl mirroring functionality
+        uint32_t produce_with_base(const std::vector<std::pair<topic_partition, std::pair<uint64_t, std::vector<msg>>>> &req);
 
         uint32_t produce_to(const topic_partition &to, const std::vector<msg> &msgs);
 
@@ -559,6 +583,8 @@ class TankClient
         uint32_t consume(const std::vector<std::pair<topic_partition, std::pair<uint64_t, uint32_t>>> &req, const uint64_t maxWait, const uint32_t minSize);
 
         uint32_t consume_from(const topic_partition &from, const uint64_t seqNum, const uint32_t minFetchSize, const uint64_t maxWait, const uint32_t minSize);
+
+	uint32_t discover_partitions(const strwlen8_t topic);
 
         void set_client_id(const char *const p, const uint32_t len)
         {
@@ -604,7 +630,7 @@ class TankClient
 
         bool should_poll() const
         {
-                return connectionAttempts.size() || pendingConsumeReqs.size() || pendingProduceReqs.size() || rescheduleQueue.size();
+                return connectionAttempts.size() || pendingConsumeReqs.size() || pendingProduceReqs.size() || pendingDiscoverReqs.size() || rescheduleQueue.size();
         }
 };
 

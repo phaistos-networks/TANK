@@ -261,6 +261,9 @@ struct topic_partition_log
                         // relative sequence number = absSeqNum - baseSeqNum
                         Switch::vector<std::pair<uint32_t, uint32_t>> skipList;
 
+			// see above
+			bool haveWideEntries;
+
                         // We may access the index both directly, if ondisk is valid, and via the skipList
                         // This is so that we won't have to restore the skiplist on init
                         struct
@@ -315,13 +318,17 @@ struct topic_partition_log
 
         lookup_res range_for(uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum);
 
-        append_res append_bundle(const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt);
+        append_res append_bundle(const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt, const uint64_t, const uint64_t);
 
         bool should_roll(const uint32_t) const;
+
+	bool may_switch_index_wide(const uint64_t);
 
         void schedule_flush(const uint32_t);
 
         void consider_ro_segments();
+
+	void compact();
 };
 
 struct connection;
@@ -415,7 +422,7 @@ struct topic_partition
 
         void consider_append_res(append_res &res, Switch::vector<wait_ctx *> &waitCtxWorkL);
 
-        append_res append_bundle_to_leader(const uint8_t *const bundle, const size_t bundleLen, const uint32_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL);
+        append_res append_bundle_to_leader(const uint8_t *const bundle, const size_t bundleLen, const uint32_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL, const uint64_t, const uint64_t);
 
         lookup_res read_from_local(const bool fetchOnlyFromLeader, const bool fetchOnlyComittted, const uint64_t absSeqNum, const uint32_t fetchSize);
 };
@@ -848,6 +855,8 @@ class Service
 
         bool process_replica_reg(connection *const c, const uint8_t *p, const size_t len);
 
+        bool process_discover_partitions(connection *const c, const uint8_t *p, const size_t len);
+
         wait_ctx *get_waitctx(const uint8_t totalPartitions)
         {
                 if (waitCtxPool[totalPartitions].size())
@@ -863,7 +872,7 @@ class Service
 
         bool register_consumer_wait(connection *const c, const uint32_t requestId, const uint64_t maxWait, const uint32_t minBytes, topic_partition **const partitions, const uint32_t totalPartitions);
 
-        bool process_produce(connection *const c, const uint8_t *p, const size_t len);
+        bool process_produce(const TankAPIMsgType, connection *const c, const uint8_t *p, const size_t len);
 
         bool process_msg(connection *const c, const uint8_t msg, const uint8_t *const data, const size_t len);
 
@@ -895,7 +904,7 @@ class Service
 
 	static uint32_t verify_log(int);
 
-	static void verify_index(int);
+	static void verify_index(int, const bool);
 
       public:
         Service()
