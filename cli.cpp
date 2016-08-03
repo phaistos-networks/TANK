@@ -226,15 +226,19 @@ int main(int argc, char *argv[])
                 static constexpr size_t defaultMinFetchSize{128 * 1024 * 1024};
                 size_t minFetchSize{defaultMinFetchSize};
                 uint32_t pendingResp{0};
-                bool statsOnly{false};
+                bool statsOnly{false}, asKV{false};
                 IOBuffer buf;
                 range64_t timeRange{0, UINT64_MAX};
 
                 optind = 0;
-                while ((r = getopt(argc, argv, "+SF:hBT:")) != -1)
+                while ((r = getopt(argc, argv, "+SF:hBT:K")) != -1)
                 {
                         switch (r)
                         {
+				case 'K':
+					asKV = true;
+					break;
+
                                 case 'T':
                                 {
                                         const auto r = strwlen32_t(optarg).Divided(',');
@@ -385,7 +389,10 @@ int main(int argc, char *argv[])
                                         {
                                                 if (timeRange.Contains(m->ts))
                                                 {
-                                                        buf.append(m->content);
+							if (asKV)
+								buf.append("[", m->key, "] = [", m->content, "]");
+							else
+                                                        	buf.append(m->content);
                                                         buf.append('\n');
                                                 }
                                         }
@@ -705,15 +712,19 @@ int main(int argc, char *argv[])
         {
                 char path[PATH_MAX];
                 size_t bundleSize{1};
-                bool asSingleMsg{false};
+                bool asSingleMsg{false}, asKV{false};
                 uint64_t baseSeqNum{0};
 
                 optind = 0;
                 path[0] = '\0';
-                while ((r = getopt(argc, argv, "+s:f:F:hS:")) != -1)
+                while ((r = getopt(argc, argv, "+s:f:F:hS:K")) != -1)
                 {
                         switch (r)
                         {
+				case 'K':
+					asKV = true;
+					break;
+
                                 case 'S':
                                         baseSeqNum = strwlen32_t(optarg).AsUint64();
                                         break;
@@ -740,11 +751,12 @@ int main(int argc, char *argv[])
                                 break;
 
                                 case 'h':
-                                        Print("PRODUCE options [message1 message2...]\n");
+                                        Print("PRODUCE [options] [message1 message2...]\n");
                                         Print("Options include:\n");
                                         Print("-s number: The bundle size; how many messages to be grouped into a bundle before producing that to the broker. Default is 1, which means each new message is published as a single bundle\n");
                                         Print("-f file: The messages are read from `file`, which is expected to contain the mesasges in every new line. The `file` can be \"-\" for stdin. If this option is provided, the messages list is ignored\n");
                                         Print("-F file: Like '-f file', except that the contents of the file will be stored as a single message\n");
+					Print("-K: treat each message in the message list as a key=value pair, instead of as the content(value) of a message\n");
                                         return 1;
 
                                 default:
@@ -981,7 +993,18 @@ int main(int argc, char *argv[])
                 {
                         for (uint32_t i{0}; i != argc; ++i)
                         {
-                                msgs.push_back({strwlen32_t(argv[i]), Timings::Milliseconds::SysTime(), {}});
+				if (asKV)
+				{
+					const strwlen32_t s(argv[i]);
+					const auto r = s.Divided('=');
+
+	                                msgs.push_back({r.second, Timings::Milliseconds::SysTime(), {r.first.p, uint8_t(r.first.len)}});
+				}
+				else
+				{
+	                                msgs.push_back({strwlen32_t(argv[i]), Timings::Milliseconds::SysTime(), {}});
+				}
+
 
                                 if (msgs.size() == bundleSize)
                                 {

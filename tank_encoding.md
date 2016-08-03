@@ -60,6 +60,8 @@ bundle
 		{
 			// -1 because we want to maximize varint gains
 			// we do the same for deltas in the message set
+			// so for example, if the first message's sequence number is 10 and the last's is 15, 
+			// we 'll encode 15 - 10 - 1 = 4 as varint here
 			last messsage in this message set seqNumber - first message seqNum - 1:varint
 		}
 	}
@@ -79,6 +81,8 @@ bundle
 		{
 			if (this is neither the first NOR the last message in the message set)
 			{
+				// So for example, if the previous message in this bundle's message set seq.num was 10
+				// and this message's seq num is 11, then we encode (11 - 10 - 1) = 0 here
 				(message.seqNum - prevMessage.seqNum - 1):varint
 			}
 			else
