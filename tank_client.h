@@ -225,7 +225,9 @@ class TankClient
                         UnknownPartition,
                         Access,
                         Network,
-                        BoundaryCheck
+                        BoundaryCheck,
+			InvalidReq,
+			SystemFail
                 } type;
 
                 enum class Req : uint8_t
@@ -282,7 +284,7 @@ class TankClient
                         uint32_t prevSleep;
                         uint64_t until;
                         uint64_t naSince;
-                        uint16_t retries;
+                        uint16_t retries{0};
                 } block_ctx;
 
                 void set_reachability(const Reachability r);
@@ -572,7 +574,7 @@ class TankClient
 
         uint32_t produce(const std::vector<std::pair<topic_partition, std::vector<msg>>> &req);
 
-	// This is needed for some special tools -- applications should never need to use this
+	// This is needed for Tank system tools. Applications should never need to use this method
 	// e.g tank-ctl mirroring functionality
         uint32_t produce_with_base(const std::vector<std::pair<topic_partition, std::pair<uint64_t, std::vector<msg>>>> &req);
 
@@ -628,9 +630,9 @@ class TankClient
 
         void interrupt_poll();
 
-        bool should_poll() const
+        inline bool should_poll() const
         {
-                return connectionAttempts.size() || pendingConsumeReqs.size() || pendingProduceReqs.size() || pendingDiscoverReqs.size() || rescheduleQueue.size();
+                return connectionAttempts.size() || pendingConsumeReqs.size() || pendingProduceReqs.size() || pendingDiscoverReqs.size();
         }
 };
 

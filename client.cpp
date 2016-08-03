@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <date.h>
 
-static constexpr bool trace{false};
+static constexpr bool trace{true};
 
 TankClient::broker *TankClient::broker_state(const Switch::endpoint e)
 {
@@ -262,8 +262,22 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
 			if (baseSeqNum)
 			{
 				b.Serialize<uint64_t>(baseSeqNum);	 //base seqnum
-				b.SerializeVarUInt32(it->msgsCnt - 1); 	// last message seqNum delta/offset from baseSeqNum
+
+				if (it->msgsCnt != 1)
+				{
+					// last message seqNum delta/offset from baseSeqNum
+					// we encode msgsCnt - 2 because
+					// we want to encode (lastMsg - firstMsg) - 1
+					// so if baseSeqNum = 10 and msgsCnt = 2, the last would be 11, so we want to encode
+					// 11 - 10 - 1 = 0
+					//
+					// see tank_encoding.md
+					b.SerializeVarUInt32(it->msgsCnt - 2); 	
+				}
 			}
+
+			if (trace)
+				SLog("bundleFlags = ", bundleFlags, "\n");
 
 
                         // END:bundle header; serialize messages set
@@ -282,6 +296,12 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
                         {
                                 const auto &m = it->msgs[i];
 
+				if (unlikely(!m.content.len))
+				{
+					put_payload(payload, __LINE__);
+					throw Switch::data_error("Unexpected message with no content");
+				}
+
                                 required += m.key.len;
                                 required += m.content.len;
                         }
@@ -293,35 +313,63 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
                         {
                                 const auto &m = it->msgs[i];
                                 uint8_t flags = m.key ? uint8_t(TankFlags::BundleMsgFlags::HaveKey) : 0;
+				bool encodeTS;
 
-				if (baseSeqNum)
-                                {
-                                        // bundle sparse bit is set
-                                        if (i && i != it->msgsCnt - 1)
-                                        {
-						// they are ordered in this bundle
-						b.SerializeVarUInt32(i);
-                                        }
-                                }
+				if (trace)
+					SLog("message ", i, " / ", it->msgsCnt, "\n");
+
+
 
                                 if (m.ts == lastTS && i)
                                 {
                                         // This message's timestamp == last message timestamp we serialized
                                         flags |= uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS);
                                         b.Serialize(flags);
+					encodeTS= false;
+
+					if (trace)
+						SLog("Using last specified TS\n");
                                 }
                                 else
                                 {
                                         lastTS = m.ts;
                                         b.Serialize(flags);
-                                        b.Serialize<uint64_t>(m.ts);
+					encodeTS= true;
+
+					if (trace)
+						SLog("Specifying TS\n");
                                 }
+
+				if (baseSeqNum)
+                                {
+                                        // bundle sparse bit is set
+                                        if (i && i != it->msgsCnt - 1)
+                                        {
+						// they are ordered in this bundle, and distance from last is always 1
+						// and we encode distance - 1 so always encode 0 here
+						if (trace)
+							SLog("Serializing delta = 0\n");
+
+						b.SerializeVarUInt32(0);
+                                        }
+                                }
+				
+				if (encodeTS)
+				{
+	                                b.Serialize<uint64_t>(m.ts);
+				}
 
                                 if (m.key)
                                 {
                                         b.Serialize(m.key.len);
                                         b.Serialize(m.key.p, m.key.len);
+
+					if (trace)
+						SLog("Specifying key\n");
                                 }
+
+				if (trace)
+					SLog("msg.content.len = ", m.content.len, "\n");
 
                                 b.SerializeVarUInt32(m.content.len);
                                 b.Serialize(m.content.p, m.content.len);
@@ -963,6 +1011,10 @@ void TankClient::flush_broker(broker *const bs)
         }
         bs->reqs_tracker.pendingProduce.clear();
 
+        Drequire(bs->reqs_tracker.pendingConsume.empty());
+        Drequire(bs->reqs_tracker.pendingProduce.empty());
+        Drequire(bs->reqs_tracker.pendingDiscover.empty());
+
         if (trace)
                 SLog("capturedFaults ", capturedFaults.size(), "\n");
 }
@@ -1200,6 +1252,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                                 if (trace)
                                         SLog("for partition ", partitionId, ", err = ", err, ", partitionsCnt = ", partitionsCnt, "\n");
 
+
                                 if (err == 1)
                                 {
                                         if (trace)
@@ -1209,12 +1262,20 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                                 }
                                 else if (err)
                                 {
-                                        capturedFaults.push_back({clientReqId, fault::Type::Access, fault::Req::Produce, topicName, partitionId});
+					if (err == 2)
+					{
+						// Invald sequence numbers
+	                                        capturedFaults.push_back({clientReqId, fault::Type::InvalidReq, fault::Req::Produce, topicName, partitionId});
+					}
+					else
+	                                        capturedFaults.push_back({clientReqId, fault::Type::SystemFail, fault::Req::Produce, topicName, partitionId});
                                 }
                                 else
                                 {
                                         produceAcks.push_back({clientReqId, topicName, partitionId});
                                 }
+
+
 
                                 if (--partitionsCnt == 0)
                                         break;
@@ -1292,7 +1353,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
         const auto *const reqSeqNums = reqInfo.seqNums;
         uint8_t reqOffsetIdx{0};
         strwlen8_t key;
-	uint64_t firstMsgSeqNum, lastMsgSeqNum, logBaseSeqNum, msgAbsSeqNum, msgSetEnd;
+	uint64_t firstMsgSeqNum, lastMsgSeqNum, logBaseSeqNum,  msgSetEnd;
 
 	// TODO:
 	// if broker reports that it is no longer the leader for (topic, broker), we need to retain
@@ -1460,7 +1521,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 					if (trace)
 						SLog("msgSetEnd not packed into flags\n");
 
-                                        if (!Compression::UnpackUInt32Check(p, chunkEnd))
+                                        if (unlikely(!Compression::UnpackUInt32Check(p, chunkEnd)))
                                         {
                                                 if (trace)
                                                         SLog("boundaries\n");
@@ -1492,7 +1553,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                         if (msgsSetSize != 1)
                                         {
-						if (!Compression::UnpackUInt32Check(p, chunkEnd))
+						if (unlikely(!Compression::UnpackUInt32Check(p, chunkEnd)))
 						{
 							if (trace)
 								SLog("boundaries\n");
@@ -1500,7 +1561,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 							break;
 						}
 
-                                                lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p);
+                                                lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p) + 1;
                                         }
 					else
 					{
@@ -1601,7 +1662,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                 // Parse the bundle's message set
                                 // if this a compressed messages set, the boundary checks are not necessary
-                                for (const auto *p = msgSetContent.offset, *const endOfMsgSet = p + msgSetContent.len;; ++msgIdx)
+                                for (const auto *p = msgSetContent.offset, *const endOfMsgSet = p + msgSetContent.len;; ++msgIdx, ++logBaseSeqNum)
                                 {
                                         // parse next bundle message
                                         if (p + sizeof(uint8_t) > endOfMsgSet)
@@ -1638,11 +1699,14 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                                         const auto delta = Compression::UnpackUInt32(p);
 
-                                                        logBaseSeqNum = firstMsgSeqNum + delta;
+							if (trace)
+								SLog("Delta ", delta, "\n");
+
+                                                        logBaseSeqNum += delta;
                                                 }
                                         }
 
-                                        msgAbsSeqNum = logBaseSeqNum++; // This message's absolute sequence number
+					const auto msgAbsSeqNum = logBaseSeqNum;
 
                                         if (trace)
                                                 SLog("Message ", msgIdx, ", msgFlags = ", msgFlags, " for seq.num = ", msgAbsSeqNum, "\n");

@@ -58,7 +58,9 @@ bundle
 
 		if (total messages in message set > 1)
 		{
-			last messsage in this message set seqNumber - first message seqNum(delta):varint
+			// -1 because we want to maximize varint gains
+			// we do the same for deltas in the message set
+			last messsage in this message set seqNumber - first message seqNum - 1:varint
 		}
 	}
 
@@ -77,7 +79,7 @@ bundle
 		{
 			if (this is neither the first NOR the last message in the message set)
 			{
-				message.seqNum - firstMsg.seqNum:varint 	 		// firstMsg.seqNumber is encoded in the bundle header
+				(message.seqNum - prevMessage.seqNum - 1):varint
 			}
 			else
 			{

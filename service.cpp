@@ -25,7 +25,7 @@
 // The glibc sendfile() wrapper function transparently deals with the kernel differences.
 #define HAVE_SENDFILE64 1
 
-static constexpr bool trace{false};
+static constexpr bool trace{true};
 
 static Switch::mutex mboxLock;
 static Switch::vector<std::pair<int, int>> mbox;
@@ -214,9 +214,13 @@ static uint32_t search_before_offset(uint64_t baseSeqNum, const uint32_t maxSize
                         p += sizeof(uint64_t);
 
                         if (msgSetSize != 1)
-                                lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p);
+			{
+                                lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p) + 1;
+			}
                         else
+			{
                                 lastMsgSeqNum = firstMsgSeqNum;
+			}
 
 			if (trace)
 				SLog("sparseBundleBitSet is set, firstMsgSeqNum = ", firstMsgSeqNum, ", lastMsgSeqNum = ", lastMsgSeqNum, "\n");
@@ -315,9 +319,13 @@ static bool adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
                         p += sizeof(uint64_t);
 
                         if (msgSetSize != 1)
-                                lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p);
+			{
+                                lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p) + 1;
+			}
                         else
+			{
                                 lastMsgSeqNum = firstMsgSeqNum;
+			}
 
 			if (trace)
 				SLog("sparseBundleBitSet, firstMsgSeqNum = ", firstMsgSeqNum, ", lastMsgSeqNum, ", lastMsgSeqNum, "\n");
@@ -581,9 +589,13 @@ void topic_partition_log::compact()
                                 p += sizeof(uint64_t);
 
                                 if (msgsSetSize != 1)
-                                        lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p);
+				{
+                                        lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p) + 1;
+				}
                                 else
+				{
                                         lastMsgSeqNum = firstMsgSeqNum;
+				}
                         }
 
                         if (codec)
@@ -610,7 +622,10 @@ void topic_partition_log::compact()
                                         else if (msgIdx == msgsSetSize - 1)
                                                 msgSeqNum = lastMsgSeqNum;
                                         else
-                                                msgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p);
+					{
+						// we encode delta from last - 1, but we already ++msgSeqNum in for()
+                                                msgSeqNum += Compression::UnpackUInt32(p);
+					}
                                 }
 
                                 if (!(flags & uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS)))
@@ -1328,14 +1343,14 @@ append_res topic_partition::append_bundle_to_leader(const uint8_t *const bundle,
 				if (trace)
 					SLog("Unexpected, lastMsgSeqNum(", lastMsgSeqNum, ") < firstMsgSeqNum(", firstMsgSeqNum, ")\n");
 
-				return {nullptr, {}, {}};
+				return {nullptr, {0, UINT32_MAX}, {}};
                         }
                         else if (unlikely(firstMsgSeqNum <= log_->lastAssignedSeqNum))
                         {
 				if (trace)
                                         SLog("Unexpected, firstMsgSeqNum(", firstMsgSeqNum, ") <= lastAssignedSeqNum(", log_->lastAssignedSeqNum, ")\n");
 
-                                return {nullptr, {}, {}};
+				return {nullptr, {0, UINT32_MAX}, {}};
                         }
                 }
                 else if (unlikely(firstMsgSeqNum && firstMsgSeqNum <= log_->lastAssignedSeqNum))
@@ -1343,7 +1358,7 @@ append_res topic_partition::append_bundle_to_leader(const uint8_t *const bundle,
                         if (trace)
                                 SLog("Unexpected, firstMsgSeqNum(", firstMsgSeqNum, ") <= lastAssignedSeqNum(", log_->lastAssignedSeqNum, ")\n");
 
-                        return {nullptr, {}, {}};
+                        return {nullptr, {0, UINT32_MAX}, {}};
                 }
 
                 auto res = log_->append_bundle(bundle, bundleLen, bundleMsgsCnt, firstMsgSeqNum, lastMsgSeqNum);
@@ -1674,6 +1689,7 @@ uint32_t Service::verify_log(int fd)
         uint32_t relSeqNum{0};
         IOBuffer cb;
         range_base<const uint8_t *, size_t> msgSetContent;
+        uint64_t lastMsgSeqNum;
 
         if (fileData == MAP_FAILED)
                 throw Switch::system_error("Unable to mmap():", strerror(errno));
@@ -1701,14 +1717,17 @@ uint32_t Service::verify_log(int fd)
 		if (sparseBundleBitSet)
                 {
                         const auto firstMsgSeqNum = *(uint64_t *)p;
-			uint64_t lastMsgSeqNum;
 
                         p += sizeof(uint64_t);
 
                         if (msgsSetSize != 1)
-                                lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p);
+			{
+                                lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p) + 1;
+			}
                         else
+			{
                                 lastMsgSeqNum = firstMsgSeqNum;
+			}
 
                         expect(firstMsgSeqNum && lastMsgSeqNum >= firstMsgSeqNum);
                 }
@@ -1746,7 +1765,7 @@ uint32_t Service::verify_log(int fd)
 				}
 				else
 				{
-					// delta from first
+					// delta from prev - 1
 					Compression::UnpackUInt32(p);
 				}
 			}
@@ -1771,9 +1790,12 @@ uint32_t Service::verify_log(int fd)
                         p += msgLen;
                 }
 
-                relSeqNum += msgsSetSize;
-                p = nextBundle;
+		if (sparseBundleBitSet)
+			relSeqNum = lastMsgSeqNum;
+		else
+	                relSeqNum += msgsSetSize;
 
+                p = nextBundle;
                 expect(p <= e);
         }
 
@@ -2105,9 +2127,13 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                                 p += sizeof(uint64_t);
 
                                                 if (msgSetSize != 1)
-                                                        lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p);
+						{
+                                                        lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p) + 1;
+						}
                                                 else
+						{
                                                         lastMsgSeqNum = firstMsgSeqNum;
+						}
 
                                                 next = lastMsgSeqNum + 1;
                                         }
@@ -2726,11 +2752,13 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 				{
 					// multiple messages in the bundle
 					// compute the last message in the bundle abs.seqNumber from
-					// the encoded delta
-					lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p);
+					// the encoded delta (see tank_encoding.md)
+					lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p) + 1;
 				}
 				else
+				{
 					lastMsgSeqNum = firstMsgSeqNum;
+				}
 
 				if (trace)
 					SLog("sparseBundleBitSet set: firstMsgSeqNum = ", firstMsgSeqNum, ", lastMsgSeqNum ", lastMsgSeqNum, "\n");
@@ -2776,13 +2804,16 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 				uint32_t msgIdx{0};
 
 				if (trace)
-					SLog("Iterating ", msgSetContent.len, "\n");
+					SLog("Iterating ", msgSetContent.len, " bytes\n");
 
 
                                 for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.len; p != e; ++msgIdx, ++absMsgSeqNum)
                                 {
                                         // Next message set message
                                         const auto flags = *p++;
+
+					if (trace)
+						SLog("Considering ", msgIdx, " / ", msgSetSize, "\n");
 
 					if (sparseBundleBitSet)
                                         {
@@ -2796,7 +2827,12 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                                                                 absMsgSeqNum = lastMsgSeqNum;
                                                         else
 							{
-                                                                absMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p);
+								const auto delta = Compression::UnpackUInt32(p);
+
+								if (trace)
+									SLog("Delta from previous (", delta, ")\n");
+
+                                                                absMsgSeqNum += delta;
 							}
 
                                                         if (absMsgSeqNum <= prevAbsMsgSeqNum)
@@ -2827,11 +2863,17 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                                         {
                                                 key.Set((char *)p + 1, *p);
                                                 p += key.len + sizeof(uint8_t);
+
+						if (trace)
+							SLog("have key\n");
                                         }
                                         else
                                                 key.Unset();
 
                                         const auto msgLen = Compression::UnpackUInt32(p);
+
+					if (trace)
+						SLog("msgLen = ", msgLen, "\n");
 
                                         (void)flags;
                                         (void)msgTs;
@@ -2843,11 +2885,11 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                         }
 
 			//
-			// XXX: TODO:
-			// If we append to a fresh segment log (i.e firstMsgSeqNum == 0) 2 msgs
-			// and right after that we append 2 more msgs to an explicit firstMsgSeqNum = 5112
+			// XXX:
+			// If we append to a fresh partition (i.e firstAvailableSeqNum == 0) 2 msgs
+			// and right after that we append 2 more msgs to an explicit firstMsgSeqNum = 5112 using e.g tank-cli set -S 5112
 			// and then we try to e.g tank-cli get from that partition starting at 0
-			// thewn we 'll get 4 msgs, _but_ the client won't have a clue that the 2 later messages have a different
+			// then we 'll get 4 msgs, _but_ the client won't have a clue that the 2 later messages have a different
 			// id (starting from 5112), and instead will consider them to have ids 3 and 4 respectively, and so, it will
 			// set next.seqNum to 5. (which is wrong). Setting their ids to 3 and 4 is also wrong.
 			//
@@ -2855,15 +2897,34 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 			// messages.
 			// So we need to either allow explicit firstMsgSeqNum > 0 only iff the partition is empty, or we need
 			// to explicitly use a sparse bundle if we need to do that (at least for the first bundle!)
+			//
+			// That's why we need to use TankClient::produce_with_base()
+			// Rules:
+			// 1. Always use sparse bundles when compacting
+			// 2. use TankClient::produce_with_base() for mirroring
+			// 3. Expect that everything will work out otherwise if you are just building Tank apps.
                         const auto b = Timings::Microseconds::Tick();
                         const auto res = partition->append_bundle_to_leader(bundle, bundleLen, msgSetSize, expiredCtxList, firstMsgSeqNum, lastMsgSeqNum);
 
                         if (unlikely(!res.fdh))
                         {
-				// TODO: https://github.com/phaistos-networks/TANK/issues/28
-                                Print("Failed; will shutdown\n");
-                                _exit(1);
+				if (res.dataRange.len == UINT32_MAX)
+				{
+					// Invalid request(offsets)
+					respHeader->Serialize(uint8_t(2));
+				}
+				else
+				{
+					// System error
+					respHeader->Serialize(uint8_t(10));
+				}
                         }
+			else
+			{
+				// success
+                        	respHeader->Serialize(uint8_t(0));
+			}
+
 
                         if (trace)
                                 SLog("Took ", duration_repr(Timings::Microseconds::Since(b)), " for ", msgSetSize, " msgs in bundle message set: ", expiredCtxList.size(), "\n");
@@ -2871,8 +2932,6 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 #ifdef LEAN_SWITCH
                         (void)b;
 #endif
-
-                        respHeader->Serialize(uint8_t(0));
 
                         while (expiredCtxList.size())
                         {

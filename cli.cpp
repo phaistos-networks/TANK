@@ -108,7 +108,7 @@ int main(int argc, char *argv[])
 
                                 if (!s.IsDigits())
                                 {
-                                        Print("Invalid partition\n");
+                                        Print("Invalid partition '", s, "'. Expected numeric id from 0 upto ", UINT16_MAX, "\n");
                                         return 1;
                                 }
 
@@ -194,6 +194,14 @@ int main(int argc, char *argv[])
                         case TankClient::fault::Type::Access:
                                 Print("Access error\n");
                                 break;
+
+			case TankClient::fault::Type::SystemFail:
+				Print("System Error\n");
+				break;
+
+			case TankClient::fault::Type::InvalidReq:
+				Print("Invalid Request\n");
+				break;
 
                         case TankClient::fault::Type::Network:
                                 Print("Network error\n");
@@ -418,8 +426,8 @@ int main(int argc, char *argv[])
                         {
                                 case 'h':
                                         Print("mirror [options] endpoint\n");
-                                        Print("Will mirror the selected topic's partitions to the broker identified by endpoint.\n");
-                                        Print("You should have created the partitions(directories) in the destination before you attempt to mirror\n");
+                                        Print("Will mirror the selected topic's partitions to the broker identified by <endpoint>.\n");
+                                        Print("You should have created the partitions(directories) in the destination before you attempt to mirror from source to destination.\n");
                                         return 0;
 
                                 default:
@@ -432,7 +440,7 @@ int main(int argc, char *argv[])
 
                 if (!argc)
                 {
-                        Print("Mirror destination not specified\n");
+                        Print("Mirror destination endpoint not specified\n");
                         return 1;
                 }
 
@@ -487,8 +495,6 @@ int main(int argc, char *argv[])
 
                         if (tankClient.discovered_partitions().size())
                         {
-                                // TODO: keep track of the first available sequence number - first request to
-                                // partition on destionation should use produce_with_base() and that first available sequence number
                                 const auto &v = tankClient.discovered_partitions().front();
 
                                 require(v.clientReqId == reqId1);
@@ -535,6 +541,8 @@ int main(int argc, char *argv[])
                         Print("Partitions mismatch, ", dotnotation_repr(srcPartitionsCnt), " partitions discovered in source, ", dotnotation_repr(pending.size()), " in destination\n");
                         return 1;
                 }
+
+
 
                 Print("Will now mirror ", dotnotation_repr(srcPartitionsCnt), " partitions of ", ansifmt::bold, topicPartition.first, ansifmt::reset, "\n");
                 Print("You can safely abort mirroring by stoping this tank-cli process (e.g CTRL-C or otherwise). Next mirror session will pick up mirroring from where this session ended\n");
