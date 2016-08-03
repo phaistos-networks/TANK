@@ -25,7 +25,7 @@
 // The glibc sendfile() wrapper function transparently deals with the kernel differences.
 #define HAVE_SENDFILE64 1
 
-static constexpr bool trace{true};
+static constexpr bool trace{false};
 
 static Switch::mutex mboxLock;
 static Switch::vector<std::pair<int, int>> mbox;

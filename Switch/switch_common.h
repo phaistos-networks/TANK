@@ -664,7 +664,7 @@ struct strwithlen
 
         strwithlen Prefix(const LT l) const
         {
-                return strwithlen(p, Min(len, l));
+                return strwithlen(p, std::min<LT>(len, l));
         }
 
         strwithlen Suffix(const LT l) const

@@ -694,8 +694,8 @@ int main(int argc, char *argv[])
 
                                 // http://www.tldp.org/HOWTO/Bash-Prompt-HOWTO/x361.html
                                 Print(ansifmt::bold, "Partition\r\033\[<10CFirst Available\r\033\[<30CLast Assigned", ansifmt::reset, "\n");
-                                for (const auto it : it.watermarks)
-                                        Print(ansifmt::bold, i++, ansifmt::reset, "\033\[<10C", it->first, "\r\033[<30C", it->second, "\n");
+                                for (const auto wm : it.watermarks)
+                                        Print(ansifmt::bold, i++, ansifmt::reset, "\033\[<10C", wm->first, "\r\033[<30C", wm->second, "\n");
                         }
                 }
 

@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <date.h>
 
-static constexpr bool trace{true};
+static constexpr bool trace{false};
 
 TankClient::broker *TankClient::broker_state(const Switch::endpoint e)
 {
