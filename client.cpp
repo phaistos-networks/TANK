@@ -166,6 +166,8 @@ uint8_t TankClient::choose_compression_codec(const msg *const msgs, const size_t
         return 0;
 }
 
+
+
 bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const Switch::endpoint leader, const produce_ctx *const produce, const size_t cnt)
 {
         const uint64_t start = trace ? Timings::Microseconds::Tick() : 0;
@@ -2397,17 +2399,22 @@ uint32_t TankClient::produce_to(const topic_partition &to, const std::vector<msg
 		return clientReqId;
 }
 
-uint32_t TankClient::produce_with_base(const std::vector<
-	std::pair<topic_partition, std::pair<uint64_t, std::vector<msg>>>> &req)
+uint32_t TankClient::produce_with_base(const std::vector< std::pair<topic_partition, std::pair<uint64_t, std::vector<msg>>>> &req)
+{
+	return produce_with_base(req.data(), req.size());
+}
+
+uint32_t TankClient::produce_with_base(const std::pair<topic_partition, std::pair<uint64_t, std::vector<msg>>> *const list, const size_t listSize)
 {
         auto &out = produceOut;
 
         if (trace)
-                SLog("Producing into ", req.size(), " partitions\n");
+                SLog("Producing into ", listSize, " partitions\n");
 
         out.clear();
-        for (const auto &it : req)
-        {
+	for (size_t i{0}; i != listSize; ++i)
+	{
+		const auto &it = list[i];
                 const auto ref = it.first;
                 const auto topic = ref.first;
 
@@ -2446,17 +2453,22 @@ uint32_t TankClient::produce_with_base(const std::vector<
         return clientReqId;
 }
 
-uint32_t TankClient::produce(const std::vector<
-                             std::pair<topic_partition, std::vector<msg>>> &req)
+uint32_t TankClient::produce(const std::vector<std::pair<topic_partition, std::vector<msg>>> &req)
+{
+        return produce(req.data(), req.size());
+}
+
+uint32_t TankClient::produce(const std::pair<topic_partition, std::vector<msg>> *list, const size_t listSize)
 {
         auto &out = produceOut;
 
         if (trace)
-                SLog("Producing into ", req.size(), " partitions\n");
+                SLog("Producing into ", listSize, " partitions\n");
 
         out.clear();
-        for (const auto &it : req)
-        {
+	for (size_t i{0}; i != listSize; ++i)
+	{
+		const auto &it = list[i];
                 const auto ref = it.first;
                 const auto topic = ref.first;
 

@@ -26,6 +26,24 @@ namespace ansifmt
 	static constexpr const char *bgcolor_magenta = "\033[45m";
 	static constexpr const char *bgcolor_cyan = "\033[46m";
 	static constexpr const char *bgcolor_gray = "\033[47m";
-
 	static constexpr const char *cls = "\033[2J\033[1;1H";
+
+	// http://www.tldp.org/HOWTO/Bash-Prompt-HOWTO/x361.html
+	struct set_col
+	{
+		const uint32_t column;
+
+		set_col(const uint32_t v)
+			: column{v}
+		{
+
+		}
+	};
 };
+
+static void PrintImpl(Buffer &out, const ansifmt::set_col &c)
+{
+	// We need to reset to 0 first with \r and then advance
+	// maybe there's another escape sequence for explicitly setting the column
+	out.AppendFmt("\r\033\[<%uC", c.column);
+}

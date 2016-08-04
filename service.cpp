@@ -729,9 +729,10 @@ void topic_partition_log::compact()
                                         key.Unset();
                                 }
 
-                                if (const auto msgLen = Compression::UnpackUInt32(p))
+                                const auto msgLen = Compression::UnpackUInt32(p);
+
+				if (msgLen || !key)
                                 {
-                                        // Drop deleted messages
                                         msgValue.Set((char *)p, msgLen);
                                         p += msgLen;
 
@@ -744,7 +745,10 @@ void topic_partition_log::compact()
                                         msgs.push_back({key, msgSeqNum, msgTs, msgValue});
                                 }
                                 else
+				{
+                                        // Drop deleted messages(messages with a key and no content)
                                         anyDropped = true;
+				}
                         }
                 }
         }
@@ -1097,7 +1101,12 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
                 uint32_t offsetCeil;
 
                 if (trace)
+                {
                         SLog("Found in RO segment (", f->baseSeqNum, ", ", f->lastAvailSeqNum, ")\n");
+
+                        for (const auto &it : *prevSegments)
+                                SLog(">> (", it->baseSeqNum, ", ", it->lastAvailSeqNum, ")\n");
+                }
 
                 if (maxAbsSeqNum != UINT64_MAX)
                 {
@@ -1834,7 +1843,7 @@ bool Service::parse_partition_config(const char *const path, partition_config *c
 // TODO: respect configuration
 void Service::rebuild_index(int logFd, int indexFd)
 {
-	static constexpr bool trace{true};
+	static constexpr bool trace{false};
         const auto fileSize = lseek64(logFd, 0, SEEK_END);
         auto *const fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, logFd, 0);
         IOBuffer b;
@@ -2530,7 +2539,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
 
                 (void)clientVersion;
                 if (trace)
-                        SLog("topicsCnt = ", topicsCnt, "\n");
+                        SLog(ansifmt::bold, ansifmt::color_magenta, "New COSNUME request fro topicsCnt = ", topicsCnt, ansifmt::reset, "\n");
 
                 respHeader->Serialize(uint8_t(TankAPIMsgType::Consume));
                 const auto sizeOffset = respHeader->length();
@@ -2605,7 +2614,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                 }
 
                                 if (trace)
-                                        SLog("> ", partitionId, ", ", absSeqNum, ", ", fetchSize, "\n");
+                                        SLog("> REQUEST FOR partition ", partitionId, ", absSeqNum ", absSeqNum, ", fetchSize ", fetchSize, "\n");
 
                                 if (absSeqNum == UINT64_MAX)
                                 {
@@ -3236,6 +3245,9 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 
                                 wakeup_wait_ctx(ctx, res, c);
                         }
+
+
+			p = e; // to next partition
                 }
         }
         *(uint32_t *)respHeader->At(sizeOffset) = respHeader->length() - sizeOffset - sizeof(uint32_t);

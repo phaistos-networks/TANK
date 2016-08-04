@@ -293,6 +293,7 @@ int main(int argc, char *argv[])
 
                                 case 'h':
                                         Print("CONSUME [options] from\n");
+					Print("Consumes/retrieves messages from Tank\n");
                                         Print("Options include:\n");
                                         Print("-F display format: Specify a ',' separated list of message properties to be displayed. Properties include: \"seqnum\", \"key\", \"content\", \"ts\". By default, only the content is displayed\n");
                                         Print("-S: statistics only\n");
@@ -390,7 +391,7 @@ int main(int argc, char *argv[])
                                                 if (timeRange.Contains(m->ts))
                                                 {
 							if (asKV)
-								buf.append("[", m->key, "] = [", m->content, "]");
+								buf.append(m->seqNum, " [", m->key, "] = [", m->content, "]");
 							else
                                                         	buf.append(m->content);
                                                         buf.append('\n');
@@ -424,10 +425,13 @@ int main(int argc, char *argv[])
         {
                 TankClient dest;
                 uint32_t reqId1, reqId2;
+                // XXX: arbitrary defaults
+                size_t bundleMsgsSetCntThreshold{128};
+                size_t bundleMsgsSetSizeThreshold{4 * 1024 * 1024};
 
                 // TODO: throttling options
                 optind = 0;
-                while ((r = getopt(argc, argv, "+h")) != -1)
+                while ((r = getopt(argc, argv, "+hC:S:")) != -1)
                 {
                         switch (r)
                         {
@@ -435,7 +439,28 @@ int main(int argc, char *argv[])
                                         Print("mirror [options] endpoint\n");
                                         Print("Will mirror the selected topic's partitions to the broker identified by <endpoint>.\n");
                                         Print("You should have created the partitions(directories) in the destination before you attempt to mirror from source to destination.\n");
+					Print("Options include:\n");
+					Print("-C cnt: Each bundle produced will contain no more that `cnt` messages. Default is ", bundleMsgsSetCntThreshold, "\n");
+					Print("-S size: Each bundle produced will be no larger(in terms of bytes) than `size` bytes. Default is ", bundleMsgsSetSizeThreshold, "\n");
                                         return 0;
+
+				case 'C':
+					bundleMsgsSetCntThreshold = strwlen32_t(optarg).AsUint32();
+					if (!IsBetweenRange<size_t>(bundleMsgsSetCntThreshold, 1, 65536))
+					{
+						Print("Invalid value ", optarg, "\n");
+						return 1;
+					}
+					break;
+				
+				case 'S':
+					bundleMsgsSetSizeThreshold = strwlen32_t(optarg).AsUint32();
+					if (!IsBetweenRange<size_t>(bundleMsgsSetSizeThreshold, 64, 8 * 1024 * 1024))
+					{
+						Print("Invalid value ", optarg, "\n");
+						return 1;
+					}
+					break;
 
                                 default:
                                         return 1;
@@ -457,9 +482,12 @@ int main(int argc, char *argv[])
                 }
                 catch (...)
                 {
-                        Print("Invalid destination endpoint\n");
+                        Print("Invalid destination endpoint '", argv[0], "'\n");
                         return 1;
                 }
+
+		if (verbose)
+			Print("Discovering partitions\n");
 
                 // Discover partitions first
                 reqId1 = tankClient.discover_partitions(topicPartition.first);
@@ -480,6 +508,7 @@ int main(int argc, char *argv[])
                 {
                         uint16_t id;
                         bool pending;
+			uint64_t nextBase, last;
                         uint64_t next;
                 };
 
@@ -489,6 +518,8 @@ int main(int argc, char *argv[])
                 std::vector<partition_ctx *> pending;
                 std::vector<std::pair<TankClient::topic_partition, std::pair<uint64_t, uint32_t>>> inputs;
                 std::vector<std::pair<TankClient::topic_partition, std::vector<TankClient::msg>>> outputs;
+                std::vector<std::pair<TankClient::topic_partition, std::pair<uint64_t, std::vector<TankClient::msg>>>> outputsForBase;
+		std::vector<uint8_t> outputsOrder;
 
                 while (tankClient.should_poll())
                 {
@@ -506,6 +537,9 @@ int main(int argc, char *argv[])
 
                                 require(v.clientReqId == reqId1);
                                 srcPartitionsCnt = v.watermarks.len;
+
+				if (verbose)
+					Print("Discovered topics from source\n");
                         }
                 }
 
@@ -531,10 +565,15 @@ int main(int argc, char *argv[])
 
                                         partition->id = pending.size();
                                         partition->pending = true;
+                                        partition->nextBase = UINT64_MAX;
+                                        partition->last = 0;
                                         partition->next = p->second + 1;
                                         pending.push_back(partition);
                                         map.insert({partition->id, partition});
                                 }
+
+                                if (verbose)
+					Print("Discovered topics from dest\n");
                         }
                 }
 
@@ -568,7 +607,7 @@ int main(int argc, char *argv[])
                                         inputs.push_back({{topicPartition.first, it->id}, {it->next, 4 * 1024 * 1024}});
                                 }
 
-                                reqId1 = tankClient.consume(inputs, 4e3, 0);
+                                reqId1 = tankClient.consume(inputs, 4e3, 1);
                                 if (!reqId1)
                                 {
                                         Print("Failed to issue consume request\n");
@@ -577,6 +616,7 @@ int main(int argc, char *argv[])
 
                                 pending.clear();
                         }
+
 
                         if (tankClient.should_poll())
                         {
@@ -593,6 +633,8 @@ int main(int argc, char *argv[])
                                 if (tankClient.consumed().size())
                                 {
                                         outputs.clear();
+					outputsForBase.clear();
+					outputsOrder.clear();
 
                                         for (const auto &it : tankClient.consumed())
                                         {
@@ -602,22 +644,46 @@ int main(int argc, char *argv[])
                                                 {
                                                         std::vector<TankClient::msg> msgs;
                                                         size_t sum{0};
+							auto first = it.msgs.offset->seqNum;
 
                                                         msgs.reserve(it.msgs.len);
                                                         for (const auto m : it.msgs)
                                                         {
-                                                                if (msgs.size() == 256 || sum > 4 * 1024 * 1024) // XXX: arbitrary
+                                                                if (msgs.size() == bundleMsgsSetCntThreshold || sum > bundleMsgsSetSizeThreshold)
                                                                 {
-                                                                        outputs.push_back({{topicPartition.first, it.partition}, std::move(msgs)});
+                                                                        if (partition->nextBase != first)
+                                                                        {
+                                                                                outputsForBase.push_back({{topicPartition.first, it.partition}, {first, std::move(msgs)}});
+										outputsOrder.push_back(1);
+                                                                        }
+                                                                        else
+                                                                        {
+                                                                                outputs.push_back({{topicPartition.first, it.partition}, std::move(msgs)});
+										outputsOrder.push_back(0);
+                                                                        }
+                                                                        partition->nextBase = partition->last + 1;
+
                                                                         sum = 0;
                                                                         msgs.clear();
+                                                                        first = m->seqNum;
                                                                 }
 
                                                                 sum += m->key.len + m->content.len + 32;
+                                                                partition->last = m->seqNum;
                                                                 msgs.push_back({m->content, m->ts, m->key});
                                                         }
 
-                                                        outputs.push_back({{topicPartition.first, it.partition}, std::move(msgs)});
+                                                        if (partition->nextBase != first)
+                                                        {
+                                                                outputsForBase.push_back({{topicPartition.first, it.partition}, {first, std::move(msgs)}});
+                                                                partition->nextBase = partition->last + 1;
+										outputsOrder.push_back(1);
+                                                        }
+                                                        else
+                                                        {
+                                                                outputs.push_back({{topicPartition.first, it.partition}, std::move(msgs)});
+										outputsOrder.push_back(0);
+                                                        }
                                                 }
                                                 else
                                                 {
@@ -632,17 +698,43 @@ int main(int argc, char *argv[])
                                                 partition->next = it.next.seqNum;
                                         }
 
-                                        if (outputs.size())
-                                        {
-                                                reqId2 = dest.produce(outputs);
 
-                                                if (!reqId2)
+					// we need to do this in order
+					if (outputsOrder.size())
+                                        {
+						uint32_t outputsIt{0}, outputsForBaseIt{0};
+                                                const auto end = outputsOrder.end();
+
+                                                for (auto it = outputsOrder.begin(); it != end;)
                                                 {
-                                                        Print("Failed to schedule product request to destination\n");
-                                                        return 1;
+                                                        const auto base = it;
+                                                        const auto t = *it;
+
+                                                        for (++it; it != end && *it == t; ++it)
+                                                                continue;
+
+                                                        const auto span = it - base;
+
+                                                        switch (t)
+                                                        {
+                                                                case 0:
+                                                                        reqId2 = dest.produce(outputs.data() + outputsIt, span);
+                                                                        outputsIt += span;
+                                                                        break;
+
+                                                                case 1:
+                                                                        reqId2 = dest.produce_with_base(outputsForBase.data() + outputsForBaseIt, span);
+                                                                        outputsForBaseIt += span;
+                                                                        break;
+                                                        }
+
+							if (!reqId2)
+							{
+								Print("Failed to produce to destination\n");
+								return 1;
+							}
                                                 }
                                         }
-
                                         reqId1 = 0;
                                 }
                         }
@@ -699,10 +791,9 @@ int main(int argc, char *argv[])
                                 require(it.clientReqId == reqId);
                                 Print(dotnotation_repr(it.watermarks.len), " partitions for '", topicPartition.first, "'\n");
 
-                                // http://www.tldp.org/HOWTO/Bash-Prompt-HOWTO/x361.html
-                                Print(ansifmt::bold, "Partition\r\033\[<10CFirst Available\r\033\[<30CLast Assigned", ansifmt::reset, "\n");
+                                Print(ansifmt::bold, "Partition", ansifmt::set_col(10), "First Available", ansifmt::set_col(30), "Last Assigned", ansifmt::reset, "\n");
                                 for (const auto wm : it.watermarks)
-                                        Print(ansifmt::bold, i++, ansifmt::reset, "\033\[<10C", wm->first, "\r\033[<30C", wm->second, "\n");
+                                        Print(ansifmt::bold, i++, ansifmt::reset, ansifmt::set_col(10), wm->first, ansifmt::set_col(30), wm->second, "\n");
                         }
                 }
 
@@ -752,6 +843,7 @@ int main(int argc, char *argv[])
 
                                 case 'h':
                                         Print("PRODUCE [options] [message1 message2...]\n");
+					Print("Produce messages to Tank\n");
                                         Print("Options include:\n");
                                         Print("-s number: The bundle size; how many messages to be grouped into a bundle before producing that to the broker. Default is 1, which means each new message is published as a single bundle\n");
                                         Print("-f file: The messages are read from `file`, which is expected to contain the mesasges in every new line. The `file` can be \"-\" for stdin. If this option is provided, the messages list is ignored\n");
@@ -1039,6 +1131,7 @@ int main(int argc, char *argv[])
 
                                 case 'h':
                                         Print("BENCHMARK [options] type [options]\n");
+					Print("Executes a benchmark on the selected broker/topic/partition\n");
                                         Print("Type can be:\n");
                                         Print("p2c:  Measures latency when producing from client to broker and consuming(tailing) the broker that message\n");
                                         Print("p2b:  Measures latency when producing from client to broker\n");
