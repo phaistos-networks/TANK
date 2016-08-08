@@ -2471,7 +2471,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         uint32_t creationTS;
                 };
 
-                // TODO: reuse roLogs and wideEntyRoLogIndices and the allocator
+                // TODO: reuse roLogs, wideEntyRoLogIndices, swapped and the allocator
                 Switch::vector<rosegment_ctx> roLogs;
                 std::set<uint64_t> wideEntyRoLogIndices;
 		simple_allocator allocator{1024};
