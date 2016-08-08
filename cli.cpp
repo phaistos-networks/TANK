@@ -423,6 +423,7 @@ int main(int argc, char *argv[])
         }
         else if (cmd.Eq(_S("mirror")))
         {
+		// See: https://eng.uber.com/umirrormaker/
                 TankClient dest;
                 uint32_t reqId1, reqId2;
                 // XXX: arbitrary defaults

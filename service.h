@@ -316,7 +316,7 @@ struct topic_partition_log
 
         lookup_res read_cur(const uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum);
 
-        lookup_res range_for(uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum);
+        lookup_res range_for(uint64_t absSeqNum, const uint32_t maxSize, uint64_t maxAbsSeqNum);
 
         append_res append_bundle(const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt, const uint64_t, const uint64_t);
 
@@ -328,7 +328,7 @@ struct topic_partition_log
 
         void consider_ro_segments();
 
-	void compact();
+	void compact(const char *);
 };
 
 struct connection;

@@ -8,7 +8,7 @@
 #pragma once
 #include <switch.h>
 
-#define TANK_VERSION (0 * 100 + 36)
+#define TANK_VERSION (0 * 100 + 38)
 
 // All kind of if (trace) SLog() calls here, for checks and for debugging. Will be stripped out later
 
@@ -21,7 +21,8 @@ namespace TankFlags
         enum class BundleMsgFlags : uint8_t
         {
                 HaveKey = 1,
-                UseLastSpecifiedTS = 2
+                UseLastSpecifiedTS = 2,
+		SeqNumPrevPlusOne = 4
         };
 }
 

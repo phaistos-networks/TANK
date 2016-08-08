@@ -320,7 +320,11 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
 				if (trace)
 					SLog("message ", i, " / ", it->msgsCnt, "\n");
 
-
+				if (baseSeqNum && i && i != it->msgsCnt - 1)
+				{
+					// messages sequence numbers are monotiically increasing in this sparse bundle
+					flags|=uint8_t(TankFlags::BundleMsgFlags::SeqNumPrevPlusOne);
+				}
 
                                 if (m.ts == lastTS && i)
                                 {
@@ -342,6 +346,8 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
 						SLog("Specifying TS\n");
                                 }
 
+
+#if 0 	// no longer needed, we use the TankFlags::BundleMsgFlags::SeqNumPrevPlusOne
 				if (baseSeqNum)
                                 {
                                         // bundle sparse bit is set
@@ -355,6 +361,7 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
 						b.SerializeVarUInt32(0);
                                         }
                                 }
+#endif
 				
 				if (encodeTS)
 				{
@@ -1680,7 +1687,12 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
 					if (sparseBundleBitSet)
                                         {
-						if (msgIdx == 0)
+						if (msgFlags & uint8_t(TankFlags::BundleMsgFlags::SeqNumPrevPlusOne))
+						{
+							// prev + 1
+							// no need to advance logBaseSeqNum, was advanced in for()
+						}
+						else if (msgIdx == 0)
 						{
 							logBaseSeqNum = firstMsgSeqNum;
 						}

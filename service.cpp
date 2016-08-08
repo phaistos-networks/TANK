@@ -30,6 +30,21 @@ static constexpr bool trace{false};
 static Switch::mutex mboxLock;
 static Switch::vector<std::pair<int, int>> mbox;
 
+static int Rename(const char *oldpath, const char *newpath)
+{
+        if (trace)
+                SLog("rename(", oldpath, ", ", newpath, ")\n");
+
+        return rename(oldpath, newpath);
+}
+
+static int Unlink(const char *pathname)
+{
+        if (trace)
+                SLog("unlink(", pathname, ")\n");
+        return unlink(pathname);
+}
+
 ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, const strwlen32_t base, const uint32_t creationTS, const bool wideEntries)
     : baseSeqNum{absSeqNum}, lastAvailSeqNum{lastAbsSeqNum}, createdTS{creationTS}, haveWideEntries{wideEntries}
 {
@@ -137,6 +152,13 @@ std::pair<uint32_t, uint32_t> ro_segment::snapDown(const uint64_t absSeqNum) con
 	}
 		
         const auto relSeqNum = uint32_t(absSeqNum - baseSeqNum);
+
+	if (relSeqNum == baseSeqNum)
+	{
+		// optimization
+		return {relSeqNum, 0};
+	}
+
         const auto *const all = reinterpret_cast<const index_record *>(index.data);
         const auto *const end = all + index.fileSize / sizeof(index_record);
         const auto it = std::upper_bound_or_match(all, end, relSeqNum, [](const auto &a, const auto num) {
@@ -480,15 +502,7 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
         return res;
 }
 
-// Will remove duplicate msgs from ro segments
-// A message with key K and offset O is obsolete, if there exists a message with key K and offset O2, such that O < O2
-// 
-// See Kafka's log/LogCleaner.scala - cleanInto() is where this logic's implemented
-// See also log/Log.scala#replaceSegments()
-//
-// This is a first implementation; we can and we will do better later
-// TODO: throttling tunables
-void topic_partition_log::compact()
+void topic_partition_log::compact(const char *const basePartitionPath)
 {
         struct msg
         {
@@ -498,7 +512,8 @@ void topic_partition_log::compact()
                 strwlen32_t content;
         };
 
-        static constexpr bool trace{true};
+
+        static constexpr bool trace{false};
         auto prevSegments = roSegments;
         uint64_t firstMsgSeqNum, lastMsgSeqNum, msgSeqNum;
         range_base<const uint8_t *, size_t> msgSetContent;
@@ -512,7 +527,6 @@ void topic_partition_log::compact()
 
         Drequire(roSegments->size());
 
-        const auto firstSegmentTS = roSegments->front()->createdTS;
         const auto compact = [&anyDropped](Switch::vector<msg> &msgs) {
 
                 std::sort(msgs.begin(), msgs.end(), [](const auto &a, const auto &b) {
@@ -574,7 +588,7 @@ void topic_partition_log::compact()
         };
 
         Switch::vector<msg> msgs;
-	std::vector<std::pair<void *, size_t>> vmas;
+        std::vector<std::pair<void *, size_t>> vmas;
 
         Defer(
             {
@@ -582,11 +596,11 @@ void topic_partition_log::compact()
                     {
                             auto it = vmas.back();
 
+			    madvise(it.first, it.second, MADV_DONTNEED);
                             munmap(it.first, it.second);
                             vmas.pop_back();
                     }
             });
-
 
         if (trace)
                 SLog(roSegments->size(), " segments\n");
@@ -598,14 +612,13 @@ void topic_partition_log::compact()
                 const auto baseSeqNum = it->baseSeqNum;
                 auto *const fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, fd, 0);
 
-		if (fileData == MAP_FAILED)
-			throw Switch::system_error("mmap() failed:", strerror(errno));
+                if (fileData == MAP_FAILED)
+                        throw Switch::system_error("mmap() failed:", strerror(errno));
 
-		vmas.push_back({fileData, fileSize});
+                vmas.push_back({fileData, fileSize});
 
                 if (trace)
                         SLog("baseSeqNum for segment ", baseSeqNum, "\n");
-
 
                 msgSeqNum = baseSeqNum;
                 for (const auto *p = static_cast<const uint8_t *>(fileData), *const e = p + fileSize; p != e;)
@@ -643,7 +656,7 @@ void topic_partition_log::compact()
 
                         if (codec)
                         {
-                                if (!cur || cur->Reserved() > 10 * 1024 * 1024)	 // XXX: arbitrary
+                                if (!cur || cur->Reserved() > 64 * 1024 * 1024) // XXX: arbitrary
                                 {
                                         const auto n = msgs.size();
 
@@ -690,9 +703,15 @@ void topic_partition_log::compact()
                         uint32_t msgIdx{0};
                         const auto *const ptrBase = cur ? cur->data() : nullptr;
 
+                        if (trace)
+                                SLog("Parsing Message Set\n");
+
                         for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.len; p != e; ++msgIdx, ++msgSeqNum)
                         {
                                 const auto flags = *p++;
+
+                                if (trace)
+                                        SLog("Message ", msgIdx, ", flags ", flags, "\n");
 
                                 if (sparseBundleBitSet)
                                 {
@@ -700,12 +719,24 @@ void topic_partition_log::compact()
                                                 msgSeqNum = firstMsgSeqNum;
                                         else if (msgIdx == msgsSetSize - 1)
                                                 msgSeqNum = lastMsgSeqNum;
+                                        else if (flags & uint8_t(TankFlags::BundleMsgFlags::SeqNumPrevPlusOne))
+                                        {
+                                                // incremented in for()
+                                                if (trace)
+                                                        SLog("SeqNumPrevPlusOne set\n");
+                                        }
                                         else
                                         {
                                                 // we encode delta from last - 1, but we already ++msgSeqNum in for()
                                                 msgSeqNum += Compression::UnpackUInt32(p);
+
+                                                if (trace)
+                                                        SLog("Adjusting delta\n");
                                         }
                                 }
+
+                                if (trace)
+                                        SLog("SeqNum = ", msgSeqNum, "\n");
 
                                 if (!(flags & uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS)))
                                 {
@@ -731,7 +762,7 @@ void topic_partition_log::compact()
 
                                 const auto msgLen = Compression::UnpackUInt32(p);
 
-				if (msgLen || !key)
+                                if (msgLen || !key)
                                 {
                                         msgValue.Set((char *)p, msgLen);
                                         p += msgLen;
@@ -745,10 +776,10 @@ void topic_partition_log::compact()
                                         msgs.push_back({key, msgSeqNum, msgTs, msgValue});
                                 }
                                 else
-				{
+                                {
                                         // Drop deleted messages(messages with a key and no content)
                                         anyDropped = true;
-				}
+                                }
                         }
                 }
         }
@@ -777,13 +808,18 @@ void topic_partition_log::compact()
                 }
         }
 
-        if (!msgs.size())
+
+
+
+
+        if (!compact(msgs))
         {
                 if (trace)
-                        SLog("No messages remained after compaction\n");
+                        SLog("No need for compaction\n");
+
+                return;
         }
 
-        compact(msgs);
 
         if (trace)
         {
@@ -791,18 +827,25 @@ void topic_partition_log::compact()
                         Print(it.seqNum, " [", it.key, "] [", it.content, "]\n");
         }
 
+
+
+
+
+
+	// go through all segments, rebuild each of them by keeping only the messages that existed in that segment (we can just use a range check for first available, last assigned)
+	// but if after compaction a segment's too small (in terms of file size), then include into it messages from successive segments, and in that case
+	// use the last segment's timestamp that is to be encoded in the filename
+        static constexpr size_t sinceLastUpdateBytesThreshold{10000}, sinceLastUpdateMsgsCntThreshold{128}, maxBundleMsgsSetSize{5}, maxBundleMsgsSetSizeBytes{65536}; // XXX: arbitrary
+	static constexpr size_t minSegmentLogFileSize{64 *1024}; // XXX: arbitrary
+        auto newSegments = std::make_unique<Switch::vector<ro_segment *>>();
+        int fd;
+        char logPath[PATH_MAX];
         const auto n = msgs.size();
         const auto *const all = msgs.data();
-        const auto baseSeqNum{all[0].seqNum}; // for the new segment
-        uint8_t bundleFlags;
-        IOBuffer out, cbuf;
+        IOBuffer out, cbuf, index;
         struct iovec iov[1024];
         uint32_t iovLen{0};
-        Switch::vector<std::pair<uint64_t, uint32_t>> index;
-        size_t sinceLastUpdateBytes{UINT32_MAX}, sinceLastUpdateMsgsCnt{UINT32_MAX};
-        size_t outFileSize{0};
-        int fd = open(Buffer::build("/tmp/tankREPO/msgs/0/", baseSeqNum, "-", all[n - 1].seqNum, "_", firstSegmentTS, ".ilog").data(), O_WRONLY | O_CREAT | O_LARGEFILE | O_TRUNC, 0775);
-        const auto flush = [&iovLen, &iov, &out, &cbuf, fd]() {
+        const auto flush = [&iovLen, &iov, &out, &cbuf, &fd]() {
                 for (uint32_t i{0}; i != iovLen; ++i)
                 {
                         auto &it = iov[i];
@@ -833,183 +876,439 @@ void topic_partition_log::compact()
                 iovLen = 0;
         };
 
-        require(fd != -1);
 
-        for (uint32_t i{0}; i != n;)
+
+
+        try
         {
-                // new bundle
-                const auto base{i};
-                const auto upto = Min<size_t>(n, i + 5); // XXX: arbitrary
-                bool asSparse{false};
-                size_t sum{0};
-                auto expected = all[i].seqNum;
+                const char *destPartitionPath;
+                uint32_t curSegmentIdx{0};
 
-                do
+#if 0
+                if (getenv("FOOOOO"))
+                        destPartitionPath = "/tmp/foo/0/";
+                else
+		{
+                        destPartitionPath = "/tmp/tankREPO/msgs/0/";
+		}
+#else
+                destPartitionPath = basePartitionPath;
+#endif
+
+                // Process all collected messages, pack into segments
+                for (uint32_t i{0}; i != n;)
                 {
-                        const auto n = all[i].seqNum;
-
-                        if (n != expected)
-                                asSparse = true;
+                        uint8_t bundleFlags;
+                        size_t outFileSize{0};
+                        size_t logPathLen;
+                        size_t sinceLastUpdateBytes{UINT32_MAX}, sinceLastUpdateMsgsCnt{UINT32_MAX};
+                        auto curSegment = roSegments->at(curSegmentIdx);
+                        const auto baseSeqNum{all[i].seqNum};
+                        auto curSegmentLastAvailSeqNum = curSegment->lastAvailSeqNum;
+			index_record indexLastRecorded;
 
                         if (trace)
-                                SLog("consider ", i, " ", all[i].seqNum, "\n");
+                                SLog(ansifmt::bold, ansifmt::color_blue, "Now processing segment ", curSegmentIdx, "/", roSegments->size(), " (", baseSeqNum, ", ", curSegment->lastAvailSeqNum, ")", ansifmt::reset, "\n");
 
-                        expected = n + 1;
-                        sum += all[i].key.len + all[i].content.len + 8;
-                } while (++i != upto && sum < 65536); // XXX: arbitrary
+                        // new segment
+                        index.clear();
+                        out.clear();
+                        cbuf.clear();
+                        iovLen = 0;
 
-                if (trace)
-                        SLog("expected = ", expected, ", asSparse = ", asSparse, "\n");
+                        logPathLen = Snprint(logPath, sizeof(logPath), destPartitionPath, baseSeqNum, "-", 0, "_", 0, ".ilog.cleaned");
+                        fd = open(logPath, O_RDWR | O_CREAT | O_LARGEFILE | O_TRUNC, 0775);
+                        require(fd != -1);
 
-                if (sinceLastUpdateBytes > 1000 || sinceLastUpdateMsgsCnt > 128) // XXX: arbitrary
-                {
-                        // TODO: if (all[base].seqNum - baseSeqNum > threshold, need to
-                        // switch to wide-entries index
-                        index.push_back({all[base].seqNum - baseSeqNum, outFileSize});
-                        sinceLastUpdateBytes = 0;
-                        sinceLastUpdateMsgsCnt = 0;
-                }
+                        Defer({
+                                if (fd != -1)
+                                        close(fd);
+                        });
 
-                const uint32_t msgSetSize = i - base;
-                const auto bundleHeaderFlagsOffset = out.length();
-                const auto bundleLengthIOVIdx = iovLen++;
-
-                out.reserve(sum + 1024);
-                if (asSparse)
-                {
-                        bundleFlags = (1u << 6);
-
-                        if (msgSetSize < 16)
+                        for (;;)
                         {
-                                bundleFlags |= (msgSetSize << 2);
-                                out.Serialize(bundleFlags);
+                                // new bundle
+                                const auto base{i};
+                                const auto upto = Min<size_t>(n, i + maxBundleMsgsSetSize);
+                                bool asSparse{false};
+                                size_t sum{0};
+                                auto expected = all[i].seqNum;
+
+                                do
+                                {
+                                        const auto n = all[i].seqNum;
+
+                                        if (n != expected)
+                                                asSparse = true;
+
+                                        if (trace)
+                                                SLog("consider ", i, " ", all[i].seqNum, "\n");
+
+                                        expected = n + 1;
+                                        sum += all[i].key.len + all[i].content.len + 8;
+                                } while (++i != upto && sum < maxBundleMsgsSetSizeBytes && all[i].seqNum <= curSegmentLastAvailSeqNum);
+
+                                if (trace)
+                                        SLog("expected = ", expected, ", asSparse = ", asSparse, "\n");
+
+                                if (sinceLastUpdateBytes > sinceLastUpdateBytesThreshold || sinceLastUpdateMsgsCnt > sinceLastUpdateMsgsCntThreshold)
+                                {
+                                        // TODO: if (all[base].seqNum - baseSeqNum > threshold, need to
+                                        // switch to wide-entries index
+                                        indexLastRecorded.relSeqNum = all[base].seqNum - baseSeqNum;
+					indexLastRecorded.absPhysical = outFileSize;
+
+                                        index.Serialize<uint32_t>(indexLastRecorded.relSeqNum);
+                                        index.Serialize<uint32_t>(indexLastRecorded.absPhysical);
+                                        sinceLastUpdateBytes = 0;
+                                        sinceLastUpdateMsgsCnt = 0;
+                                }
+
+                                const uint32_t msgSetSize = i - base;
+                                const auto bundleHeaderFlagsOffset = out.length();
+                                const auto bundleLengthIOVIdx = iovLen++;
+
+                                out.reserve(sum + 1024);
+                                if (asSparse)
+                                {
+                                        bundleFlags = (1u << 6);
+
+                                        if (msgSetSize < 16)
+                                        {
+                                                bundleFlags |= (msgSetSize << 2);
+                                                out.Serialize(bundleFlags);
+                                        }
+                                        else
+                                        {
+                                                out.Serialize(bundleFlags);
+                                                out.SerializeVarUInt32(msgSetSize);
+                                        }
+
+                                        const auto first = all[base].seqNum, last = all[i - 1].seqNum;
+
+                                        if (trace)
+                                                SLog("Sparse bundle first = ", first, ", last = ", last, ", set size = ", msgSetSize, "\n");
+
+                                        out.Serialize<uint64_t>(first);
+                                        if (msgSetSize != 1)
+                                                out.SerializeVarUInt32(last - first - 1);
+                                }
+                                else
+                                {
+                                        bundleFlags = 0;
+
+                                        if (msgSetSize < 16)
+                                        {
+                                                bundleFlags |= (msgSetSize << 2);
+                                                out.Serialize(bundleFlags);
+                                        }
+                                        else
+                                        {
+                                                out.Serialize(bundleFlags);
+                                                out.SerializeVarUInt32(msgSetSize);
+                                        }
+                                }
+
+                                const auto savedOutFileSize = outFileSize;
+                                const auto bundleHeaderLength = out.length() - bundleHeaderFlagsOffset;
+                                uint64_t lastTS{0};
+                                const auto msgSetOffset = out.length();
+
+                                sinceLastUpdateMsgsCnt += msgSetSize;
+                                outFileSize += bundleHeaderLength;
+
+                                iov[iovLen++] = {(void *)uintptr_t(bundleHeaderFlagsOffset | (1u << 31)), bundleHeaderLength};
+
+                                if (trace)
+                                        SLog("Encoding Messages Set asSparse = ", asSparse, "\n");
+
+                                for (uint32_t k{base}; k != i; ++k)
+                                {
+                                        const auto &m = all[k];
+                                        uint8_t msgFlags = m.key ? uint8_t(TankFlags::BundleMsgFlags::HaveKey) : uint8_t(0);
+                                        bool encodeTS, encodeSparseDelta;
+
+                                        if (asSparse && k != base && k != i - 1)
+                                        {
+                                                if (m.seqNum == all[k - 1].seqNum + 1)
+                                                {
+                                                        msgFlags |= uint8_t(TankFlags::BundleMsgFlags::SeqNumPrevPlusOne);
+                                                        encodeSparseDelta = false;
+                                                }
+                                                else
+                                                        encodeSparseDelta = true;
+                                        }
+                                        else
+                                        {
+                                                encodeSparseDelta = false;
+                                        }
+
+					if (trace)
+                                                SLog("message ", k - base, " ", m.seqNum, ", asSparse = ", asSparse, ", encodeSparseDelta = ", encodeSparseDelta, "\n");
+
+                                        if (m.ts == lastTS && k != base)
+                                        {
+                                                msgFlags |= uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS);
+                                                encodeTS = false;
+                                        }
+                                        else
+                                        {
+                                                lastTS = m.ts;
+                                                encodeTS = true;
+                                        }
+
+                                        out.Serialize(msgFlags);
+
+                                        if (encodeSparseDelta)
+                                        {
+                                                out.SerializeVarUInt32(m.seqNum - all[k - 1].seqNum - 1);
+                                                if (trace)
+                                                        SLog("Serializing delta ", m.seqNum - all[k - 1].seqNum - 1, "\n");
+                                        }
+
+                                        if (encodeTS)
+                                        {
+                                                out.Serialize<uint64_t>(m.ts);
+                                        }
+
+                                        if (m.key)
+                                        {
+                                                out.Serialize(m.key.len);
+                                                out.Serialize(m.key.p, m.key.len);
+                                        }
+
+                                        out.SerializeVarUInt32(m.content.len);
+                                        out.Serialize(m.content.p, m.content.len);
+                                }
+
+                                const auto msgSetLen = out.length() - msgSetOffset;
+
+                                if (trace)
+                                        SLog("msgSetLen = ", msgSetLen, ", bundleFlags = ", bundleFlags, "\n");
+
+                                if (msgSetLen > 1024) // XXX: arbitrary
+                                {
+                                        const auto offset = cbuf.length();
+
+                                        if (!Compression::Compress(Compression::Algo::SNAPPY, out.At(msgSetOffset), msgSetLen, &cbuf))
+                                                throw Switch::system_error("Compression failed");
+
+                                        const auto span = cbuf.length() - offset;
+
+                                        if (span >= msgSetLen)
+                                        {
+                                                // not worth it
+                                                if (trace)
+                                                        SLog("Not worth compressing bundle msgs set\n");
+
+                                                cbuf.SetLength(offset);
+                                                goto l10;
+                                        }
+                                        else
+                                        {
+                                                iov[iovLen++] = {(void *)uintptr_t(offset | (1u << 30)), span};
+                                                out.SetLength(msgSetOffset);
+
+                                                *(uint8_t *)out.At(bundleHeaderFlagsOffset) |= 1; // set codec
+                                                outFileSize += span;
+
+                                                if (trace)
+                                                        SLog(">> Compressed ", msgSetLen, " ", span, "\n");
+                                        }
+                                }
+                                else
+                                {
+                                l10:
+                                        iov[iovLen++] = {(void *)uintptr_t(msgSetOffset | (1u << 31)), msgSetLen};
+                                        outFileSize += msgSetLen;
+                                }
+
+                                const auto bundleLength = outFileSize - savedOutFileSize;
+                                const auto _l = out.length();
+
+                                out.SerializeVarUInt32(bundleLength);
+                                iov[bundleLengthIOVIdx] = {(void *)uintptr_t(_l | (1u << 31)), out.length() - _l};
+
+                                sinceLastUpdateBytes += bundleLength;
+                                if (iovLen > sizeof_array(iov) - 16)
+                                        flush();
+
+                                if (i == n)
+                                {
+                                        // done and done
+                                        break;
+                                }
+                                else if (all[i].seqNum > curSegmentLastAvailSeqNum)
+                                {
+                                        if (trace)
+                                                SLog("Consumed current segment ", curSegmentIdx, "\n");
+
+                                        ++curSegmentIdx;
+                                        if (outFileSize > minSegmentLogFileSize)
+                                        {
+                                                // we got enough messages for this segment
+                                                break;
+                                        }
+                                        else
+                                        {
+                                                // we still haven't had enough messages stored in the currently produced segment, so keep
+                                                // consuming from successive segments
+                                        }
+                                }
                         }
-                        else
-                        {
-                                out.Serialize(bundleFlags);
-                                out.SerializeVarUInt32(msgSetSize);
-                        }
 
-                        const auto first = all[base].seqNum, last = all[i - 1].seqNum - first;
+                        if (iovLen)
+                                flush();
 
-                        out.Serialize<uint64_t>(first);
-                        if (msgSetSize != 1)
-                                out.SerializeVarUInt32(last - first - 1);
-                }
-                else
-                {
-                        bundleFlags = 0;
+                        auto logFd = fd;
+                        const auto lastAvailSeqNum = all[i - 1].seqNum;
 
-                        if (msgSetSize < 16)
-                        {
-                                bundleFlags |= (msgSetSize << 2);
-                                out.Serialize(bundleFlags);
-                        }
-                        else
-                        {
-                                out.Serialize(bundleFlags);
-                                out.SerializeVarUInt32(msgSetSize);
-                        }
-                }
+                        close(fd);
+                        fd = open(Buffer::build(destPartitionPath, "/", baseSeqNum, ".index.cleaned").data(), O_RDWR | O_CREAT | O_LARGEFILE | O_TRUNC, 0775);
 
-                const auto bundleHeaderLength = out.length() - bundleHeaderFlagsOffset;
-                uint64_t lastTS{0};
-                const auto msgSetOffset = out.length();
+                        if (fd == -1)
+                                throw Switch::system_error("Failed to access new segment's index:", strerror(errno));
 
-                sinceLastUpdateMsgsCnt += msgSetSize;
-                outFileSize += bundleHeaderLength;
+                        if (write(fd, index.data(), index.length()) != index.length())
+                                throw Switch::system_error("Failed to create new segment's index:", strerror(errno));
 
-                iov[iovLen++] = {(void *)uintptr_t(bundleHeaderFlagsOffset | (1u << 31)), bundleHeaderLength};
+                        // We could have instead used (firstSegmentConsumedForThisNewSegment->baseSeqNum, curSegmentLastAvailSeqNum)
+                        // instead of (baseSeqNum, all[i - 1].seqNum), which would have retained the filename for some segments cleaned up onto themselves
+                        // and would reduce need to scan forward for a ro_segment if the query seqNum > segment.lastSeqNum and < nextSegment.baseSeqNum
+                        // but we 'd rather not do this
+                        if (Rename(logPath, Buffer::build(destPartitionPath, baseSeqNum, "-", lastAvailSeqNum, "_", curSegment->createdTS, ".ilog.cleaned")) == -1)
+                                throw Switch::system_error("Failed to rename segment:", strerror(errno));
 
-                for (uint32_t k{base}; k != i; ++k)
-                {
-                        const auto &m = all[k];
-                        uint8_t msgFlags = m.key ? uint8_t(TankFlags::BundleMsgFlags::HaveKey) : uint8_t(0);
-                        bool encodeTS;
+                        auto newSegment = std::make_unique<ro_segment>(baseSeqNum, lastAvailSeqNum, curSegment->createdTS);
 
-                        if (m.ts == lastTS && k != base)
-                        {
-                                msgFlags |= uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS);
-                                out.Serialize(msgFlags);
-                                encodeTS = false;
-                        }
-                        else
-                        {
-                                lastTS = m.ts;
-                                out.Serialize(msgFlags);
-                                encodeTS = true;
-                        }
+                        newSegment->fdh.reset(new fd_handle(logFd));
+                        newSegment->fileSize = outFileSize;
+                        newSegment->index.data = reinterpret_cast<const uint8_t *>(mmap(nullptr, index.length(), PROT_READ, MAP_SHARED, fd, 0));
+                        newSegment->index.fileSize = index.length();
+                        newSegment->index.lastRecorded = indexLastRecorded;
 
-                        if (asSparse)
-                        {
-                                if (k != base && k != i - 1)
-                                        out.SerializeVarUInt32(m.seqNum - all[k - 1].seqNum - 1);
-                        }
+                        close(fd);
+                        fd = -1;
 
-                        if (encodeTS)
-                        {
-                                out.Serialize<uint64_t>(m.ts);
-                        }
+                        if (newSegment->index.data == MAP_FAILED)
+                                throw Switch::system_error("mmap() failed:", strerror(errno));
 
-                        if (m.key)
-                        {
-                                out.Serialize(m.key.len);
-                                out.Serialize(m.key.p, m.key.len);
-                        }
-
-                        out.SerializeVarUInt32(m.content.len);
-                        out.Serialize(m.content.p, m.content.len);
-                }
-
-                const auto msgSetLen = out.length() - msgSetOffset;
-
-                if (trace)
-                        SLog("msgSetLen = ", msgSetLen, ", bundleFlags = ", bundleFlags, "\n");
-
-                if (msgSetLen > 70000) // XXX: arbitrary
-                {
-                        const auto offset = cbuf.length();
-
-                        if (!Compression::Compress(Compression::Algo::SNAPPY, out.At(msgSetOffset), msgSetLen, &cbuf))
-                                throw Switch::system_error("Compression failed");
-
-                        const auto span = cbuf.length() - offset;
-
-                        iov[iovLen++] = {(void *)uintptr_t(offset | (1u << 30)), span};
-                        out.SetLength(msgSetOffset);
-
-                        *(uint8_t *)out.At(bundleHeaderFlagsOffset) |= 1; // set codec
-                        outFileSize += span;
+                        newSegments->push_back(newSegment.release());
 
                         if (trace)
-                                SLog(">> Compressed ", msgSetLen, " ", span, "\n");
+                                SLog("Out segment, output ", outFileSize, "(", size_repr(outFileSize), ") ", dotnotation_repr(index.size()), " index entries\n");
                 }
-                else
+
+                if (trace)
+                        SLog("Done scanning RO segments\n");
+
+
+
+
+                // We have created a new set of segments, so we need to replace their .cleaned extension with a .swap extension
+		// During startup, if we find any *.cleaned files, then we 'll delete them and will also remove any .swap files left around
+                for (auto it : *newSegments)
                 {
-                        iov[iovLen++] = {(void *)uintptr_t(msgSetOffset | (1u << 31)), msgSetLen};
-                        outFileSize += msgSetLen;
+                        if (Rename(Buffer::build(destPartitionPath, it->baseSeqNum, "-", it->lastAvailSeqNum, "_", it->createdTS, ".ilog.cleaned").data(),
+                                   Buffer::build(destPartitionPath, it->baseSeqNum, "-", it->lastAvailSeqNum, "_", it->createdTS, ".ilog.swap").data()) == -1)
+                        {
+                                throw Switch::system_error("Failed to rename files:", strerror(errno));
+                        }
+
+                        if (Rename(Buffer::build(destPartitionPath, "/", it->baseSeqNum, ".index.cleaned").data(),
+                                   Buffer::build(destPartitionPath, "/", it->baseSeqNum, ".index.swap").data()) == -1)
+                        {
+                                throw Switch::system_error("Failed to rename files:", strerror(errno));
+                        }
                 }
 
-                const auto bundleLength = outFileSize - bundleHeaderFlagsOffset;
-                const auto _l = out.length();
 
-                out.SerializeVarUInt32(bundleLength);
-                iov[bundleLengthIOVIdx] = {(void *)uintptr_t(_l | (1u << 31)), out.length() - _l};
+		// Rename input segments by appending the .log extension to both log files and index files
+		for (auto it : *roSegments)
+                {
+                        if (const auto createdTS = it->createdTS)
+                        {
+                                if (Rename(Buffer::build(basePartitionPath, "/", it->baseSeqNum, "-", it->lastAvailSeqNum, "_", createdTS, ".ilog").data(),
+                                           Buffer::build(basePartitionPath, "/", it->baseSeqNum, "-", it->lastAvailSeqNum, "_", createdTS, ".ilog.old").data()) == -1)
+                                {
+                                        throw Switch::system_error("Failed to rename files:", strerror(errno));
+                                }
+                        }
+                        else
+                        {
+                                if (Rename(Buffer::build(basePartitionPath, "/", it->baseSeqNum, "-", it->lastAvailSeqNum, ".ilog").data(),
+                                           Buffer::build(basePartitionPath, "/", it->baseSeqNum, "-", it->lastAvailSeqNum, ".ilog.old").data()) == -1)
+                                {
+                                        throw Switch::system_error("Failed to rename files:", strerror(errno));
+                                }
+                        }
 
-                sinceLastUpdateBytes += bundleLength;
-                if (iovLen > sizeof_array(iov) - 16)
-                        flush();
+                        if (Rename(Buffer::build(basePartitionPath, "/", it->baseSeqNum, ".index").data(),
+                                   Buffer::build(basePartitionPath, "/", it->baseSeqNum, ".index.old").data()) == -1)
+                        {
+                                throw Switch::system_error("Failed to rename files:", strerror(errno));
+                        }
+                }
+
+		// Strip .swap extension from the set of new segments files
+                for (auto it : *newSegments)
+                {
+                        if (Rename(Buffer::build(destPartitionPath, it->baseSeqNum, "-", it->lastAvailSeqNum, "_", it->createdTS, ".ilog.swap").data(),
+                                   Buffer::build(destPartitionPath, it->baseSeqNum, "-", it->lastAvailSeqNum, "_", it->createdTS, ".ilog").data()) == -1)
+                        {
+                                throw Switch::system_error("Failed to rename files:", strerror(errno));
+                        }
+
+                        if (Rename(Buffer::build(destPartitionPath, "/", it->baseSeqNum, ".index.swap").data(),
+                                   Buffer::build(destPartitionPath, "/", it->baseSeqNum, ".index").data()) == -1)
+                        {
+                                throw Switch::system_error("Failed to rename files:", strerror(errno));
+                        }
+                }
+
+		// Unlink all input segment files
+                for (auto it : *roSegments)
+                {
+                        char path[PATH_MAX];
+                        size_t pathLen;
+
+                        if (const auto createdTS = it->createdTS)
+                                pathLen = Snprint(path, sizeof(path), basePartitionPath, "/", it->baseSeqNum, "-", it->lastAvailSeqNum, "_", createdTS, ".ilog.old");
+                        else
+                                pathLen = Snprint(path, sizeof(path), basePartitionPath, "/", it->baseSeqNum, "-", it->lastAvailSeqNum, ".ilog.old");
+
+                        if (Unlink(path) == -1)
+                                throw Switch::system_error("Failed to remove ", strwlen32_t(path, pathLen), ": ", strerror(errno));
+
+			Snprint(path, sizeof(path), basePartitionPath, "/", it->baseSeqNum, ".index.old");
+			if (Unlink(path) == -1)
+				throw Switch::system_error("Failed to unlink file:", strerror(errno));
+                }
+
+                // Replace segments
+		// XXX: we probably want to ship newSegments in the main threads so that we 'll do that there
+		// though we could definitely do it here
+		for (auto it : *roSegments.get())
+			delete it;
+
+                roSegments.reset(newSegments.release());
+	}
+        catch (...)
+        {
+		if (newSegments)
+		{
+			while (newSegments->size())
+			{
+				delete newSegments->back();
+				newSegments->pop_back();
+			}
+		}
+                throw;
         }
-
-        if (iovLen)
-                flush();
-
-        if (trace)
-                SLog("Done, output ", outFileSize, "(", size_repr(outFileSize), ") ", dotnotation_repr(index.size()), " index entries\n");
 }
 
 // Aligns to indices boundaries
-lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum)
+lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t maxSize, uint64_t maxAbsSeqNum)
 {
         if (trace)
                 SLog("Read for absSeqNum = ", absSeqNum, ", lastAssignedSeqNum = ", lastAssignedSeqNum, ", firstAvailableSeqNum = ", firstAvailableSeqNum, "\n");
@@ -1088,25 +1387,39 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
 
         auto prevSegments = roSegments;
 
-        // TODO: https://github.com/phaistos-networks/TANK/issues/2
         const auto end = prevSegments->end();
-        const auto it = std::upper_bound_or_match(prevSegments->begin(), end, absSeqNum, [](const auto s, const auto absSeqNum) {
+        auto it = std::upper_bound_or_match(prevSegments->begin(), end, absSeqNum, [](const auto s, const auto absSeqNum) {
                 return TrivialCmp(absSeqNum, s->baseSeqNum);
         });
 
         if (it != end)
         {
+		// Solves:  https://github.com/phaistos-networks/TANK/issues/2
+		// for e.g (1,26), (28, 50)
+		// when you request 27 which may no longer exist because of compaction/cleanup, we need
+		// to properly advance to the _next_ segment, and adjust absSeqNum
+		// accordingly
+		// (TODO: we should probably come up with a binary search alternative to this linear search scan)
+		while (absSeqNum > (*it)->lastAvailSeqNum && ++it != end)
+		{
+			if (trace)
+				SLog("Adjusting ", absSeqNum, " to ", (*it)->baseSeqNum, "\n");
+
+			absSeqNum = (*it)->baseSeqNum;
+		}
+
                 const auto f = *it;
                 const auto res = f->translateDown(absSeqNum, UINT32_MAX);
                 uint32_t offsetCeil;
 
+
                 if (trace)
                 {
                         SLog("Found in RO segment (", f->baseSeqNum, ", ", f->lastAvailSeqNum, ")\n");
-
                         for (const auto &it : *prevSegments)
                                 SLog(">> (", it->baseSeqNum, ", ", it->lastAvailSeqNum, ")\n");
                 }
+
 
                 if (maxAbsSeqNum != UINT64_MAX)
                 {
@@ -1174,14 +1487,14 @@ void topic_partition_log::consider_ro_segments()
                         SLog(ansifmt::bold, ansifmt::color_red, "Removing ", segment->baseSeqNum, ansifmt::reset, "\n");
 
                 basePath.append("/", segment->baseSeqNum, "-", segment->lastAvailSeqNum, "_", segment->createdTS, ".ilog");
-                if (unlink(basePath.data()) == -1)
+                if (Unlink(basePath.data()) == -1)
                         Print("Failed to unlink ", basePath, ": ", strerror(errno), "\n");
                 else if (trace)
                         SLog("Removed ", basePath, "\n");
 
                 basePath.SetLength(basePathLen);
                 basePath.append("/", segment->baseSeqNum, ".index");
-                if (unlink(basePath.data()) == -1)
+                if (Unlink(basePath.data()) == -1)
                         Print("Failed to unlink ", basePath, ": ", strerror(errno), "\n");
                 else if (trace)
                         SLog("Removed ", basePath, "\n");
@@ -1275,11 +1588,22 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 
 
 	if (lastMsgSeqNum)
+	{
+		// Sparse bundle; last message seqNum encoded in the bundle header
 		lastAssignedSeqNum = lastMsgSeqNum;
+	}
 	else if (firstMsgSeqNum)
-	        lastAssignedSeqNum = firstMsgSeqNum + bundleMsgsCnt - 1;
+	{
+                // either sparse bundle(first message encoded in the bundle header), or bundle in
+                // a TankAPIMsgType::ProduceWithBaseSeqNum request, where the bundle is encoded in the partition header
+                lastAssignedSeqNum = firstMsgSeqNum + bundleMsgsCnt - 1;
+	}
 	else
+	{
 	        lastAssignedSeqNum += bundleMsgsCnt;
+	}
+
+
 
 	if (trace)
 		SLog("firstMsgSeqNum(", firstMsgSeqNum, "), lastMsgSeqNum(", lastMsgSeqNum, "), bundleMsgsCnt(", bundleMsgsCnt, ") => ", lastAssignedSeqNum, "\n");
@@ -1314,16 +1638,16 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                         // support sparse sequence numbers space
                         if (cur.nameEncodesTS)
                         {
-                                if (rename(Buffer::build(basePath, "/", cur.baseSeqNum, "_", cur.createdTS, ".log").data(),
+                                if (Rename(Buffer::build(basePath, "/", cur.baseSeqNum, "_", cur.createdTS, ".log").data(),
                                            Buffer::build(basePath, "/", cur.baseSeqNum, "-", savedLastAssignedSeqNum, "_", cur.createdTS, ".ilog").data()) == -1)
                                 {
-                                        throw Switch::system_error("Failed to rename():", strerror(errno));
+                                        throw Switch::system_error("Failed to Rename():", strerror(errno));
                                 }
                         }
-                        else if (rename(Buffer::build(basePath, "/", cur.baseSeqNum, ".log").data(),
+                        else if (Rename(Buffer::build(basePath, "/", cur.baseSeqNum, ".log").data(),
                                         Buffer::build(basePath, "/", cur.baseSeqNum, "-", savedLastAssignedSeqNum, "_", cur.createdTS, ".ilog").data()) == -1)
                         {
-                                throw Switch::system_error("Failed to rename():", strerror(errno));
+                                throw Switch::system_error("Failed to Rename():", strerror(errno));
                         }
 
                         if (newROFile->index.fileSize)
@@ -1374,6 +1698,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 
                 if (cur.index.ondisk.data != nullptr && cur.index.ondisk.data != MAP_FAILED)
                 {
+			madvise((void *)cur.index.ondisk.data, cur.index.ondisk.span, MADV_DONTNEED);
                         munmap((void *)cur.index.ondisk.data, cur.index.ondisk.span);
                         cur.index.ondisk.data = nullptr;
                 }
@@ -1427,7 +1752,10 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                                 SLog(ansifmt::bold, ansifmt::color_red, "Emptying skiplist", ansifmt::reset, "\n");
 
                         if (cur.index.ondisk.data != nullptr && cur.index.ondisk.data != MAP_FAILED)
+			{
+				madvise((void *)cur.index.ondisk.data, cur.index.ondisk.span, MADV_DONTNEED);
                                 munmap((void *)cur.index.ondisk.data, cur.index.ondisk.span);
+			}
 
                         cur.index.ondisk.span = lseek64(cur.index.fd, 0, SEEK_END);
                         cur.index.ondisk.data = static_cast<const uint8_t *>(mmap(nullptr, cur.index.ondisk.span, PROT_READ, MAP_SHARED, cur.index.fd, 0));
@@ -1609,6 +1937,7 @@ append_res topic_partition::append_bundle_to_leader(const uint8_t *const bundle,
         {
 		if (lastMsgSeqNum)
                 {
+			// Sparse bundle; last message seqNum encoded in the bundle header
                         if (unlikely(lastMsgSeqNum < firstMsgSeqNum))
                         {
 				if (trace)
@@ -1626,6 +1955,8 @@ append_res topic_partition::append_bundle_to_leader(const uint8_t *const bundle,
                 }
                 else if (unlikely(firstMsgSeqNum && firstMsgSeqNum <= log_->lastAssignedSeqNum))
                 {
+			// either sparse bundle(first message encoded in the bundle header), or bundle in 
+			// a TankAPIMsgType::ProduceWithBaseSeqNum request, where the bundle is encoded in the partition header
                         if (trace)
                                 SLog("Unexpected, firstMsgSeqNum(", firstMsgSeqNum, ") <= lastAssignedSeqNum(", log_->lastAssignedSeqNum, ")\n");
 
@@ -1870,7 +2201,6 @@ void Service::rebuild_index(int logFd, int indexFd)
                 const bool sparseBundleBitSet = bundleFlags & (1u << 6);
                 uint32_t msgsSetSize = (bundleFlags >> 2) & 0xf;
 
-
                 if (!msgsSetSize)
                         msgsSetSize = Compression::UnpackUInt32(p);
 
@@ -1878,7 +2208,6 @@ void Service::rebuild_index(int logFd, int indexFd)
 
 		if (trace)
 			SLog("New bundle bundleFlags = ", bundleFlags, ", msgSetSize = ", msgsSetSize, "\n");
-
 
 		if (sparseBundleBitSet)
 		{
@@ -1897,7 +2226,7 @@ void Service::rebuild_index(int logFd, int indexFd)
 			}
 
 			if (trace)
-				SLog("bundle's sparse ", firstMsgSeqNum, " ", lastMsgSeqNum, "\n");
+				SLog("bundle's sparse first ", firstMsgSeqNum, ", last ", lastMsgSeqNum, "\n");
 		}
 		else
 		{
@@ -1929,6 +2258,9 @@ void Service::rebuild_index(int logFd, int indexFd)
                 throw Switch::system_error("Failed to truncate index file:", strerror(errno));
 
         fdatasync(indexFd);
+
+	if (trace)
+		SLog("REBUILT INDEX\n");
 }
 
 void Service::verify_index(int fd, const bool wideEntries)
@@ -2064,17 +2396,21 @@ uint32_t Service::verify_log(int fd)
                         const auto flags = *p++;
 
 			if (sparseBundleBitSet)
-			{
-				if (msgIdx == 0 || msgIdx == msgsSetSize - 1)
-				{
-
-				}
-				else
-				{
-					// delta from prev - 1
-					Compression::UnpackUInt32(p);
-				}
-			}
+                        {
+                                if (msgIdx == 0 || msgIdx == msgsSetSize - 1)
+                                {
+                                        //
+                                }
+                                else if (flags & uint8_t(TankFlags::BundleMsgFlags::SeqNumPrevPlusOne))
+                                {
+                                        //
+                                }
+                                else
+                                {
+                                        // delta from prev - 1
+                                        Compression::UnpackUInt32(p);
+                                }
+                        }
 
                         if (!(flags & uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS)))
                         {
@@ -2135,15 +2471,18 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         uint32_t creationTS;
                 };
 
-                // TODO: reuse roLogs and wideEntyRoLogIndices
+                // TODO: reuse roLogs and wideEntyRoLogIndices and the allocator
                 Switch::vector<rosegment_ctx> roLogs;
                 std::set<uint64_t> wideEntyRoLogIndices;
+		simple_allocator allocator{1024};
+		std::vector<strwlen32_t> swapped;
                 auto partition = Switch::make_sharedref(new topic_partition());
                 uint64_t curLogSeqNum{0};
                 uint32_t curLogCreateTS{0};
                 const strwlen32_t b(basePath, basePathLen);
                 int fd;
                 auto l = new topic_partition_log();
+		bool processSwapped{true};
 
                 l->config = partitionConf;
                 partition->distinctId = ++nextDistinctPartitionId;
@@ -2171,7 +2510,56 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                 continue;
                         }
 
-                        const auto r = name.Divided('.');
+                        auto r = name.Divided('.');
+
+			if (r.second.StripSuffix(_S(".cleaned")))
+			{
+				// Compaction failed mid-way
+				// remove this file and make sure any .swap file files are also deleted
+				auto fullPath = Buffer::build(basePath, "/", name);
+
+				if (Unlink(fullPath.data()) == -1)
+					throw Switch::system_error("Failed to Unlink(", fullPath, "):", strerror(errno));
+					
+				processSwapped = false;
+				continue;
+			}
+			else if (r.second.EndsWith(_S(".swap")))
+			{
+				// Compaction failed mid-way
+				// Before we had a chance to append .old to all previous segment files, the broker crashed
+				//
+				// If any *.cleaned files are found, we didn't get to append .swap to all new segments files so we need to
+				//	undo the effects by removing all .swap and .cleaned files
+				// If no *.cleaned files are found, we got to append .swap to all new segments files, so we should
+				// 	remove the *.swap extension and remove all *.old files
+				if (processSwapped == false)
+                                {
+                                        auto fullPath = Buffer::build(basePath, "/", name);
+
+                                        if (Unlink(fullPath.data()) == -1)
+                                                throw Switch::system_error("Failed to Unlink(", fullPath, "):", strerror(errno));
+                                }
+				else
+				{
+					// we 'll process them in the end, iff processSwapped is still true by then
+					swapped.push_back({allocator.CopyOf(name.p, name.len), name.len});
+				}
+
+                                continue;
+			}
+			else if (r.second.StripSuffix(_S(".old")))
+			{
+				// Compaction failed mid-way
+				//
+				// If any *.swap files are found, we didn't manage to strip the .swap extension from all new segments files
+				// but that's OK. We should still remove the .swap extension and remove all *.old files
+				// 
+				// We are just going to remove the extension and consider the file
+				if (Rename(Buffer::build(basePath, "/", name).data(), Buffer::build(basePath, "/", strwlen8_t(name.p, name.len - STRLEN(".old"))).data()) == -1)
+					throw Switch::system_error("Unable to rename .old file:", strerror(errno));
+			}
+
 
                         if (r.second.Eq(_S("index")))
                         {
@@ -2184,17 +2572,6 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                         wideEntyRoLogIndices.insert(v.first.AsUint64());
                                 }
                         }
-                        else if (r.second.Eq(_S("swap")))
-                        {
-                                // TODO:
-                        }
-			else if (r.second.Eq(_S("tmp")))
-			{
-				auto fullPath = Buffer::build(basePath, "/", name);
-
-				if (unlink(fullPath.data()) == -1)
-					throw Switch::system_error("Failed to unlink(", fullPath, "):", strerror(errno));
-			}
                         else if (r.second.Eq(_S("ilog")))
                         {
                                 // Immutable log
@@ -2259,6 +2636,75 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         }
                         else
                                 Print("Unexpected name ", name, " in ", basePath, "\n");
+                }
+
+                if (processSwapped == false)
+                {
+                        if (trace)
+                                SLog("Cannoy process any swapped files\n");
+
+                        while (swapped.size())
+                        {
+                                auto it = swapped.back();
+
+                                if (Unlink(Buffer::build(basePath, "/", it).data()) == -1)
+                                        throw Switch::system_error("Failed to unlink swapped file:", strerror(errno));
+
+                                swapped.pop_back();
+                        }
+		}
+		else
+                {
+			if (trace)
+				SLog("Can process swapped files\n");
+
+                        while (swapped.size())
+                        {
+                                auto name = swapped.back();
+
+                                name.StripSuffix(STRLEN(".swap"));
+
+				if (trace)
+					SLog("Processing swapped ", name, "\n");
+
+                                if (Rename(Buffer::build(basePath, "/", name, ".swap").data(), Buffer::build(basePath, "/", name).data()) == -1)
+                                        throw Switch::system_error("Failed to rename swapped file:", strerror(errno));
+
+                                const auto r = name.Divided('.');
+
+                                if (r.second.Eq(_S("index")))
+                                {
+                                        const auto v = r.first.Divided('_');
+
+                                        if (v.second.Eq(_S("64")))
+                                        {
+                                                // Just so ro_segment::ro_segment() won't have to try different names until it gets it right
+                                                wideEntyRoLogIndices.insert(v.first.AsUint64());
+                                        }
+                                }
+                                else if (r.second.Eq(_S("ilog")))
+                                {
+                                        auto s = r.first;
+                                        uint32_t creationTS{0};
+
+                                        if (const auto *const p = s.Search('_'))
+                                        {
+                                                // Creation TS is encoded in the name
+                                                creationTS = s.SuffixFrom(p + 1).AsUint32();
+                                                s = s.PrefixUpto(p);
+                                        }
+
+                                        const auto repr = s.Divided('-');
+                                        const auto baseSeqNum = repr.first.AsUint64(), lastAvailSeqNum = repr.second.AsUint64();
+
+                                        if (trace)
+                                                SLog("(	", baseSeqNum, ", ", lastAvailSeqNum, ", ", creationTS, ") ", r.first, "\n");
+
+                                        roLogs.push_back({baseSeqNum, lastAvailSeqNum, creationTS});
+                                }
+
+                                swapped.pop_back();
+                        }
                 }
 
                 if (trace)
@@ -3131,6 +3577,10 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                                                 {
                                                         if (msgIdx == msgSetSize - 1)
                                                                 absMsgSeqNum = lastMsgSeqNum;
+							else if (flags & uint8_t(TankFlags::BundleMsgFlags::SeqNumPrevPlusOne))
+							{
+								// incremented in for()
+							}
                                                         else
 							{
 								const auto delta = Compression::UnpackUInt32(p);
@@ -4031,7 +4481,7 @@ int Service::start(int argc, char **argv)
                                                         Snprint(path, sizeof(path), basePath_.data(), "/", t->name_, "/", partition, "/");
                                                         auto p = init_local_partition(partition, path, t->partitionConf);
 
-							//SLog("Initializing ", path, "\n"); p->log_->compact(); exit(0);
+							//SLog("Initializing ", path, "\n"); p->log_->compact(path); exit(0);
 
                                                         collectLock.lock();
                                                         list.push_back({t, std::move(p)});

@@ -79,7 +79,11 @@ bundle
 
 		if (SPARSE bit is set)
 		{
-			if (this is neither the first NOR the last message in the message set)
+			if (flags & TankFlags::BundleMsgFlags::SeqNumPrevPlusOne)
+			{
+				// message.seqNum = prevMessage.seqNum + 1
+			}
+			else if (this is neither the first NOR the last message in the message set)
 			{
 				// So for example, if the previous message in this bundle's message set seq.num was 10
 				// and this message's seq num is 11, then we encode (11 - 10 - 1) = 0 here
@@ -94,11 +98,12 @@ bundle
 
 		if ((flags & TankFlags::BundleMsgFlags::UseLastSpecifiedTS) == 0)
 		{
-			creation ts in milliseconds:u64 					// See later for message timestamp assignment semantics
+			creation ts:u64 					// See later for message timestamp assignment semantics
+										// You should use ms, but you may want to use us instead
 		}
 		else
 		{
-			use the timestamp for the last message that had a timestamp set in this bundle
+			// use the timestamp for the last message that had a timestamp set in this bundle
 		}
 
 
