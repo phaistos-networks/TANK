@@ -2,7 +2,6 @@ Tank is [a very high performance distributed log](https://github.com/phaistos-ne
 
 You should begin by [reading about the core concepts](https://github.com/phaistos-networks/TANK/wiki/Core-Concepts) and the [client API](https://github.com/phaistos-networks/TANK/wiki/Client-API).
 
-It is a work in progress. The core functionality is implemented and tested, and new features will be implemented soon.  
 It depends on our Switch library, so a lean/stripped-down Switch is included in the repo. 
 Please see [building instructions](https://github.com/phaistos-networks/TANK/wiki/Building-Tank). You may also want to [run Tank using its Docker image](https://github.com/phaistos-networks/TANK/wiki/Docker).
 
@@ -16,12 +15,13 @@ It will eventually support, among other features:
 - encryption (wire transfers and bundle serialization)
 - improved client and extended API
 - HTTP/1 and HTTP/2 REST APIs
-- compactions based on message key (will retain the last published message for each key)
 
 Features include:
 - [Very high performance](https://github.com/phaistos-networks/TANK/wiki/Why-Tank-and-Tank-vs-X)
 - Very tight encoding of messages(into bundles)
 - Simple design (Simple is Beautiful; [Convenience is Key](https://medium.com/@markpapadakis/convenience-is-key-2aad97d531cd#.47eyjv6xt))
+- compactions based on message keys and in the future based on programmable logic
+- A powerful CLI tool for managing, querying, setting messages, mirroring across brokets, etc.
  
 You should probably use Kafka (the Confluent folk are particularly great ), or Google Pub/Sub, or any other open source broker/queue instead of Tank - they are all perfectly fine, some more than other. 
 Tank's goal is highest performance and simplicity. If you need very high performance, operation simplicity and no reliance on other services (when running Tank in stand-alone mode), consider Tank.
