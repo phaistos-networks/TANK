@@ -60,7 +60,7 @@ When we request data for a (topic, partition), we provide the absolute sequence 
 That value has two reserved special-purprose possible values.  
 `0` : This asks the broker to begin from the first message available in the topic, regardless of its sequence number.  
 Because of various retention and (in the future, compaction) semantics, older messages may be dropped(configurable), so
-by asking for 0, you always get to begin form the very first available message, without having to know what its message id is.  
+by asking for 0, you always get to begin from the very first available message, without having to know what its message id is.  
 `18446744073709551615`: This is the maximum value an unsigned integer can represent, and that meeans this is the highest possible message sequence number (it's almost impossible you will get to that value). When this sequence number is requested, the broker will translate that value  to
 the `last assigned sequence number + 1`. 
 
@@ -114,7 +114,7 @@ msgReq is `0x2`
 				{
 					base absolute sequence number of the first message in the first bundle returned:u64
 				}
-				ese
+				else
 				{
 					The first bundle has the SPARSE bit set so
 					instead of storing the abs.seqNum of the first bundle's message here and in the bundle header
