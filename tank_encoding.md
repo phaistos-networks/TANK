@@ -120,7 +120,7 @@ bundle
 ```
 
 
-#### Timestmp assignment semantics
+#### Timestamp assignment semantics
 Because very often all messages in a bundle have the same creation timestamp, we take that into consideration because it means we can usually save the 8bytes used for
 encoding the creation timestamp for the majority of the messages in the bundle. 
 We do that by reserving 1 bit from the message flags. If that bit is set, it means
