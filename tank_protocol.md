@@ -102,12 +102,12 @@ msgReq is `0x2`
 			partition
 			{
 				partitionid:u16 		Partition ID
-				errorOrFlags: u8 		Error or flags(0 means no error or any special flags are set)
+				errorOrFlags:u8 		Error or flags(0 means no error or any special flags are set)
 
 				if (errorOrFlags == 0xff)
 				{
- 					the specified partition is unknown
-					and following fields are not encoded in this response/topic/partition
+ 					//the specified partition is unknown
+					//and following fields are not encoded in this response/topic/partition
 				}
 
 				if (errorOrFlags != 0xfe)
@@ -116,18 +116,21 @@ msgReq is `0x2`
 				}
 				else
 				{
-					The first bundle has the SPARSE bit set so
-					instead of storing the abs.seqNum of the first bundle's message here and in the bundle header
-					we will only deserialize from the bundle header in order to save 8 bytes
+					//The first bundle has the SPARSE bit set so
+					//instead of storing the abs.seqNum of the first bundle's message here and in the bundle header
+					//we will only deserialize from the bundle header in order to save 8 bytes
 				}
 
 				high water mark:u64 		absolute sequence number of the latest committed message for this (topic, partition):u64
 				chunk length:u32 		See later for chunk encoding semantics
 
+
 				{
-					if (errorOrFlags == 0x1) this is a boundary check failure, and 
-					firstAvailSeqNum:u64 is serialized here
-				 	chunk length is also encoded as 0, along with the base abs.sequence number
+					if (errorOrFlags == 0x1) 
+					{
+						//this is a boundary check failure, and  chunk length and base abs.seqn number encoded earlier as 0
+						firstAvailSeqNum:u64 is serialized here
+					}
 				}
 
 			} ..

@@ -117,9 +117,9 @@ TankClient::~TankClient()
                         free(info.ctx);
                 }
 
-		for (const auto id : bs->reqs_tracker.pendingDiscover)
+		for (const auto id : bs->reqs_tracker.pendingCtrl)
 		{
-			const auto res = pendingDiscoverReqs.detach(id);
+			const auto res = pendingCtrlReqs.detach(id);
 			const auto info = res.value();
 
 			put_payload(info.reqPayload, __LINE__);
@@ -831,6 +831,46 @@ bool TankClient::try_transmit(broker *const bs)
         return false;
 }
 
+uint32_t TankClient::create_topic(const strwlen8_t topic, const uint16_t totPartitions)
+{
+        expect(topic);
+        expect(totPartitions);
+
+        auto bs = broker_state(defaultLeader);
+        auto payload = get_payload();
+        auto &b = *payload->b;
+        const auto clientReqId = ids_tracker.client.next++;
+        const auto reqId = ids_tracker.leader_reqs.next++;
+
+        b.Serialize(uint8_t(TankAPIMsgType::CreateTopic));
+	const auto lenOffset = b.length();
+	b.MakeSpace(sizeof(uint32_t));
+
+        b.Serialize<uint32_t>(reqId);
+        b.Serialize(topic.len);
+        b.Serialize(topic.p, topic.len);
+	b.Serialize<uint16_t>(totPartitions);
+
+        payload->iov[0] = {(void *)b.data(), b.length()};
+        payload->iovCnt = 1;
+
+        bs->reqs_tracker.pendingCtrl.insert(reqId);
+	// this is not an actually an idempotent request, but the broker will check if it topic is defined already so we 'll just an error, so we 'll treat it as such
+        payload->flags = (1u << uint8_t(outgoing_payload::Flags::ReqIsIdempotent)) | (1u << uint8_t(outgoing_payload::Flags::ReqMaybeRetried));
+        Drequire(payload->tracked_by_reqs_tracker());
+        bs->outgoing_content.push_back(payload);
+
+        pendingCtrlReqs.Add(reqId, {clientReqId, payload, nowMS});
+        track_inflight_req(reqId, nowMS, TankAPIMsgType::CreateTopic);
+
+	*(uint32_t *)b.At(lenOffset) = b.length() - lenOffset - sizeof(uint32_t);
+
+        if (!try_transmit(bs))
+                return 0;
+        else
+                return clientReqId;
+}
+
 uint32_t TankClient::discover_partitions(const strwlen8_t topic)
 {
         auto bs = broker_state(defaultLeader);
@@ -850,12 +890,12 @@ uint32_t TankClient::discover_partitions(const strwlen8_t topic)
         payload->iov[0] = {(void *)b.data(), b.length()};
         payload->iovCnt = 1;
 
-        bs->reqs_tracker.pendingDiscover.insert(reqId);
+        bs->reqs_tracker.pendingCtrl.insert(reqId);
         payload->flags = (1u << uint8_t(outgoing_payload::Flags::ReqIsIdempotent)) | (1u << uint8_t(outgoing_payload::Flags::ReqMaybeRetried));
         Drequire(payload->tracked_by_reqs_tracker());
         bs->outgoing_content.push_back(payload);
 
-        pendingDiscoverReqs.Add(reqId, {clientReqId, payload, nowMS});
+        pendingCtrlReqs.Add(reqId, {clientReqId, payload, nowMS});
         track_inflight_req(reqId, nowMS, TankAPIMsgType::DiscoverPartitions);
 
 	*(uint32_t *)b.At(lenOffset) = b.length() - lenOffset - sizeof(uint32_t);
@@ -956,7 +996,7 @@ bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::e
 void TankClient::flush_broker(broker *const bs)
 {
         if (trace)
-                SLog("Flushing Broker:", bs->reqs_tracker.pendingConsume.size(), ", ", bs->reqs_tracker.pendingProduce.size(), ", ", bs->reqs_tracker.pendingDiscover.size(), "\n");
+                SLog("Flushing Broker:", bs->reqs_tracker.pendingConsume.size(), ", ", bs->reqs_tracker.pendingProduce.size(), ", ", bs->reqs_tracker.pendingCtrl.size(), "\n");
 
         for (auto it = bs->outgoing_content.front(); it;)
         {
@@ -994,17 +1034,17 @@ void TankClient::flush_broker(broker *const bs)
         }
         bs->reqs_tracker.pendingConsume.clear();
 
-	for (const auto id : bs->reqs_tracker.pendingDiscover)
+	for (const auto id : bs->reqs_tracker.pendingCtrl)
 	{
-		forget_inflight_req(id, TankAPIMsgType::DiscoverPartitions);
+		forget_inflight_req(id, TankAPIMsgType::DiscoverPartitions);	 // XXX: proper type?
 
-		const auto res = pendingDiscoverReqs.detach(id);
+		const auto res = pendingCtrlReqs.detach(id);
 		auto info = res.value();
 
 		put_payload(info.reqPayload, __LINE__);
-                capturedFaults.push_back({info.clientReqId, fault::Type::Network, fault::Req::DiscoverPartitions, {}, 0});
+                capturedFaults.push_back({info.clientReqId, fault::Type::Network, fault::Req::Ctrl, {}, 0});
 	}
-	bs->reqs_tracker.pendingDiscover.clear();
+	bs->reqs_tracker.pendingCtrl.clear();
 
         for (const auto id : bs->reqs_tracker.pendingProduce)
         {
@@ -1022,7 +1062,7 @@ void TankClient::flush_broker(broker *const bs)
 
         Drequire(bs->reqs_tracker.pendingConsume.empty());
         Drequire(bs->reqs_tracker.pendingProduce.empty());
-        Drequire(bs->reqs_tracker.pendingDiscover.empty());
+        Drequire(bs->reqs_tracker.pendingCtrl.empty());
 
         if (trace)
                 SLog("capturedFaults ", capturedFaults.size(), "\n");
@@ -1299,12 +1339,12 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
         return true;
 }
 
-bool TankClient::process_discover_partitions(connection *const c, const uint8_t *const content, const size_t len)
+bool TankClient::process_create_topic(connection *const c, const uint8_t *const content, const size_t len)
 {
         const auto *p = content;
         auto *const bs = c->bs;
         const auto reqId = *(uint32_t *)p;
-        const auto res = pendingDiscoverReqs.detach(reqId);
+        const auto res = pendingCtrlReqs.detach(reqId);
         const auto reqInfo = res.value();
         const auto clientReqId = reqInfo.clientReqId;
         strwlen8_t topicName;
@@ -1312,7 +1352,36 @@ bool TankClient::process_discover_partitions(connection *const c, const uint8_t 
         p += sizeof(uint32_t);
 
         ack_payload(bs, reqInfo.reqPayload);
-        bs->reqs_tracker.pendingDiscover.erase(reqId);
+        bs->reqs_tracker.pendingCtrl.erase(reqId);
+        forget_inflight_req(reqId, TankAPIMsgType::CreateTopic);
+
+        topicName.Set(resultsAllocator.CopyOf((char *)p + 1, *p), *p);
+        p += topicName.len + sizeof(uint8_t);
+
+	const auto err = *p++;
+
+	if (err)
+                capturedFaults.push_back({clientReqId, fault::Type::AlreadyExists, fault::Req::Ctrl, topicName, 0});
+	else
+		createdTopicsResults.push_back({clientReqId, topicName});
+
+	return true;
+}
+
+bool TankClient::process_discover_partitions(connection *const c, const uint8_t *const content, const size_t len)
+{
+        const auto *p = content;
+        auto *const bs = c->bs;
+        const auto reqId = *(uint32_t *)p;
+        const auto res = pendingCtrlReqs.detach(reqId);
+        const auto reqInfo = res.value();
+        const auto clientReqId = reqInfo.clientReqId;
+        strwlen8_t topicName;
+
+        p += sizeof(uint32_t);
+
+        ack_payload(bs, reqInfo.reqPayload);
+        bs->reqs_tracker.pendingCtrl.erase(reqId);
         forget_inflight_req(reqId, TankAPIMsgType::DiscoverPartitions);
 
         topicName.Set(resultsAllocator.CopyOf((char *)p + 1, *p), *p);
@@ -1321,14 +1390,14 @@ bool TankClient::process_discover_partitions(connection *const c, const uint8_t 
         const auto cnt = *(uint16_t *)p;
 
         if (!cnt)
-                capturedFaults.push_back({clientReqId, fault::Type::UnknownTopic, fault::Req::DiscoverPartitions, topicName, 0});
+                capturedFaults.push_back({clientReqId, fault::Type::UnknownTopic, fault::Req::Ctrl, topicName, 0});
         else
         {
-                // because we need to access the (firstAvail, lastAssigned) pairs here
+                // because we need to access the (firstAvail, lastAssigned) pairs here, which requires
+		// dereferencing the input buffer of the connection, we are going to lock it
                 c->state.flags |= (1u << uint8_t(connection::State::Flags::LockedInputBuffer));
 
                 p += sizeof(uint16_t);
-
                 discoverPartitionsResults.push_back({clientReqId, topicName, {(std::pair<uint64_t, uint64_t> *)p, cnt}});
         }
 
@@ -1902,6 +1971,9 @@ bool TankClient::process(connection *const c, const uint8_t msg, const uint8_t *
 		case TankAPIMsgType::DiscoverPartitions:
 			return process_discover_partitions(c, content, len);
 
+		case TankAPIMsgType::CreateTopic:
+			return process_create_topic(c, content, len);
+
                 case TankAPIMsgType::Ping:
                         if (trace)
                                 SLog("PING\n");
@@ -2278,6 +2350,7 @@ void TankClient::poll(uint32_t timeoutMS)
         capturedFaults.clear();
         produceAcks.clear();
 	discoverPartitionsResults.clear();
+	createdTopicsResults.clear();
 
 
 	// it is important that we update_time_cache() here before we invoke reschedule_any() and right after Poll()

@@ -44,5 +44,7 @@ enum class TankAPIMsgType : uint8_t
 	// For example, if the earliest available segment for a partition in origin has a baseSeqNum (1000) (i.e not 1), and we consume from it
 	// in order to mirror to another node, and that node has no data for that partition, it will create a new segment with baseSeqNum(0), not 1.
 	ProduceWithBaseSeqNum=0x5,
-	DiscoverPartitions=0x6
+	DiscoverPartitions=0x6,
+
+	CreateTopic
 };

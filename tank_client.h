@@ -157,7 +157,7 @@ class TankClient
                 uint8_t seqNumsCnt;
         };
 
-	struct active_discover_req
+	struct active_ctrl_req
 	{
                 uint32_t clientReqId;
                 outgoing_payload *reqPayload;
@@ -179,6 +179,12 @@ class TankClient
                 strwlen8_t topic;
                 range_base<std::pair<uint64_t, uint64_t> *, uint16_t> watermarks;
         };
+
+	struct created_topic
+	{
+		uint32_t clientReqId;
+		strwlen8_t topic;
+	};
 
         struct produce_ack
         {
@@ -227,14 +233,15 @@ class TankClient
                         Network,
                         BoundaryCheck,
 			InvalidReq,
-			SystemFail
+			SystemFail,
+			AlreadyExists
                 } type;
 
                 enum class Req : uint8_t
                 {
                         Consume = 1,
                         Produce,
-			DiscoverPartitions
+			Ctrl
                 } req;
 
                 strwlen8_t topic;
@@ -351,7 +358,7 @@ class TankClient
                 {
                         std::set<uint32_t> pendingConsume;
                         std::set<uint32_t> pendingProduce;
-                        std::set<uint32_t> pendingDiscover;
+                        std::set<uint32_t> pendingCtrl;
                 } reqs_tracker;
 
                 broker(const Switch::endpoint e)
@@ -378,6 +385,7 @@ class TankClient
         Switch::vector<fault> capturedFaults;
         Switch::vector<produce_ack> produceAcks;
         Switch::vector<discovered_topic_partitions> discoverPartitionsResults;
+	Switch::vector<created_topic> createdTopicsResults;
         Switch::vector<consumed_msg> consumptionList;
         Switch::vector<consume_ctx> consumeOut;
         Switch::vector<produce_ctx> produceOut;
@@ -395,7 +403,7 @@ class TankClient
         IOBuffer produceCtx;
         Switch::unordered_map<uint32_t, active_consume_req> pendingConsumeReqs;
         Switch::unordered_map<uint32_t, active_produce_req> pendingProduceReqs;
-        Switch::unordered_map<uint32_t, active_discover_req> pendingDiscoverReqs;
+        Switch::unordered_map<uint32_t, active_ctrl_req> pendingCtrlReqs;
         struct reschedule_queue_entry_cmp
         {
                 bool operator()(const broker *const b1, const broker *const b2)
@@ -452,6 +460,8 @@ class TankClient
         bool process_consume(connection *const c, const uint8_t *const content, const size_t len);
 
         bool process_discover_partitions(connection *const c, const uint8_t *const content, const size_t len);
+
+        bool process_create_topic(connection *const c, const uint8_t *const content, const size_t len);
 
         bool process(connection *const c, const uint8_t msg, const uint8_t *const content, const size_t len);
 
@@ -570,6 +580,11 @@ class TankClient
 		return discoverPartitionsResults;
 	}
 
+	const auto &created_topics() const noexcept
+	{
+		return createdTopicsResults;
+	}
+
         void poll(uint32_t timeoutMS);
 
 
@@ -600,6 +615,7 @@ class TankClient
 
 	uint32_t discover_partitions(const strwlen8_t topic);
 
+	uint32_t create_topic(const strwlen8_t topic, const uint16_t numPartitions);
 
 
         void set_client_id(const char *const p, const uint32_t len)
@@ -646,7 +662,7 @@ class TankClient
 
         inline bool should_poll() const
         {
-                return connectionAttempts.size() || pendingConsumeReqs.size() || pendingProduceReqs.size() || pendingDiscoverReqs.size();
+                return connectionAttempts.size() || pendingConsumeReqs.size() || pendingProduceReqs.size() || pendingCtrlReqs.size();
         }
 };
 

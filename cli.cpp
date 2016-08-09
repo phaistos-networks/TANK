@@ -134,7 +134,7 @@ int main(int argc, char *argv[])
                                 Print("-S bytes: set tank client's socket send buffer size\n");
                                 Print("-R bytes: set tank client's socket receive buffer size\n");
                                 Print("-v : Verbose output\n");
-                                Print("Commands available: consume, produce, benchmark, discover_partitions, mirror\n");
+                                Print("Commands available: consume, produce, benchmark, discover_partitions, mirror, create_topic\n");
                                 return 0;
 
                         default:
@@ -206,6 +206,10 @@ int main(int argc, char *argv[])
                         case TankClient::fault::Type::Network:
                                 Print("Network error\n");
                                 break;
+
+			case TankClient::fault::Type::AlreadyExists:
+				Print("Already Exists\n");
+				break;
 
                         default:
                                 break;
@@ -420,6 +424,62 @@ int main(int argc, char *argv[])
                                 pendingResp = 0;
                         }
                 }
+        }
+        else if (cmd.Eq(_S("create_topic")))
+        {
+		optind = 0;
+		while ((r = getopt(argc, argv, "+h")) != -1)
+		{
+			switch (r)
+			{
+				case 'h':
+					Print("create_topic total_partitions\n");
+					return 0;
+
+				default:
+					return 1;
+			}
+		}
+                argc -= optind;
+                argv += optind;
+
+		if (argc == 0)
+		{
+			Print("Expected total partitions for new topic '", topicPartition.first, "'\n");
+			return 1;
+		}
+
+		const strwlen32_t s(argv[0]);
+
+		if (!s.IsDigits() || s.AsUint32() > UINT16_MAX || !s.AsUint32())
+		{
+			Print("Invalid total partitions specified\n");
+			return 1;
+		}
+
+                const auto reqId = tankClient.create_topic(topicPartition.first, s.AsUint32());
+
+                if (!reqId)
+                {
+                        Print("Unable to schedule create topic request\n");
+                        return 1;
+                }
+
+                while (tankClient.should_poll())
+                {
+                        tankClient.poll(1e3);
+
+                        for (const auto &it : tankClient.faults())
+                                consider_fault(it);
+
+                        for (const auto &it : tankClient.created_topics())
+                        {
+                                require(it.clientReqId == reqId);
+				Print("Created topic ", ansifmt::bold, it.topic, ansifmt::reset, "\n");
+                        }
+                }
+
+                return 0;
         }
         else if (cmd.Eq(_S("mirror")))
         {

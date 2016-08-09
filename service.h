@@ -475,6 +475,7 @@ struct topic
 	{
 		for (uint32_t i{0}; i != n; ++i)
 		{
+			require(all[i]);
 			all[i]->owner = this;
 			partitions_->push_back(all[i]);
 		}
@@ -856,6 +857,8 @@ class Service
         bool process_replica_reg(connection *const c, const uint8_t *p, const size_t len);
 
         bool process_discover_partitions(connection *const c, const uint8_t *p, const size_t len);
+
+        bool process_create_topic(connection *const c, const uint8_t *p, const size_t len);
 
         wait_ctx *get_waitctx(const uint8_t totalPartitions)
         {

@@ -3270,6 +3270,92 @@ bool Service::register_consumer_wait(connection *const c, const uint32_t request
         return true;
 }
 
+bool Service::process_create_topic(connection *const c, const uint8_t *p, const size_t len)
+{
+        if (unlikely(len < sizeof(uint32_t) + sizeof(uint8_t) + sizeof(uint8_t)))
+        {
+                if (trace)
+                        SLog("Unexpected len = ", len, "\n");
+
+                return shutdown(c, __LINE__);
+        }
+
+        auto q = c->outQ;
+        auto resp = get_buffer();
+        const auto requestId = *(uint32_t *)p;
+        p += sizeof(uint32_t);
+        const strwlen8_t topicName((char *)p + 1, *p);
+
+        p += topicName.len + sizeof(uint8_t);
+
+        const auto partitionsCnt = *(uint16_t *)p;
+        p += sizeof(uint16_t);
+
+        if (!q)
+                q = c->outQ = get_outgoing_queue();
+
+        resp->Serialize(uint8_t(TankAPIMsgType::CreateTopic));
+        const auto sizeOffset = resp->length();
+
+        resp->MakeSpace(sizeof(uint32_t));
+        resp->Serialize(requestId);
+
+        if (topic_by_name(topicName))
+                resp->Serialize<uint8_t>(1); // already exists
+        else
+        {
+                char topicPath[PATH_MAX];
+                const auto topicPathLen = Snprint(topicPath, sizeof(topicPath), basePath_, "/", topicName, "/");
+
+                if (mkdir(topicPath, 0775) == -1)
+                        resp->Serialize<uint8_t>(2);
+                else
+                {
+                        std::vector<topic_partition *> list;
+
+                        try
+                        {
+                                partition_config partitionConfig;
+
+                                for (uint16_t i{0}; i != partitionsCnt; ++i)
+                                {
+                                        sprintf(topicPath + topicPathLen, "%u", i);
+
+                                        if (mkdir(topicPath, 0775) == -1)
+                                        {
+                                                resp->Serialize<uint8_t>(2);
+                                                goto l1;
+                                        }
+
+                                        list.push_back(init_local_partition(i, topicPath, partitionConfig).release());
+                                }
+
+                                auto t = Switch::make_sharedref(new struct topic(topicName, partitionConfig));
+
+                                t->register_partitions(list.data(), list.size());
+
+                                register_topic(t.release());
+                                resp->Serialize(uint8_t(0));
+                        }
+                        catch (...)
+                        {
+                                while (list.size())
+                                {
+                                        delete list.back();
+                                        list.pop_back();
+                                }
+
+                                resp->Serialize<uint8_t>(1);
+                        }
+                }
+        }
+
+l1:
+        *(uint32_t *)resp->At(sizeOffset) = resp->length() - sizeOffset - sizeof(uint32_t);
+        q->push_back(resp);
+        return try_send_ifnot_blocked(c);
+}
+
 bool Service::process_discover_partitions(connection *const c, const uint8_t *p, const size_t len)
 {
         if (unlikely(len < sizeof(uint32_t) + sizeof(uint8_t) + sizeof(uint8_t)))
@@ -3453,7 +3539,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 
 
 
-                        // TODO: Reject appending to internal topics if not alowed
+                        // TODO: Reject appending to internal topics if not allowed
 
                         if (trace)
                                 SLog("partitionId = ", partitionId, ",  bundleLen = ", bundleLen, "\n");
@@ -3733,6 +3819,9 @@ bool Service::process_msg(connection *const c, const uint8_t msg, const uint8_t 
 
 		case TankAPIMsgType::DiscoverPartitions:
 			return process_discover_partitions(c, data, len);
+		
+		case TankAPIMsgType::CreateTopic:
+			return process_create_topic(c, data, len);
 
                 default:
                         return shutdown(c, __LINE__);
