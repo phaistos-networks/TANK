@@ -18,10 +18,10 @@ It will eventually support, among other features:
 
 Features include:
 - [Very high performance](https://github.com/phaistos-networks/TANK/wiki/Why-Tank-and-Tank-vs-X)
-- Very tight encoding of messages(into bundles)
+- [Very tight encoding](https://github.com/phaistos-networks/TANK/blob/master/tank_encoding.md) of messages(into bundles)
 - Simple design (Simple is Beautiful; [Convenience is Key](https://medium.com/@markpapadakis/convenience-is-key-2aad97d531cd#.47eyjv6xt))
-- compactions based on message keys and in the future based on programmable logic
-- A powerful CLI tool for managing, querying, setting messages, mirroring across brokets, etc.
+- [compactions](https://github.com/phaistos-networks/TANK/wiki/Compactions) based on message keys and in the future based on programmable logic
+- A [powerful CLI tool](https://github.com/phaistos-networks/TANK/wiki/Tank-CLI) for managing, querying, setting messages, mirroring across brokets, etc.
  
 You should probably use Kafka (the Confluent folk are particularly great ), or Google Pub/Sub, or any other open source broker/queue instead of Tank - they are all perfectly fine, some more than other. 
 Tank's goal is highest performance and simplicity. If you need very high performance, operation simplicity and no reliance on other services (when running Tank in stand-alone mode), consider Tank.
