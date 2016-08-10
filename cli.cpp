@@ -129,11 +129,11 @@ int main(int argc, char *argv[])
                                 Print(app, " [common options] command [command options] [command arguments]\n");
                                 Print("Common options include:\n");
                                 Print("-b broker endpoint: The endpoint of the Tank broker\n");
-                                Print("-t topic: The topic to produce to or consume from\n");
-                                Print("-p partition: The partition of the topic to produce to or consme from\n");
+                                Print("-t topic: The selected topic\n");
+                                Print("-p partition: The selected partition\n");
                                 Print("-S bytes: set tank client's socket send buffer size\n");
                                 Print("-R bytes: set tank client's socket receive buffer size\n");
-                                Print("-v : Verbose output\n");
+                                Print("-v : enable verbose output\n");
                                 Print("Commands available: consume, produce, benchmark, discover_partitions, mirror, create_topic\n");
                                 return 0;
 
@@ -434,6 +434,7 @@ int main(int argc, char *argv[])
 			{
 				case 'h':
 					Print("create_topic total_partitions\n");
+					Print("Will create a new topic named '", topicPartition.first, "', with total_partitions total partitions\n");
 					return 0;
 
 				default:
@@ -854,7 +855,7 @@ int main(int argc, char *argv[])
 
                                 Print(ansifmt::bold, "Partition", ansifmt::set_col(10), "First Available", ansifmt::set_col(30), "Last Assigned", ansifmt::reset, "\n");
                                 for (const auto wm : it.watermarks)
-                                        Print(ansifmt::bold, i++, ansifmt::reset, ansifmt::set_col(10), wm->first, ansifmt::set_col(30), wm->second, "\n");
+                                        Print(ansifmt::bold, i++, ansifmt::reset, ansifmt::set_col(10), dotnotation_repr(wm->first), ansifmt::set_col(30), dotnotation_repr(wm->second), "\n");
                         }
                 }
 

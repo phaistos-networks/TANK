@@ -29,6 +29,9 @@ static constexpr bool trace{false};
 
 static Switch::mutex mboxLock;
 static Switch::vector<std::pair<int, int>> mbox;
+static Buffer basePath_;
+static bool cleanupTrackerIsDirty{false};
+static std::vector<topic_partition_log *> cleanupTracker;
 
 static int Rename(const char *oldpath, const char *newpath)
 {
@@ -502,7 +505,89 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
         return res;
 }
 
-void topic_partition_log::compact(const char *const basePartitionPath)
+template <typename T>
+struct PubSubQueue
+{
+        alignas(64 /* cache line size */) std::atomic<T *> list{nullptr};
+
+        void push_back(T *const v)
+        {
+                T *old;
+
+                do
+                {
+                        old = list.load(std::memory_order_relaxed);
+                        v->next = old;
+                } while (!list.compare_exchange_weak(old, v, std::memory_order_release, std::memory_order_relaxed));
+        }
+
+
+	bool any() const
+	{
+		return list.load(std::memory_order_relaxed);
+	}
+	
+        inline T *drain()
+        {
+                if (!list.load(std::memory_order_relaxed))
+                        return nullptr;
+                else
+                        return list.exchange(nullptr, std::memory_order_acquire);
+        }
+};
+
+// basic type-erasure for the callable of std::bind
+struct mainthread_closure
+{
+        struct callable
+        {
+                virtual void invoke() = 0;
+                virtual ~callable()
+                {
+                }
+        };
+
+        template <typename T>
+        struct internal
+            : public callable
+        {
+                T v;
+
+                internal(T &&call)
+                    : v(std::move(call))
+                {
+                }
+
+                virtual void invoke() override
+                {
+                        v();
+                }
+        };
+
+        template <typename T>
+        mainthread_closure(T &&foo)
+            : L{new internal<T>(std::move(foo))}
+        {
+        }
+
+        void operator()()
+        {
+                L->invoke();
+        }
+
+        mainthread_closure *next;
+        std::unique_ptr<callable> L;
+};
+
+static PubSubQueue<mainthread_closure> mainThreadClosures;
+
+template<typename F, typename...Arg>
+static void run_on_main_thread(F &&l, Arg&&... args)
+{
+        mainThreadClosures.push_back(new mainthread_closure(std::bind(l, std::forward<Arg>(args)...)));
+}
+
+static void compact_partition(topic_partition_log *const log, const char *const basePartitionPath, std::vector<ro_segment *> prevSegments)
 {
         struct msg
         {
@@ -514,7 +599,6 @@ void topic_partition_log::compact(const char *const basePartitionPath)
 
 
         static constexpr bool trace{false};
-        auto prevSegments = roSegments;
         uint64_t firstMsgSeqNum, lastMsgSeqNum, msgSeqNum;
         range_base<const uint8_t *, size_t> msgSetContent;
         strwlen8_t key;
@@ -525,7 +609,6 @@ void topic_partition_log::compact(const char *const basePartitionPath)
         size_t base{0};
         static constexpr uint64_t ptrBit{uint64_t(1) << (sizeof(uintptr_t) * 8 - 1)};
 
-        Drequire(roSegments->size());
 
         const auto compact = [&anyDropped](Switch::vector<msg> &msgs) {
 
@@ -603,9 +686,9 @@ void topic_partition_log::compact(const char *const basePartitionPath)
             });
 
         if (trace)
-                SLog(roSegments->size(), " segments\n");
+		SLog(prevSegments.size(), " segments\n");
 
-        for (auto it : *roSegments)
+	for (auto it : prevSegments)
         {
                 int fd = it->fdh->fd;
                 const auto fileSize = it->fileSize;
@@ -814,12 +897,24 @@ void topic_partition_log::compact(const char *const basePartitionPath)
 
         if (!compact(msgs))
         {
+#if 1
                 if (trace)
                         SLog("No need for compaction\n");
 
-                return;
-        }
+                run_on_main_thread([log]() {
+                        log->compacting = false;
+			Print("Did not need to compact log\n");
+                });
 
+                return;
+#else
+		Print("ENABLE AGAIN\n");
+
+                std::sort(msgs.begin(), msgs.end(), [](const auto &a, const auto &b) {
+                        return a.seqNum < b.seqNum;
+                });
+#endif
+        }
 
         if (trace)
         {
@@ -837,7 +932,7 @@ void topic_partition_log::compact(const char *const basePartitionPath)
 	// use the last segment's timestamp that is to be encoded in the filename
         static constexpr size_t sinceLastUpdateBytesThreshold{10000}, sinceLastUpdateMsgsCntThreshold{128}, maxBundleMsgsSetSize{5}, maxBundleMsgsSetSizeBytes{65536}; // XXX: arbitrary
 	static constexpr size_t minSegmentLogFileSize{64 *1024}; // XXX: arbitrary
-        auto newSegments = std::make_unique<Switch::vector<ro_segment *>>();
+	std::vector<ro_segment *> newSegments;
         int fd;
         char logPath[PATH_MAX];
         const auto n = msgs.size();
@@ -902,13 +997,13 @@ void topic_partition_log::compact(const char *const basePartitionPath)
                         size_t outFileSize{0};
                         size_t logPathLen;
                         size_t sinceLastUpdateBytes{UINT32_MAX}, sinceLastUpdateMsgsCnt{UINT32_MAX};
-                        auto curSegment = roSegments->at(curSegmentIdx);
+                        auto curSegment = prevSegments[curSegmentIdx];
                         const auto baseSeqNum{all[i].seqNum};
                         auto curSegmentLastAvailSeqNum = curSegment->lastAvailSeqNum;
 			index_record indexLastRecorded;
 
                         if (trace)
-                                SLog(ansifmt::bold, ansifmt::color_blue, "Now processing segment ", curSegmentIdx, "/", roSegments->size(), " (", baseSeqNum, ", ", curSegment->lastAvailSeqNum, ")", ansifmt::reset, "\n");
+                                SLog(ansifmt::bold, ansifmt::color_blue, "Now processing segment ", curSegmentIdx, "/", prevSegments.size(), " (", baseSeqNum, ", ", curSegment->lastAvailSeqNum, ")", ansifmt::reset, "\n");
 
                         // new segment
                         index.clear();
@@ -1127,7 +1222,10 @@ void topic_partition_log::compact(const char *const basePartitionPath)
                                 const auto _l = out.length();
 
                                 out.SerializeVarUInt32(bundleLength);
-                                iov[bundleLengthIOVIdx] = {(void *)uintptr_t(_l | (1u << 31)), out.length() - _l};
+				const auto bundleLengthReprLen = out.length() - _l;
+                                iov[bundleLengthIOVIdx] = {(void *)uintptr_t(_l | (1u << 31)), bundleLengthReprLen};
+
+                                outFileSize += bundleLengthReprLen;
 
                                 sinceLastUpdateBytes += bundleLength;
                                 if (iovLen > sizeof_array(iov) - 16)
@@ -1163,14 +1261,22 @@ void topic_partition_log::compact(const char *const basePartitionPath)
                         auto logFd = fd;
                         const auto lastAvailSeqNum = all[i - 1].seqNum;
 
-                        close(fd);
                         fd = open(Buffer::build(destPartitionPath, "/", baseSeqNum, ".index.cleaned").data(), O_RDWR | O_CREAT | O_LARGEFILE | O_TRUNC, 0775);
 
                         if (fd == -1)
+			{
+				close(logFd);
                                 throw Switch::system_error("Failed to access new segment's index:", strerror(errno));
+			}
 
                         if (write(fd, index.data(), index.length()) != index.length())
+			{
+				close(logFd);
+				close(fd);
                                 throw Switch::system_error("Failed to create new segment's index:", strerror(errno));
+			}
+
+			fdatasync(logFd);
 
                         // We could have instead used (firstSegmentConsumedForThisNewSegment->baseSeqNum, curSegmentLastAvailSeqNum)
                         // instead of (baseSeqNum, all[i - 1].seqNum), which would have retained the filename for some segments cleaned up onto themselves
@@ -1182,10 +1288,18 @@ void topic_partition_log::compact(const char *const basePartitionPath)
                         auto newSegment = std::make_unique<ro_segment>(baseSeqNum, lastAvailSeqNum, curSegment->createdTS);
 
                         newSegment->fdh.reset(new fd_handle(logFd));
+			require(newSegment->fdh.use_count() == 2);
+			newSegment->fdh->Release();
                         newSegment->fileSize = outFileSize;
                         newSegment->index.data = reinterpret_cast<const uint8_t *>(mmap(nullptr, index.length(), PROT_READ, MAP_SHARED, fd, 0));
                         newSegment->index.fileSize = index.length();
                         newSegment->index.lastRecorded = indexLastRecorded;
+
+			if (trace)
+                                SLog(newSegment->fileSize, " ", lseek64(newSegment->fdh->fd, 0, SEEK_END), "\n");
+
+                        require(newSegment->index.fileSize == lseek64(fd, 0, SEEK_END));
+			require(newSegment->fileSize == lseek64(newSegment->fdh->fd, 0, SEEK_END));
 
                         close(fd);
                         fd = -1;
@@ -1193,7 +1307,8 @@ void topic_partition_log::compact(const char *const basePartitionPath)
                         if (newSegment->index.data == MAP_FAILED)
                                 throw Switch::system_error("mmap() failed:", strerror(errno));
 
-                        newSegments->push_back(newSegment.release());
+			require(newSegment->fdh.use_count() == 1);
+                        newSegments.push_back(newSegment.release());
 
                         if (trace)
                                 SLog("Out segment, output ", outFileSize, "(", size_repr(outFileSize), ") ", dotnotation_repr(index.size()), " index entries\n");
@@ -1207,7 +1322,7 @@ void topic_partition_log::compact(const char *const basePartitionPath)
 
                 // We have created a new set of segments, so we need to replace their .cleaned extension with a .swap extension
 		// During startup, if we find any *.cleaned files, then we 'll delete them and will also remove any .swap files left around
-                for (auto it : *newSegments)
+                for (auto it : newSegments)
                 {
                         if (Rename(Buffer::build(destPartitionPath, it->baseSeqNum, "-", it->lastAvailSeqNum, "_", it->createdTS, ".ilog.cleaned").data(),
                                    Buffer::build(destPartitionPath, it->baseSeqNum, "-", it->lastAvailSeqNum, "_", it->createdTS, ".ilog.swap").data()) == -1)
@@ -1224,7 +1339,7 @@ void topic_partition_log::compact(const char *const basePartitionPath)
 
 
 		// Rename input segments by appending the .log extension to both log files and index files
-		for (auto it : *roSegments)
+		for (auto it : prevSegments)
                 {
                         if (const auto createdTS = it->createdTS)
                         {
@@ -1251,7 +1366,7 @@ void topic_partition_log::compact(const char *const basePartitionPath)
                 }
 
 		// Strip .swap extension from the set of new segments files
-                for (auto it : *newSegments)
+                for (auto it : newSegments)
                 {
                         if (Rename(Buffer::build(destPartitionPath, it->baseSeqNum, "-", it->lastAvailSeqNum, "_", it->createdTS, ".ilog.swap").data(),
                                    Buffer::build(destPartitionPath, it->baseSeqNum, "-", it->lastAvailSeqNum, "_", it->createdTS, ".ilog").data()) == -1)
@@ -1267,7 +1382,7 @@ void topic_partition_log::compact(const char *const basePartitionPath)
                 }
 
 		// Unlink all input segment files
-                for (auto it : *roSegments)
+                for (auto it : prevSegments)
                 {
                         char path[PATH_MAX];
                         size_t pathLen;
@@ -1286,25 +1401,123 @@ void topic_partition_log::compact(const char *const basePartitionPath)
                 }
 
                 // Replace segments
-		// XXX: we probably want to ship newSegments in the main threads so that we 'll do that there
-		// though we could definitely do it here
-		for (auto it : *roSegments.get())
-			delete it;
+                run_on_main_thread([ log, segments = std::move(prevSegments), newSegments = std::move(newSegments) ]() {
+			auto roSegments = log->roSegments.get();
+			auto it = std::find(roSegments->begin(), roSegments->end(), segments.front());
+			const auto upto = segments.back()->lastAvailSeqNum;
+		
+			require(it != roSegments->end());
 
-                roSegments.reset(newSegments.release());
-	}
+			// remove segments from current roSegments[]
+                        std::for_each(it, it + segments.size(), [](auto ptr) { delete ptr; });
+                        roSegments->erase(it, it + segments.size());
+
+			// replace removed segments with new segments
+			roSegments->insert(it, newSegments.begin(), newSegments.end());
+
+			log->compacting = false;
+			if (!log->lastCleanupMaxSeqNum)
+			{
+				cleanupTracker.push_back(log);
+			}
+			log->lastCleanupMaxSeqNum = upto;
+			cleanupTrackerIsDirty = true;
+
+			if (trace)
+                        {
+                                for (auto it : *roSegments)
+                                        SLog("(", it->baseSeqNum, ", ", it->lastAvailSeqNum, ") ", it->fdh.use_count(), " ", it->fdh->fd, "\n");
+                        }
+
+			Print("Compacted partition segments\n");
+                });
+        }
         catch (...)
         {
-		if (newSegments)
-		{
-			while (newSegments->size())
-			{
-				delete newSegments->back();
-				newSegments->pop_back();
-			}
-		}
-                throw;
+                while (newSegments.size())
+                {
+                        delete newSegments.back();
+                        newSegments.pop_back();
+                }
+
+                run_on_main_thread([log]() {
+                        Print("Failed to compact partition segments\n");
+                        log->compacting = false;
+                });
         }
+}
+
+void topic_partition_log::compact(const char *const basePartitionPath)
+{
+        std::vector<ro_segment *> prevSegments;
+        static std::once_flag onceFlag;
+        static std::condition_variable workCond;
+        static std::mutex workLock;
+
+        struct pending_compaction
+        {
+                pending_compaction *next;
+                char basePartitionPath[PATH_MAX];
+                std::vector<ro_segment *> prevSegments;
+                topic_partition_log *log;
+        };
+
+        Drequire(compacting == false);
+
+        static PubSubQueue<pending_compaction> pendingCompactions;
+        auto compaction = new pending_compaction();
+        const auto l = strlen(basePartitionPath);
+
+        require(l < sizeof(compaction->basePartitionPath));
+        compaction->log = this;
+        strwlen32_t(basePartitionPath, l).ToCString(compaction->basePartitionPath);
+        compaction->prevSegments.reserve(roSegments->size());
+        for (auto it : *roSegments)
+                compaction->prevSegments.push_back(it);
+
+	if (trace)
+		SLog("Compaction for [", basePartitionPath, "]\n");
+
+        Drequire(compaction->prevSegments.size());
+
+        std::call_once(onceFlag, [] {
+
+                std::thread([]() {
+                        std::vector<pending_compaction *> localWork;
+
+                        for (;;)
+                        {
+                                std::unique_lock<std::mutex> lock(workLock);
+
+                                workCond.wait(lock, [] { return pendingCompactions.any(); });
+                                for (auto it = pendingCompactions.drain(); it; it = it->next)
+                                        localWork.push_back(it);
+
+                                lock.unlock();
+
+                                while (localWork.size())
+                                {
+                                        auto c = localWork.back();
+
+                                        try
+                                        {
+                                                compact_partition(c->log, c->basePartitionPath, std::move(c->prevSegments));
+                                        }
+                                        catch (...)
+                                        {
+                                        }
+
+                                        localWork.pop_back();
+                                        delete c;
+                                }
+                        }
+
+                }).detach();
+        });
+
+        compacting = true;
+        pendingCompactions.push_back(compaction);
+        workCond.notify_one();
 }
 
 // Aligns to indices boundaries
@@ -1412,6 +1625,9 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
                 const auto res = f->translateDown(absSeqNum, UINT32_MAX);
                 uint32_t offsetCeil;
 
+		Drequire(f->fdh.use_count());
+		Drequire(f->fdh->fd != -1);
+
 
                 if (trace)
                 {
@@ -1469,52 +1685,99 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
 
 void topic_partition_log::consider_ro_segments()
 {
-        size_t sum{0};
-        const uint32_t nowTS = Timings::Seconds::SysTime();
 
-        for (auto it : *roSegments)
-                sum += it->fileSize;
+	if (compacting)
+	{
+		// Busy compacting
+                if (trace)
+                        SLog("Compacting\n");
+
+		return;
+	}
+
+        uint64_t sum{0};
+        const uint32_t nowTS = Timings::Seconds::SysTime();
 
         if (trace)
                 SLog(ansifmt::bold, ansifmt::color_blue, "Considering segments sum=", sum, ", total = ", roSegments->size(), " limits { roSegmentsCnt ", config.roSegmentsCnt, ", roSegmentsSize ", config.roSegmentsSize, "}", ansifmt::reset, "\n");
 
-        while (roSegments->size() && ((config.roSegmentsCnt && roSegments->size() > config.roSegmentsCnt) || (config.roSegmentsSize && sum > config.roSegmentsSize) || (roSegments->front()->createdTS && config.lastSegmentMaxAge && roSegments->front()->createdTS + config.lastSegmentMaxAge < nowTS)))
+	if (config.logCleanupPolicy == CleanupPolicy::DELETE)
         {
-                auto segment = roSegments->front();
-                const auto basePathLen = basePath.length();
+		if (trace)
+			SLog("DELETE policy\n");
+
+                for (auto it : *roSegments)
+                        sum += it->fileSize;
+
+                while (roSegments->size() && ((config.roSegmentsCnt && roSegments->size() > config.roSegmentsCnt) || (config.roSegmentsSize && sum > config.roSegmentsSize) || (roSegments->front()->createdTS && config.lastSegmentMaxAge && roSegments->front()->createdTS + config.lastSegmentMaxAge < nowTS)))
+                {
+			Buffer basePath;
+
+			basePath.append(basePath_, "/", partition->owner->name(), "/", partition->idx, "/");
+
+                        auto segment = roSegments->front();
+                        const auto basePathLen = basePath.length();
+
+                        if (trace)
+                                SLog(ansifmt::bold, ansifmt::color_red, "Removing ", segment->baseSeqNum, ansifmt::reset, "\n");
+
+                        basePath.append("/", segment->baseSeqNum, "-", segment->lastAvailSeqNum, "_", segment->createdTS, ".ilog");
+                        if (Unlink(basePath.data()) == -1)
+                                Print("Failed to unlink ", basePath, ": ", strerror(errno), "\n");
+                        else if (trace)
+                                SLog("Removed ", basePath, "\n");
+
+                        basePath.SetLength(basePathLen);
+                        basePath.append("/", segment->baseSeqNum, ".index");
+                        if (Unlink(basePath.data()) == -1)
+                                Print("Failed to unlink ", basePath, ": ", strerror(errno), "\n");
+                        else if (trace)
+                                SLog("Removed ", basePath, "\n");
+
+                        basePath.SetLength(basePathLen);
+
+                        segment->fdh.reset(nullptr);
+
+                        sum -= segment->fileSize;
+                        delete segment;
+
+                        roSegments->erase(roSegments->begin()); // pop_front()
+                }
+
+                if (roSegments->size())
+                        firstAvailableSeqNum = roSegments->front()->baseSeqNum;
+                else
+                        firstAvailableSeqNum = cur.baseSeqNum;
 
                 if (trace)
-                        SLog(ansifmt::bold, ansifmt::color_red, "Removing ", segment->baseSeqNum, ansifmt::reset, "\n");
-
-                basePath.append("/", segment->baseSeqNum, "-", segment->lastAvailSeqNum, "_", segment->createdTS, ".ilog");
-                if (Unlink(basePath.data()) == -1)
-                        Print("Failed to unlink ", basePath, ": ", strerror(errno), "\n");
-                else if (trace)
-                        SLog("Removed ", basePath, "\n");
-
-                basePath.SetLength(basePathLen);
-                basePath.append("/", segment->baseSeqNum, ".index");
-                if (Unlink(basePath.data()) == -1)
-                        Print("Failed to unlink ", basePath, ": ", strerror(errno), "\n");
-                else if (trace)
-                        SLog("Removed ", basePath, "\n");
-
-                basePath.SetLength(basePathLen);
-
-                segment->fdh.reset(nullptr);
-
-                sum -= segment->fileSize;
-                delete segment;
-                roSegments->pop_front();
+                        SLog("firstAvailableSeqNum now = ", firstAvailableSeqNum, "\n");
         }
+	else if (config.logCleanupPolicy == CleanupPolicy::CLEANUP)
+        {
+                const auto firstDirtyOffset = first_dirty_offset();
+                uint64_t dirtyBytes{0};
 
-        if (roSegments->size())
-                firstAvailableSeqNum = roSegments->front()->baseSeqNum;
-        else
-                firstAvailableSeqNum = cur.baseSeqNum;
+                if (trace)
+                        SLog("CLEANUP policy ", firstDirtyOffset, "\n");
 
-        if (trace)
-                SLog("firstAvailableSeqNum now = ", firstAvailableSeqNum, "\n");
+                for (auto it : *roSegments)
+                {
+                        if (it->baseSeqNum >= firstDirtyOffset)
+                                dirtyBytes += it->fileSize;
+
+                        sum += it->fileSize;
+                }
+
+                const double cleanable_ratio = double(dirtyBytes) / double(sum);
+
+                if (trace)
+                        SLog(ansifmt::color_blue, "dirtyBytes = ", dirtyBytes, ", sum = ", sum, ", cleanable_ratio = ", cleanable_ratio, ansifmt::reset, "\n");
+
+                if (cleanable_ratio >= config.logCleanRatioMin)
+                {
+                        compact(Buffer::build(basePath_, "/", partition->owner->name(), "/", partition->idx, "/").data());
+                }
+        }
 }
 
 bool topic_partition_log::should_roll(const uint32_t now) const
@@ -1524,7 +1787,7 @@ bool topic_partition_log::should_roll(const uint32_t now) const
         else if (cur.fileSize)
         {
                 if (trace)
-                        SLog(ansifmt::color_green, basePath, " Consider roll:cur.fileSize(", cur.fileSize, "), config.maxSegmentSize(", config.maxSegmentSize, "), skipList.size(", cur.index.skipList.size(), "), config.curSegmentMaxAge (", config.curSegmentMaxAge, "), ", Timings::Seconds::SysTime() - cur.createdTS, " old,  cur.rollJitterSecs = ", cur.rollJitterSecs, ansifmt::reset, "\n");
+                        SLog(ansifmt::color_green, " Consider roll:cur.fileSize(", cur.fileSize, "), config.maxSegmentSize(", config.maxSegmentSize, "), skipList.size(", cur.index.skipList.size(), "), config.curSegmentMaxAge (", config.curSegmentMaxAge, "), ", Timings::Seconds::SysTime() - cur.createdTS, " old,  cur.rollJitterSecs = ", cur.rollJitterSecs, ansifmt::reset, "\n");
 
                 if (cur.fileSize > config.maxSegmentSize)
                 {
@@ -1610,6 +1873,10 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 
         if (should_roll(now))
         {
+                Buffer basePath;
+
+                basePath.append(basePath_, "/", partition->owner->name(), "/", partition->idx, "/");
+
                 const auto basePathLen = basePath.length();
 
                 if (trace)
@@ -1617,7 +1884,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 
                 if (cur.fileSize != UINT32_MAX)
                 {
-                        auto newROFiles = std::make_unique<Switch::vector<ro_segment *>>();
+                        auto newROFiles = std::make_unique<std::vector<ro_segment *>>();
                         auto newROFile = std::make_unique<ro_segment>(cur.baseSeqNum, savedLastAssignedSeqNum, cur.createdTS);
                         const auto n = cur.fdh.use_count();
 
@@ -1671,7 +1938,10 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                         else
                                 newROFile->index.data = nullptr;
 
-                        newROFiles->Append(roSegments->values(), roSegments->size());
+			const auto prevSize = newROFiles->size();
+
+			newROFiles->insert(newROFiles->end(), roSegments->begin(), roSegments->end());
+			require(newROFiles->size() == prevSize + roSegments->size());
                         newROFiles->push_back(newROFile.release());
 
                         roSegments.reset(newROFiles.release());
@@ -2116,6 +2386,22 @@ bool Service::parse_partition_config(const char *const path, partition_config *c
                                         if (l->roSegmentsCnt < 2 && l->roSegmentsCnt)
                                                 throw Switch::range_error("Invalid value for ", k);
                                 }
+				else if (k.EqNoCase(_S("log.cleanup.policy")))
+				{
+					if (v.EqNoCase(_S("cleanup")))
+						l->logCleanupPolicy = CleanupPolicy::CLEANUP;
+					else if (v.EqNoCase(_S("delete")))
+						l->logCleanupPolicy = CleanupPolicy::DELETE;
+					else
+						throw Switch::range_error("Unexpected value for ", k, ": available options are cleanup and delete");
+				}
+				else if (k.EqNoCase(_S("log.cleaner.min.cleanable.ratio")))
+				{
+					l->logCleanRatioMin = v.AsDouble();
+
+					if (l->logCleanRatioMin < 0 || l->logCleanRatioMin > 1)
+                                                throw Switch::range_error("Invalid value for ", k);
+				}
                                 else if (k.EqNoCase(_S("log.retention.secs")))
                                 {
                                         l->lastSegmentMaxAge = parse_duration(v);
@@ -2129,7 +2415,7 @@ bool Service::parse_partition_config(const char *const path, partition_config *c
                                 else if (k.EqNoCase(_S("log.segment.bytes")))
                                 {
                                         l->maxSegmentSize = parse_size(v);
-                                        if (l->maxSegmentSize < 128)
+                                        if (l->maxSegmentSize < 64)
                                                 throw Switch::range_error("Invalid value for ", k);
                                 }
                                 else if (k.EqNoCase(_S("log.index.interval.bytes")))
@@ -2484,13 +2770,13 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                 auto l = new topic_partition_log();
 		bool processSwapped{true};
 
-                l->config = partitionConf;
+		l->partition = partition;
+		l->config = partitionConf;
                 partition->distinctId = ++nextDistinctPartitionId;
 
                 partition->log_.reset(l);
                 partition->idx = idx;
 
-                l->basePath.Append(basePath, basePathLen);
                 l->roSegments = nullptr;
                 l->cur.index.ondisk.data = nullptr;
                 l->cur.index.ondisk.span = 0;
@@ -2717,7 +3003,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         });
 
                         l->firstAvailableSeqNum = roLogs.front().firstAvailableSeqNum;
-                        l->roSegments.reset(new Switch::vector<ro_segment *>());
+                        l->roSegments.reset(new std::vector<ro_segment *>());
 
                         for (const auto &it : roLogs)
                         {
@@ -2730,7 +3016,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                 else
                 {
                         l->firstAvailableSeqNum = curLogSeqNum;
-                        l->roSegments.reset(new Switch::vector<ro_segment *>());
+                        l->roSegments.reset(new std::vector<ro_segment *>());
                 }
 
                 if (curLogSeqNum)
@@ -3223,6 +3509,9 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
         }
         catch (const std::exception &e)
         {
+		if (trace)
+			SLog("Cought exception:", e.what(), "\n");
+
                 return shutdown(c, __LINE__);
         }
 }
@@ -4328,7 +4617,7 @@ static void sig_handler(int)
 int Service::start(int argc, char **argv)
 {
         sockaddr_in sa;
-        uint64_t nextIdleCheck{0}, nextExpWaitCtxCheck{0};
+        uint64_t nextIdleCheck{0}, nextExpWaitCtxCheck{0}, nextPubSubQueueDrain{0}, nextCleanupTrackerPersist{0};
         int r;
         struct stat64 st;
         size_t totalPartitions{0};
@@ -4472,13 +4761,67 @@ int Service::start(int argc, char **argv)
                         std::vector<strwlen8_t> collectedTopics;
                         std::vector<std::future<void>> futures;
                         std::mutex collectLock;
+                        Switch::vector<std::pair<std::pair<strwlen8_t, uint16_t>, uint64_t>> cleanupCheckpoints;
 
                         if (trace)
                                 before = Timings::Microseconds::Tick();
 
                         for (const auto &&name : DirectoryEntries(basePath_.data()))
                         {
-                                if (*name.p != '.')
+                                if (name.Eq(_S(".cleanup.log")))
+                                {
+                                        int fd = open(Buffer::build(basePath_, "/", name).data(), O_RDONLY | O_LARGEFILE);
+
+                                        if (fd == -1)
+                                        {
+                                                Print("Failed to access ", name, ":", strerror(errno), "\n");
+                                                return 1;
+                                        }
+
+                                        const auto fileSize = lseek64(fd, 0, SEEK_END);
+
+                                        if (!fileSize)
+                                        {
+                                                close(fd);
+                                                continue;
+                                        }
+
+                                        auto fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, fd, 0);
+
+                                        close(fd);
+                                        if (fileData == MAP_FAILED)
+                                        {
+                                                Print("mmap() failed:", strerror(errno), "\n");
+                                                return 1;
+                                        }
+
+                                        Defer(
+                                            {
+                                                    munmap(fileData, fileSize);
+                                            });
+
+                                        madvise(fileData, fileSize, MADV_SEQUENTIAL);
+
+                                        strwlen8_t topicName;
+
+                                        for (const auto *p = (uint8_t *)fileData, *const e = p + fileSize; p != e;)
+                                        {
+                                                topicName.Set((char *)p + 1, *p);
+
+                                                p += topicName.len + sizeof(uint8_t);
+
+                                                const auto partition = *(uint16_t *)p;
+                                                p += sizeof(uint16_t);
+                                                const auto seqNum = *(uint64_t *)p;
+                                                p += sizeof(uint64_t);
+
+						SLog(topicName, " ", partition, " ", seqNum, "\n");
+
+						if (seqNum)
+                                                	cleanupCheckpoints.push_back({{{a.CopyOf(topicName.p, topicName.len), topicName.len}, partition}, seqNum});
+                                        }
+                                }
+                                else if (*name.p != '.')
                                         collectedTopics.push_back({a.CopyOf(name.p, name.len), name.len});
                         }
 
@@ -4617,6 +4960,27 @@ int Service::start(int argc, char **argv)
                                         partitions.clear();
                                 }
 
+				for (const auto &it : cleanupCheckpoints)
+				{
+					const auto topic = it.first.first;
+					const auto partition = it.first.second;
+					auto seqNum = it.second;
+
+					if (auto t = topic_by_name(topic))
+					{
+						if (partition < t->partitions_->size())
+						{
+							auto log = t->partitions_->at(partition)->log_.get();
+
+                                                        if (seqNum < log->firstAvailableSeqNum)
+                                                                seqNum = log->firstAvailableSeqNum - 1;
+
+                                                        log->lastCleanupMaxSeqNum = seqNum;
+							cleanupTracker.push_back(log);	 // TODO: If we support topic/partitions deletes, we need to remove from cleanupTracker
+						}
+					}
+				}
+
                                 if (trace)
                                         SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " to initialize all partitions\n");
                         }
@@ -4702,7 +5066,7 @@ int Service::start(int argc, char **argv)
         signal(SIGINT, sig_handler);
         while (likely(running))
         {
-                const auto r = poller.Poll(1000);
+                const auto r = poller.Poll(500);
 
                 if (r == -1)
                 {
@@ -4714,6 +5078,101 @@ int Service::start(int argc, char **argv)
                 }
 
                 const auto nowMS = Timings::Milliseconds::Tick();
+
+
+#if 0
+		if (1)
+		{
+			static uint32_t done{0};
+
+			if (done != 20000)
+			{
+				require(topics.size())
+				auto topic  = (*topics.begin()).value();
+				require(topic->partitions_->size());
+				auto partition = topic->partitions_->front();
+				auto log = partition->log_.get();
+
+				if (!log->compacting)
+                                {
+                                        log->compact(Buffer::build(basePath_, "/", topic->name(), "/", partition->idx, "/").data());
+                                        ++done;
+                                }
+                        }
+		}
+#endif
+	
+		if (nowMS > nextPubSubQueueDrain)
+                {
+                        if (auto it = mainThreadClosures.drain())
+                        {
+                                // we don't care about the order those closures are executed
+                                // but we may as well reverse the list anyway
+                                mainthread_closure *rh{nullptr};
+
+                                while (it)
+                                {
+                                        auto t{it};
+
+                                        it = t->next;
+                                        t->next = rh;
+                                        rh = t;
+                                }
+
+                                do
+                                {
+                                        auto next = rh->next;
+
+					if (trace)
+						SLog("Executing\n");
+
+                                        (*rh)();
+                                        delete rh;
+                                        rh = next;
+                                } while (rh);
+                        }
+
+                        // no need to check very frequently if we need to drain the closures queue
+                        nextPubSubQueueDrain = nowMS + 120;
+                }
+
+                if (nowMS > nextCleanupTrackerPersist)
+                {
+                        if (cleanupTrackerIsDirty)
+                        {
+                                IOBuffer b;
+                                int fd;
+
+                                for (auto it : cleanupTracker)
+                                {
+                                        const auto topic = it->partition->owner->name();
+
+                                        b.Serialize(topic.len);
+                                        b.Serialize(topic.p, topic.len);
+                                        b.Serialize<uint16_t>(it->partition->idx);
+                                        b.Serialize<uint64_t>(it->lastCleanupMaxSeqNum);
+                                }
+
+                                fd = open(Buffer::build(basePath_, "/.cleanup.log.int").data(), O_WRONLY | O_TRUNC | O_CREAT, 0775);
+                                if (fd == -1)
+                                        Print("Failed to update cleanup log:", strerror(errno), "\n");
+                                else if (write(fd, b.data(), b.length()) != b.length())
+                                {
+                                        Print("Failed to update cleanup log:", strerror(errno), "\n");
+                                        close(fd);
+                                }
+                                else
+                                {
+                                        close(fd);
+                                        if (Rename(Buffer::build(basePath_, "/.cleanup.log.int").data(), Buffer::build(basePath_, "/.cleanup.log").data()) == -1)
+                                                Print("Failed to update cleanup log:", strerror(errno));
+                                }
+
+                                cleanupTrackerIsDirty = false;
+                        }
+
+                        nextCleanupTrackerPersist = nowMS + Timings::Seconds::ToMillis(4);
+                }
 
                 for (const auto *it = poller.Events(), *const e = it + r; it != e; ++it)
                 {

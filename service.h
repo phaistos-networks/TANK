@@ -80,6 +80,11 @@ struct fd_handle
 
 // A read-only (immutable, frozen-sealed) partition commit log(Segment) (and the index file for quick lookups)
 // we don't need to acquire a lock to access this
+//
+// we need to ref-count ro_segments so that we can hand off the list of current ro segments to another thread for compaction, so that
+// while the compaction is in progess, we won't delete any of those segments passed to the thread (i.e in consider_ro_segments() )
+// For now, we can return immediately from consider_ro_segments() if compaction is scheduled for the partition, and later we can
+// do this properly.
 struct ro_segment
 {
         // the absolute sequence number of the first message in this segment
@@ -199,6 +204,12 @@ struct lookup_res
         }
 };
 
+enum class CleanupPolicy: uint8_t
+{
+	DELETE = 0,
+	CLEANUP
+};
+
 struct partition_config
 {
         // Kafka defaults
@@ -212,6 +223,8 @@ struct partition_config
         size_t curSegmentMaxAge{86400 * 7};  // 1 week (soft limit)
         size_t flushIntervalMsgs{0};         // never
         size_t flushIntervalSecs{0};         // never
+	CleanupPolicy logCleanupPolicy{CleanupPolicy::DELETE};
+	float logCleanRatioMin{0.5};
 } config;
 
 static void PrintImpl(Buffer &out, const lookup_res &res)
@@ -223,6 +236,7 @@ static void PrintImpl(Buffer &out, const lookup_res &res)
 }
 
 // An append-only log for storing bundles, divided into segments
+struct topic_partition;
 struct topic_partition_log
 {
 
@@ -232,7 +246,16 @@ struct topic_partition_log
         // This will be initialized from the latest segment in initPartition()
         uint64_t lastAssignedSeqNum{0};
 
-        Buffer basePath;
+	topic_partition *partition;
+	bool compacting{false};
+
+	// Whenever we cleanup, we update lastCleanupMaxSeqNum with the lastAvailSeqNum of the latest ro segment compacted
+	uint64_t lastCleanupMaxSeqNum{0};
+
+        auto first_dirty_offset() const
+        {
+                return lastCleanupMaxSeqNum + 1;
+        }
 
         struct
         {
@@ -290,14 +313,15 @@ struct topic_partition_log
 
         } cur; // the _current_ (latest) segment
 
-        partition_config config;
+	partition_config config;
+
 
         // a topic partition is comprised of a set of segments(log file, index file) which
         // are immutable, and we don't need to serialize access to them, and a cur(rent) segment, which is not immutable.
         //
         // roSegments can also be atomically exchanged with a new vector, so we don't need to protect that either
         // make sure roSegments is sorted
-        std::shared_ptr<Switch::vector<ro_segment *>> roSegments;
+        std::shared_ptr<std::vector<ro_segment *>> roSegments;
 
         ~topic_partition_log()
         {
@@ -369,6 +393,7 @@ struct topic_partition
         uint32_t distinctId;
         topic *owner{nullptr};
         uint16_t localBrokerId; // for convenience
+        partition_config config;
 
         struct replica
             : public RefCounted<replica>
@@ -744,7 +769,6 @@ class Service
 #else
         Switch::unordered_map<strwlen8_t, topic *> topics;
 #endif
-        Buffer basePath_;
         uint16_t selfBrokerId{1};
         Switch::vector<IOBuffer *> bufs;
         Switch::vector<connection *> connsPool;
