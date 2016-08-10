@@ -178,7 +178,7 @@ msgId `0x1`  or `0x5`
 		topic
 		{
 			topic name:str8 		Name of the topic
-			partitions cnt:u8		Total distinct partitions from this topic to publush to
+			partitions cnt:u8		Total distinct partitions from this topic to publish to
 
 			partition 					
 			{
@@ -226,7 +226,7 @@ msgId `0x1`
 
 }
 ```
-Not that the client should store the sequence of (topic, partions...) for the publish request, so that processing the publish response can use that information. This is so that we wouldn't have to encode (topic, partition) again in the publish response.
+Note that the client should store the sequence of (topic, partions...) for the publish request, so that processing the publish response can use that information. This is so that we wouldn't have to encode (topic, partition) again in the publish response.
 
 
 
@@ -239,7 +239,7 @@ msgId `0x4`
 }
 ```
 
-Immediately upon connecting, the first request from a replica(follower) should be a replica ID req, where the replica ID is advertised to the broker. This way, the broker will know that the connection originated from a known broker in a cluster. This is currently not used, because clustered mode support has not be implemented yet.
+Immediately upon connecting, the first request from a replica(follower) should be a replica ID req, where the replica ID is advertised to the broker. This way, the broker will know that the connection originated from a known broker in a cluster. This is currently not used, because clustered mode support has not been implemented yet.
 
 
 
@@ -247,4 +247,4 @@ Immediately upon connecting, the first request from a replica(follower) should b
 ### Ping
 msgId `0x3`  
 
-This message has no payload. The broker is expected to immediately ping any client or broker that connects to it, and periodically do so as a hearbeat. The client should consider the connection to a broker successfull only as soon as it has received a ping from the broker.
+This message has no payload. The broker is expected to immediately ping any client or broker that connects to it, and periodically do so as a hearbeat. The client should consider the connection to a broker successful only as soon as it has received a ping from the broker.
