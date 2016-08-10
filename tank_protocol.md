@@ -35,7 +35,7 @@ msgId is `0x2`
 	client version:u16 			A client version, for versioning. Use 0 for current version
 	request id:u32 				Every request is assigned a request id, and used by the initiator for tracking. The broker will always return that request in the response
 	client id:str8 				This is used for debugging and tracing. You may omit it or set it to some dummy value.
-	max wait:u64 	 			Please see below for wait and min bytes semantics
+	max wait(ms):u64 			Please see below for wait and min bytes semantics
 	min bytes:u32 				Please see below for wait and min bytes semantics
 	topics count:u8 			How many distinct topics are requested
 
