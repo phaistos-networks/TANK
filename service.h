@@ -753,7 +753,7 @@ struct connection
         } state;
 };
 
-class Service
+class Service final
 {
 	friend struct ro_segment;
 
@@ -781,7 +781,9 @@ class Service
         Switch::vector<topic_partition *> deferList;
 
       private:
-        static bool parse_partition_config(const char *, partition_config *);
+        static void parse_partition_config(const char *, partition_config *);
+
+        static void parse_partition_config(const strwlen32_t, partition_config *);
 
         auto get_outgoing_queue()
         {

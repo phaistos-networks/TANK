@@ -14,7 +14,7 @@
 
 // Tank, because its a large container of liquid or gas
 // and data flow (as in, liquid), and also, this is a Trinity character name
-class TankClient
+class TankClient final
 {
       private:
         struct broker;
@@ -615,7 +615,7 @@ class TankClient
 
 	uint32_t discover_partitions(const strwlen8_t topic);
 
-	uint32_t create_topic(const strwlen8_t topic, const uint16_t numPartitions);
+	uint32_t create_topic(const strwlen8_t topic, const uint16_t numPartitions, const strwlen32_t configuration);
 
 
         void set_client_id(const char *const p, const uint32_t len)

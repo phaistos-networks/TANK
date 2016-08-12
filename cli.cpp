@@ -427,20 +427,40 @@ int main(int argc, char *argv[])
         }
         else if (cmd.Eq(_S("create_topic")))
         {
-		optind = 0;
-		while ((r = getopt(argc, argv, "+h")) != -1)
-		{
-			switch (r)
-			{
-				case 'h':
-					Print("create_topic total_partitions\n");
-					Print("Will create a new topic named '", topicPartition.first, "', with total_partitions total partitions\n");
-					return 0;
+		Buffer config;
 
-				default:
-					return 1;
-			}
-		}
+		optind = 0;
+		while ((r = getopt(argc, argv, "+ho:")) != -1)
+                {
+                        switch (r)
+                        {
+                                case 'h':
+                                        Print("create_topic [options] total_partitions\n");
+                                        Print("Will create a new topic named '", topicPartition.first, "', with total_partitions total partitions\n");
+					Print("Options include:\n");
+					Print("-o config-options: A ',' separated list of key=value options, that will be stored in the configuration of the new topic\n");
+					Print("\tSee https://github.com/phaistos-networks/TANK/wiki/Configuration for available configuration options\n");
+                                        return 0;
+
+                                case 'o':
+                                        for (const auto &it : strwlen32_t(optarg).Split(','))
+                                        {
+                                                strwlen32_t k, v;
+
+                                                std::tie(k, v) = it.Divided('=');
+                                                if (!k || !v)
+                                                {
+                                                        Print("Invalid configuration syntax for [", it, "]\n");
+                                                        return 1;
+                                                }
+                                                config.append(k, "=", v, "\n");
+                                        }
+                                        break;
+
+                                default:
+                                        return 1;
+                        }
+                }
                 argc -= optind;
                 argv += optind;
 
@@ -458,7 +478,7 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 
-                const auto reqId = tankClient.create_topic(topicPartition.first, s.AsUint32());
+                const auto reqId = tankClient.create_topic(topicPartition.first, s.AsUint32(), config.AsS32());
 
                 if (!reqId)
                 {

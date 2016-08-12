@@ -831,7 +831,7 @@ bool TankClient::try_transmit(broker *const bs)
         return false;
 }
 
-uint32_t TankClient::create_topic(const strwlen8_t topic, const uint16_t totPartitions)
+uint32_t TankClient::create_topic(const strwlen8_t topic, const uint16_t totPartitions, const strwlen32_t config)
 {
         expect(topic);
         expect(totPartitions);
@@ -850,6 +850,8 @@ uint32_t TankClient::create_topic(const strwlen8_t topic, const uint16_t totPart
         b.Serialize(topic.len);
         b.Serialize(topic.p, topic.len);
 	b.Serialize<uint16_t>(totPartitions);
+	b.SerializeVarUInt32(config.len);
+	b.Serialize(config.p, config.len);
 
         payload->iov[0] = {(void *)b.data(), b.length()};
         payload->iovCnt = 1;
@@ -1270,7 +1272,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                 require(ctx < ctxEnd);
 
                 auto err = *p++;
-                const strwlen8_t topicName((char *)ctx + 1, *ctx);
+                const strwlen8_t topicName(resultsAllocator.CopyOf((char *)ctx + 1, *ctx), *ctx);
                 ctx += topicName.len + sizeof(uint8_t);
                 auto partitionsCnt = *ctx++;
 

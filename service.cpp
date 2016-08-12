@@ -149,18 +149,18 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
 
 std::pair<uint32_t, uint32_t> ro_segment::snapDown(const uint64_t absSeqNum) const
 {
-	if (haveWideEntries)
-	{
-		IMPLEMENT_ME();
-	}
-		
+        if (haveWideEntries)
+        {
+                IMPLEMENT_ME();
+        }
+
         const auto relSeqNum = uint32_t(absSeqNum - baseSeqNum);
 
-	if (relSeqNum == baseSeqNum)
-	{
-		// optimization
-		return {relSeqNum, 0};
-	}
+        if (relSeqNum == baseSeqNum)
+        {
+                // optimization
+                return {relSeqNum, 0};
+        }
 
         const auto *const all = reinterpret_cast<const index_record *>(index.data);
         const auto *const end = all + index.fileSize / sizeof(index_record);
@@ -180,10 +180,10 @@ std::pair<uint32_t, uint32_t> ro_segment::snapDown(const uint64_t absSeqNum) con
 
 std::pair<uint32_t, uint32_t> ro_segment::snapUp(const uint64_t absSeqNum) const
 {
-	if (haveWideEntries)
-	{
-		IMPLEMENT_ME();
-	}
+        if (haveWideEntries)
+        {
+                IMPLEMENT_ME();
+        }
 
         const auto relSeqNum = uint32_t(absSeqNum - baseSeqNum);
         const auto *const all = reinterpret_cast<const index_record *>(index.data);
@@ -239,16 +239,16 @@ static uint32_t search_before_offset(uint64_t baseSeqNum, const uint32_t maxSize
                         p += sizeof(uint64_t);
 
                         if (msgSetSize != 1)
-			{
+                        {
                                 lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p) + 1;
-			}
+                        }
                         else
-			{
+                        {
                                 lastMsgSeqNum = firstMsgSeqNum;
-			}
+                        }
 
-			if (trace)
-				SLog("sparseBundleBitSet is set, firstMsgSeqNum = ", firstMsgSeqNum, ", lastMsgSeqNum = ", lastMsgSeqNum, "\n");
+                        if (trace)
+                                SLog("sparseBundleBitSet is set, firstMsgSeqNum = ", firstMsgSeqNum, ", lastMsgSeqNum = ", lastMsgSeqNum, "\n");
                 }
 
                 if (trace)
@@ -294,7 +294,7 @@ static bool adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
 {
         uint64_t baseSeqNum = res.absBaseSeqNum;
 
-	if (trace == false) 	// explicitly allow so that we can verify it does the right thing when tracing
+        if (trace == false) // explicitly allow so that we can verify it does the right thing when tracing
         {
                 if (baseSeqNum == absSeqNum || absSeqNum <= 1)
                 {
@@ -312,7 +312,7 @@ static bool adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
         auto o = baseOffset;
         const auto fileOffsetCeiling = res.fileOffsetCeiling;
         uint64_t before = trace ? Timings::Microseconds::Tick() : 0, lastMsgSeqNum;
-	bool firstBundleIsSparse{false};
+        bool firstBundleIsSparse{false};
 
         if (trace)
                 SLog(ansifmt::bold, ansifmt::color_brown, "About to adjust range fileOffset ", baseOffset, ", absBaseSeqNum(", baseSeqNum, "), absSeqNum(", absSeqNum, ")", ansifmt::reset, "\n");
@@ -338,33 +338,32 @@ static bool adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
                 if (!msgSetSize)
                         msgSetSize = Compression::UnpackUInt32(p);
 
-		if (sparseBundleBitSet)
+                if (sparseBundleBitSet)
                 {
                         const auto firstMsgSeqNum = *(uint64_t *)p;
                         p += sizeof(uint64_t);
 
                         if (msgSetSize != 1)
-			{
+                        {
                                 lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p) + 1;
-			}
+                        }
                         else
-			{
+                        {
                                 lastMsgSeqNum = firstMsgSeqNum;
-			}
+                        }
 
-			if (trace)
-				SLog("sparseBundleBitSet, firstMsgSeqNum = ", firstMsgSeqNum, ", lastMsgSeqNum, ", lastMsgSeqNum, "\n");
+                        if (trace)
+                                SLog("sparseBundleBitSet, firstMsgSeqNum = ", firstMsgSeqNum, ", lastMsgSeqNum, ", lastMsgSeqNum, "\n");
 
-			firstBundleIsSparse = true;
+                        firstBundleIsSparse = true;
                 }
-		else
-			firstBundleIsSparse = false;
+                else
+                        firstBundleIsSparse = false;
 
                 const auto nextBundleBaseSeqNum = sparseBundleBitSet ? lastMsgSeqNum + 1 : baseSeqNum + msgSetSize;
 
                 if (trace)
                         SLog("Now at bundle(", baseSeqNum, "), msgSetSize(", msgSetSize, "), bundleFlags(", bundleFlags, "), nextBundleBaseSeqNum = ", nextBundleBaseSeqNum, "\n");
-
 
                 if (absSeqNum >= nextBundleBaseSeqNum)
                 {
@@ -390,7 +389,7 @@ static bool adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
         if (trace)
                 SLog(ansifmt::color_blue, "After adjustement, fileOffset ", res.fileOffset, ", absBaseSeqNum(", res.absBaseSeqNum, "), took  ", duration_repr(Timings::Microseconds::Since(before)), ansifmt::reset, "\n");
 
-	return firstBundleIsSparse;
+        return firstBundleIsSparse;
 }
 
 lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum)
@@ -398,11 +397,11 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
         // lock is expected to be locked
         require(absSeqNum >= cur.baseSeqNum);
 
-	if (cur.index.haveWideEntries)
-	{
-		// need to use the appropriate skipList64 and a different index encodig format
-		IMPLEMENT_ME();
-	}
+        if (cur.index.haveWideEntries)
+        {
+                // need to use the appropriate skipList64 and a different index encodig format
+                IMPLEMENT_ME();
+        }
 
         lookup_res res;
         const auto highWatermark = lastAssignedSeqNum;
@@ -521,12 +520,11 @@ struct PubSubQueue
                 } while (!list.compare_exchange_weak(old, v, std::memory_order_release, std::memory_order_relaxed));
         }
 
+        bool any() const
+        {
+                return list.load(std::memory_order_relaxed);
+        }
 
-	bool any() const
-	{
-		return list.load(std::memory_order_relaxed);
-	}
-	
         inline T *drain()
         {
                 if (!list.load(std::memory_order_relaxed))
@@ -581,8 +579,8 @@ struct mainthread_closure
 
 static PubSubQueue<mainthread_closure> mainThreadClosures;
 
-template<typename F, typename...Arg>
-static void run_on_main_thread(F &&l, Arg&&... args)
+template <typename F, typename... Arg>
+static void run_on_main_thread(F &&l, Arg &&... args)
 {
         mainThreadClosures.push_back(new mainthread_closure(std::bind(l, std::forward<Arg>(args)...)));
 }
@@ -597,7 +595,6 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                 strwlen32_t content;
         };
 
-
         static constexpr bool trace{false};
         uint64_t firstMsgSeqNum, lastMsgSeqNum, msgSeqNum;
         range_base<const uint8_t *, size_t> msgSetContent;
@@ -608,7 +605,6 @@ static void compact_partition(topic_partition_log *const log, const char *const 
         IOBuffer *cur{nullptr};
         size_t base{0};
         static constexpr uint64_t ptrBit{uint64_t(1) << (sizeof(uintptr_t) * 8 - 1)};
-
 
         const auto compact = [&anyDropped](Switch::vector<msg> &msgs) {
 
@@ -679,16 +675,16 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                     {
                             auto it = vmas.back();
 
-			    madvise(it.first, it.second, MADV_DONTNEED);
+                            madvise(it.first, it.second, MADV_DONTNEED);
                             munmap(it.first, it.second);
                             vmas.pop_back();
                     }
             });
 
         if (trace)
-		SLog(prevSegments.size(), " segments\n");
+                SLog(prevSegments.size(), " segments\n");
 
-	for (auto it : prevSegments)
+        for (auto it : prevSegments)
         {
                 int fd = it->fdh->fd;
                 const auto fileSize = it->fileSize;
@@ -891,10 +887,6 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                 }
         }
 
-
-
-
-
         if (!compact(msgs))
         {
 #if 1
@@ -903,12 +895,12 @@ static void compact_partition(topic_partition_log *const log, const char *const 
 
                 run_on_main_thread([log]() {
                         log->compacting = false;
-			Print("Did not need to compact log\n");
+                        Print("Did not need to compact log\n");
                 });
 
                 return;
 #else
-		Print("ENABLE AGAIN\n");
+                Print("ENABLE AGAIN\n");
 
                 std::sort(msgs.begin(), msgs.end(), [](const auto &a, const auto &b) {
                         return a.seqNum < b.seqNum;
@@ -922,17 +914,12 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         Print(it.seqNum, " [", it.key, "] [", it.content, "]\n");
         }
 
-
-
-
-
-
-	// go through all segments, rebuild each of them by keeping only the messages that existed in that segment (we can just use a range check for first available, last assigned)
-	// but if after compaction a segment's too small (in terms of file size), then include into it messages from successive segments, and in that case
-	// use the last segment's timestamp that is to be encoded in the filename
+        // go through all segments, rebuild each of them by keeping only the messages that existed in that segment (we can just use a range check for first available, last assigned)
+        // but if after compaction a segment's too small (in terms of file size), then include into it messages from successive segments, and in that case
+        // use the last segment's timestamp that is to be encoded in the filename
         static constexpr size_t sinceLastUpdateBytesThreshold{10000}, sinceLastUpdateMsgsCntThreshold{128}, maxBundleMsgsSetSize{5}, maxBundleMsgsSetSizeBytes{65536}; // XXX: arbitrary
-	static constexpr size_t minSegmentLogFileSize{64 *1024}; // XXX: arbitrary
-	std::vector<ro_segment *> newSegments;
+        static constexpr size_t minSegmentLogFileSize{64 * 1024};                                                                                                      // XXX: arbitrary
+        std::vector<ro_segment *> newSegments;
         int fd;
         char logPath[PATH_MAX];
         const auto n = msgs.size();
@@ -971,9 +958,6 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                 iovLen = 0;
         };
 
-
-
-
         try
         {
                 const char *destPartitionPath;
@@ -1000,7 +984,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         auto curSegment = prevSegments[curSegmentIdx];
                         const auto baseSeqNum{all[i].seqNum};
                         auto curSegmentLastAvailSeqNum = curSegment->lastAvailSeqNum;
-			index_record indexLastRecorded;
+                        index_record indexLastRecorded;
 
                         if (trace)
                                 SLog(ansifmt::bold, ansifmt::color_blue, "Now processing segment ", curSegmentIdx, "/", prevSegments.size(), " (", baseSeqNum, ", ", curSegment->lastAvailSeqNum, ")", ansifmt::reset, "\n");
@@ -1051,7 +1035,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                         // TODO: if (all[base].seqNum - baseSeqNum > threshold, need to
                                         // switch to wide-entries index
                                         indexLastRecorded.relSeqNum = all[base].seqNum - baseSeqNum;
-					indexLastRecorded.absPhysical = outFileSize;
+                                        indexLastRecorded.absPhysical = outFileSize;
 
                                         index.Serialize<uint32_t>(indexLastRecorded.relSeqNum);
                                         index.Serialize<uint32_t>(indexLastRecorded.absPhysical);
@@ -1138,7 +1122,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                                 encodeSparseDelta = false;
                                         }
 
-					if (trace)
+                                        if (trace)
                                                 SLog("message ", k - base, " ", m.seqNum, ", asSparse = ", asSparse, ", encodeSparseDelta = ", encodeSparseDelta, "\n");
 
                                         if (m.ts == lastTS && k != base)
@@ -1222,7 +1206,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                 const auto _l = out.length();
 
                                 out.SerializeVarUInt32(bundleLength);
-				const auto bundleLengthReprLen = out.length() - _l;
+                                const auto bundleLengthReprLen = out.length() - _l;
                                 iov[bundleLengthIOVIdx] = {(void *)uintptr_t(_l | (1u << 31)), bundleLengthReprLen};
 
                                 outFileSize += bundleLengthReprLen;
@@ -1264,19 +1248,19 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         fd = open(Buffer::build(destPartitionPath, "/", baseSeqNum, ".index.cleaned").data(), O_RDWR | O_CREAT | O_LARGEFILE | O_TRUNC, 0775);
 
                         if (fd == -1)
-			{
-				close(logFd);
+                        {
+                                close(logFd);
                                 throw Switch::system_error("Failed to access new segment's index:", strerror(errno));
-			}
+                        }
 
                         if (write(fd, index.data(), index.length()) != index.length())
-			{
-				close(logFd);
-				close(fd);
+                        {
+                                close(logFd);
+                                close(fd);
                                 throw Switch::system_error("Failed to create new segment's index:", strerror(errno));
-			}
+                        }
 
-			fdatasync(logFd);
+                        fdatasync(logFd);
 
                         // We could have instead used (firstSegmentConsumedForThisNewSegment->baseSeqNum, curSegmentLastAvailSeqNum)
                         // instead of (baseSeqNum, all[i - 1].seqNum), which would have retained the filename for some segments cleaned up onto themselves
@@ -1288,18 +1272,18 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         auto newSegment = std::make_unique<ro_segment>(baseSeqNum, lastAvailSeqNum, curSegment->createdTS);
 
                         newSegment->fdh.reset(new fd_handle(logFd));
-			require(newSegment->fdh.use_count() == 2);
-			newSegment->fdh->Release();
+                        require(newSegment->fdh.use_count() == 2);
+                        newSegment->fdh->Release();
                         newSegment->fileSize = outFileSize;
                         newSegment->index.data = reinterpret_cast<const uint8_t *>(mmap(nullptr, index.length(), PROT_READ, MAP_SHARED, fd, 0));
                         newSegment->index.fileSize = index.length();
                         newSegment->index.lastRecorded = indexLastRecorded;
 
-			if (trace)
+                        if (trace)
                                 SLog(newSegment->fileSize, " ", lseek64(newSegment->fdh->fd, 0, SEEK_END), "\n");
 
                         require(newSegment->index.fileSize == lseek64(fd, 0, SEEK_END));
-			require(newSegment->fileSize == lseek64(newSegment->fdh->fd, 0, SEEK_END));
+                        require(newSegment->fileSize == lseek64(newSegment->fdh->fd, 0, SEEK_END));
 
                         close(fd);
                         fd = -1;
@@ -1307,7 +1291,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         if (newSegment->index.data == MAP_FAILED)
                                 throw Switch::system_error("mmap() failed:", strerror(errno));
 
-			require(newSegment->fdh.use_count() == 1);
+                        require(newSegment->fdh.use_count() == 1);
                         newSegments.push_back(newSegment.release());
 
                         if (trace)
@@ -1317,11 +1301,8 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                 if (trace)
                         SLog("Done scanning RO segments\n");
 
-
-
-
                 // We have created a new set of segments, so we need to replace their .cleaned extension with a .swap extension
-		// During startup, if we find any *.cleaned files, then we 'll delete them and will also remove any .swap files left around
+                // During startup, if we find any *.cleaned files, then we 'll delete them and will also remove any .swap files left around
                 for (auto it : newSegments)
                 {
                         if (Rename(Buffer::build(destPartitionPath, it->baseSeqNum, "-", it->lastAvailSeqNum, "_", it->createdTS, ".ilog.cleaned").data(),
@@ -1337,9 +1318,8 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         }
                 }
 
-
-		// Rename input segments by appending the .log extension to both log files and index files
-		for (auto it : prevSegments)
+                // Rename input segments by appending the .log extension to both log files and index files
+                for (auto it : prevSegments)
                 {
                         if (const auto createdTS = it->createdTS)
                         {
@@ -1365,7 +1345,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         }
                 }
 
-		// Strip .swap extension from the set of new segments files
+                // Strip .swap extension from the set of new segments files
                 for (auto it : newSegments)
                 {
                         if (Rename(Buffer::build(destPartitionPath, it->baseSeqNum, "-", it->lastAvailSeqNum, "_", it->createdTS, ".ilog.swap").data(),
@@ -1381,7 +1361,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         }
                 }
 
-		// Unlink all input segment files
+                // Unlink all input segment files
                 for (auto it : prevSegments)
                 {
                         char path[PATH_MAX];
@@ -1395,41 +1375,41 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         if (Unlink(path) == -1)
                                 throw Switch::system_error("Failed to remove ", strwlen32_t(path, pathLen), ": ", strerror(errno));
 
-			Snprint(path, sizeof(path), basePartitionPath, "/", it->baseSeqNum, ".index.old");
-			if (Unlink(path) == -1)
-				throw Switch::system_error("Failed to unlink file:", strerror(errno));
+                        Snprint(path, sizeof(path), basePartitionPath, "/", it->baseSeqNum, ".index.old");
+                        if (Unlink(path) == -1)
+                                throw Switch::system_error("Failed to unlink file:", strerror(errno));
                 }
 
                 // Replace segments
                 run_on_main_thread([ log, segments = std::move(prevSegments), newSegments = std::move(newSegments) ]() {
-			auto roSegments = log->roSegments.get();
-			auto it = std::find(roSegments->begin(), roSegments->end(), segments.front());
-			const auto upto = segments.back()->lastAvailSeqNum;
-		
-			require(it != roSegments->end());
+                        auto roSegments = log->roSegments.get();
+                        auto it = std::find(roSegments->begin(), roSegments->end(), segments.front());
+                        const auto upto = segments.back()->lastAvailSeqNum;
 
-			// remove segments from current roSegments[]
+                        require(it != roSegments->end());
+
+                        // remove segments from current roSegments[]
                         std::for_each(it, it + segments.size(), [](auto ptr) { delete ptr; });
                         roSegments->erase(it, it + segments.size());
 
-			// replace removed segments with new segments
-			roSegments->insert(it, newSegments.begin(), newSegments.end());
+                        // replace removed segments with new segments
+                        roSegments->insert(it, newSegments.begin(), newSegments.end());
 
-			log->compacting = false;
-			if (!log->lastCleanupMaxSeqNum)
-			{
-				cleanupTracker.push_back(log);
-			}
-			log->lastCleanupMaxSeqNum = upto;
-			cleanupTrackerIsDirty = true;
+                        log->compacting = false;
+                        if (!log->lastCleanupMaxSeqNum)
+                        {
+                                cleanupTracker.push_back(log);
+                        }
+                        log->lastCleanupMaxSeqNum = upto;
+                        cleanupTrackerIsDirty = true;
 
-			if (trace)
+                        if (trace)
                         {
                                 for (auto it : *roSegments)
                                         SLog("(", it->baseSeqNum, ", ", it->lastAvailSeqNum, ") ", it->fdh.use_count(), " ", it->fdh->fd, "\n");
                         }
 
-			Print("Compacted partition segments\n");
+                        Print("Compacted partition segments\n");
                 });
         }
         catch (...)
@@ -1475,8 +1455,8 @@ void topic_partition_log::compact(const char *const basePartitionPath)
         for (auto it : *roSegments)
                 compaction->prevSegments.push_back(it);
 
-	if (trace)
-		SLog("Compaction for [", basePartitionPath, "]\n");
+        if (trace)
+                SLog("Compaction for [", basePartitionPath, "]\n");
 
         Drequire(compaction->prevSegments.size());
 
@@ -1607,27 +1587,26 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
 
         if (it != end)
         {
-		// Solves:  https://github.com/phaistos-networks/TANK/issues/2
-		// for e.g (1,26), (28, 50)
-		// when you request 27 which may no longer exist because of compaction/cleanup, we need
-		// to properly advance to the _next_ segment, and adjust absSeqNum
-		// accordingly
-		// (TODO: we should probably come up with a binary search alternative to this linear search scan)
-		while (absSeqNum > (*it)->lastAvailSeqNum && ++it != end)
-		{
-			if (trace)
-				SLog("Adjusting ", absSeqNum, " to ", (*it)->baseSeqNum, "\n");
+                // Solves:  https://github.com/phaistos-networks/TANK/issues/2
+                // for e.g (1,26), (28, 50)
+                // when you request 27 which may no longer exist because of compaction/cleanup, we need
+                // to properly advance to the _next_ segment, and adjust absSeqNum
+                // accordingly
+                // (TODO: we should probably come up with a binary search alternative to this linear search scan)
+                while (absSeqNum > (*it)->lastAvailSeqNum && ++it != end)
+                {
+                        if (trace)
+                                SLog("Adjusting ", absSeqNum, " to ", (*it)->baseSeqNum, "\n");
 
-			absSeqNum = (*it)->baseSeqNum;
-		}
+                        absSeqNum = (*it)->baseSeqNum;
+                }
 
                 const auto f = *it;
                 const auto res = f->translateDown(absSeqNum, UINT32_MAX);
                 uint32_t offsetCeil;
 
-		Drequire(f->fdh.use_count());
-		Drequire(f->fdh->fd != -1);
-
+                Drequire(f->fdh.use_count());
+                Drequire(f->fdh->fd != -1);
 
                 if (trace)
                 {
@@ -1635,7 +1614,6 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
                         for (const auto &it : *prevSegments)
                                 SLog(">> (", it->baseSeqNum, ", ", it->lastAvailSeqNum, ")\n");
                 }
-
 
                 if (maxAbsSeqNum != UINT64_MAX)
                 {
@@ -1686,14 +1664,14 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
 void topic_partition_log::consider_ro_segments()
 {
 
-	if (compacting)
-	{
-		// Busy compacting
+        if (compacting)
+        {
+                // Busy compacting
                 if (trace)
                         SLog("Compacting\n");
 
-		return;
-	}
+                return;
+        }
 
         uint64_t sum{0};
         const uint32_t nowTS = Timings::Seconds::SysTime();
@@ -1701,19 +1679,19 @@ void topic_partition_log::consider_ro_segments()
         if (trace)
                 SLog(ansifmt::bold, ansifmt::color_blue, "Considering segments sum=", sum, ", total = ", roSegments->size(), " limits { roSegmentsCnt ", config.roSegmentsCnt, ", roSegmentsSize ", config.roSegmentsSize, "}", ansifmt::reset, "\n");
 
-	if (config.logCleanupPolicy == CleanupPolicy::DELETE)
+        if (config.logCleanupPolicy == CleanupPolicy::DELETE)
         {
-		if (trace)
-			SLog("DELETE policy\n");
+                if (trace)
+                        SLog("DELETE policy\n");
 
                 for (auto it : *roSegments)
                         sum += it->fileSize;
 
                 while (roSegments->size() && ((config.roSegmentsCnt && roSegments->size() > config.roSegmentsCnt) || (config.roSegmentsSize && sum > config.roSegmentsSize) || (roSegments->front()->createdTS && config.lastSegmentMaxAge && roSegments->front()->createdTS + config.lastSegmentMaxAge < nowTS)))
                 {
-			Buffer basePath;
+                        Buffer basePath;
 
-			basePath.append(basePath_, "/", partition->owner->name(), "/", partition->idx, "/");
+                        basePath.append(basePath_, "/", partition->owner->name(), "/", partition->idx, "/");
 
                         auto segment = roSegments->front();
                         const auto basePathLen = basePath.length();
@@ -1752,7 +1730,7 @@ void topic_partition_log::consider_ro_segments()
                 if (trace)
                         SLog("firstAvailableSeqNum now = ", firstAvailableSeqNum, "\n");
         }
-	else if (config.logCleanupPolicy == CleanupPolicy::CLEANUP)
+        else if (config.logCleanupPolicy == CleanupPolicy::CLEANUP)
         {
                 const auto firstDirtyOffset = first_dirty_offset();
                 uint64_t dirtyBytes{0};
@@ -1826,18 +1804,18 @@ bool topic_partition_log::should_roll(const uint32_t now) const
 
 bool topic_partition_log::may_switch_index_wide(const uint64_t lastMsgSeqNum)
 {
-	// This is required for proper support for sparse segments
-	// maybe instead of transforming the index we should instead roll?
-	if (trace)
-		SLog("considering switch to wide index, lastMsgSeqNum = ", lastMsgSeqNum, ", cur.baseSeqNum = ", cur.baseSeqNum, "\n");
+        // This is required for proper support for sparse segments
+        // maybe instead of transforming the index we should instead roll?
+        if (trace)
+                SLog("considering switch to wide index, lastMsgSeqNum = ", lastMsgSeqNum, ", cur.baseSeqNum = ", cur.baseSeqNum, "\n");
 
-	if (unlikely(lastMsgSeqNum - cur.baseSeqNum > INT32_MAX)) // arbitrary
-	{
-		IMPLEMENT_ME();
-		cur.index.haveWideEntries = true;
-	}
+        if (unlikely(lastMsgSeqNum - cur.baseSeqNum > INT32_MAX)) // arbitrary
+        {
+                IMPLEMENT_ME();
+                cur.index.haveWideEntries = true;
+        }
 
-	return false;
+        return false;
 }
 
 // if (firstMsgSeqNum != 0 && lastMsgSeqNum != 0), we have expicitly specified message sequence numbers for the bundle first/last message
@@ -1849,27 +1827,24 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 
         Drequire(bundleMsgsCnt);
 
-
-	if (lastMsgSeqNum)
-	{
-		// Sparse bundle; last message seqNum encoded in the bundle header
-		lastAssignedSeqNum = lastMsgSeqNum;
-	}
-	else if (firstMsgSeqNum)
-	{
+        if (lastMsgSeqNum)
+        {
+                // Sparse bundle; last message seqNum encoded in the bundle header
+                lastAssignedSeqNum = lastMsgSeqNum;
+        }
+        else if (firstMsgSeqNum)
+        {
                 // either sparse bundle(first message encoded in the bundle header), or bundle in
                 // a TankAPIMsgType::ProduceWithBaseSeqNum request, where the bundle is encoded in the partition header
                 lastAssignedSeqNum = firstMsgSeqNum + bundleMsgsCnt - 1;
-	}
-	else
-	{
-	        lastAssignedSeqNum += bundleMsgsCnt;
-	}
+        }
+        else
+        {
+                lastAssignedSeqNum += bundleMsgsCnt;
+        }
 
-
-
-	if (trace)
-		SLog("firstMsgSeqNum(", firstMsgSeqNum, "), lastMsgSeqNum(", lastMsgSeqNum, "), bundleMsgsCnt(", bundleMsgsCnt, ") => ", lastAssignedSeqNum, "\n");
+        if (trace)
+                SLog("firstMsgSeqNum(", firstMsgSeqNum, "), lastMsgSeqNum(", lastMsgSeqNum, "), bundleMsgsCnt(", bundleMsgsCnt, ") => ", lastAssignedSeqNum, "\n");
 
         if (should_roll(now))
         {
@@ -1896,10 +1871,10 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                         newROFile->index.fileSize = lseek64(cur.index.fd, 0, SEEK_END);
                         newROFile->index.lastRecorded.relSeqNum = newROFile->index.lastRecorded.absPhysical = 0;
 
-			if (cur.index.haveWideEntries)
-			{
-				IMPLEMENT_ME();
-			}
+                        if (cur.index.haveWideEntries)
+                        {
+                                IMPLEMENT_ME();
+                        }
 
                         // We now encode the [first,last] range into the filename for simplicity and future-proofing; we 'd like to
                         // support sparse sequence numbers space
@@ -1938,10 +1913,10 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                         else
                                 newROFile->index.data = nullptr;
 
-			const auto prevSize = newROFiles->size();
+                        const auto prevSize = newROFiles->size();
 
-			newROFiles->insert(newROFiles->end(), roSegments->begin(), roSegments->end());
-			require(newROFiles->size() == prevSize + roSegments->size());
+                        newROFiles->insert(newROFiles->end(), roSegments->begin(), roSegments->end());
+                        require(newROFiles->size() == prevSize + roSegments->size());
                         newROFiles->push_back(newROFile.release());
 
                         roSegments.reset(newROFiles.release());
@@ -1960,7 +1935,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 cur.sinceLastUpdate = UINT32_MAX;
                 cur.createdTS = Timings::Seconds::SysTime();
                 cur.nameEncodesTS = true;
-		cur.index.haveWideEntries = false;
+                cur.index.haveWideEntries = false;
 
                 cur.index.skipList.clear();
                 fdatasync(cur.index.fd);
@@ -1968,7 +1943,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 
                 if (cur.index.ondisk.data != nullptr && cur.index.ondisk.data != MAP_FAILED)
                 {
-			madvise((void *)cur.index.ondisk.data, cur.index.ondisk.span, MADV_DONTNEED);
+                        madvise((void *)cur.index.ondisk.data, cur.index.ondisk.span, MADV_DONTNEED);
                         munmap((void *)cur.index.ondisk.data, cur.index.ondisk.span);
                         cur.index.ondisk.data = nullptr;
                 }
@@ -2007,14 +1982,14 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 if (trace)
                         SLog("Switched\n");
         }
-	else
+        else
         {
-		if (lastMsgSeqNum && !cur.index.haveWideEntries)
-		{
-			// This may be necessary
-			may_switch_index_wide(lastMsgSeqNum);
-		}
-		
+                if (lastMsgSeqNum && !cur.index.haveWideEntries)
+                {
+                        // This may be necessary
+                        may_switch_index_wide(lastMsgSeqNum);
+                }
+
                 if (unlikely(cur.index.skipList.size() > 65536))
                 {
                         // Implements https://github.com/phaistos-networks/TANK/issues/27
@@ -2022,14 +1997,14 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                                 SLog(ansifmt::bold, ansifmt::color_red, "Emptying skiplist", ansifmt::reset, "\n");
 
                         if (cur.index.ondisk.data != nullptr && cur.index.ondisk.data != MAP_FAILED)
-			{
-				madvise((void *)cur.index.ondisk.data, cur.index.ondisk.span, MADV_DONTNEED);
+                        {
+                                madvise((void *)cur.index.ondisk.data, cur.index.ondisk.span, MADV_DONTNEED);
                                 munmap((void *)cur.index.ondisk.data, cur.index.ondisk.span);
-			}
+                        }
 
                         cur.index.ondisk.span = lseek64(cur.index.fd, 0, SEEK_END);
                         cur.index.ondisk.data = static_cast<const uint8_t *>(mmap(nullptr, cur.index.ondisk.span, PROT_READ, MAP_SHARED, cur.index.fd, 0));
-			cur.index.haveWideEntries = false;
+                        cur.index.haveWideEntries = false;
 
                         if (cur.index.ondisk.data == MAP_FAILED)
                                 throw Switch::system_error("mmap() failed:", strerror(errno));
@@ -2205,28 +2180,28 @@ append_res topic_partition::append_bundle_to_leader(const uint8_t *const bundle,
         // TODO: route to leader
         try
         {
-		if (lastMsgSeqNum)
+                if (lastMsgSeqNum)
                 {
-			// Sparse bundle; last message seqNum encoded in the bundle header
+                        // Sparse bundle; last message seqNum encoded in the bundle header
                         if (unlikely(lastMsgSeqNum < firstMsgSeqNum))
                         {
-				if (trace)
-					SLog("Unexpected, lastMsgSeqNum(", lastMsgSeqNum, ") < firstMsgSeqNum(", firstMsgSeqNum, ")\n");
+                                if (trace)
+                                        SLog("Unexpected, lastMsgSeqNum(", lastMsgSeqNum, ") < firstMsgSeqNum(", firstMsgSeqNum, ")\n");
 
-				return {nullptr, {0, UINT32_MAX}, {}};
+                                return {nullptr, {0, UINT32_MAX}, {}};
                         }
                         else if (unlikely(firstMsgSeqNum <= log_->lastAssignedSeqNum))
                         {
-				if (trace)
+                                if (trace)
                                         SLog("Unexpected, firstMsgSeqNum(", firstMsgSeqNum, ") <= lastAssignedSeqNum(", log_->lastAssignedSeqNum, ")\n");
 
-				return {nullptr, {0, UINT32_MAX}, {}};
+                                return {nullptr, {0, UINT32_MAX}, {}};
                         }
                 }
                 else if (unlikely(firstMsgSeqNum && firstMsgSeqNum <= log_->lastAssignedSeqNum))
                 {
-			// either sparse bundle(first message encoded in the bundle header), or bundle in 
-			// a TankAPIMsgType::ProduceWithBaseSeqNum request, where the bundle is encoded in the partition header
+                        // either sparse bundle(first message encoded in the bundle header), or bundle in
+                        // a TankAPIMsgType::ProduceWithBaseSeqNum request, where the bundle is encoded in the partition header
                         if (trace)
                                 SLog("Unexpected, firstMsgSeqNum(", firstMsgSeqNum, ") <= lastAssignedSeqNum(", log_->lastAssignedSeqNum, ")\n");
 
@@ -2343,7 +2318,101 @@ static uint64_t parse_size(strwlen32_t in)
         return sum;
 }
 
-bool Service::parse_partition_config(const char *const path, partition_config *const l)
+void Service::parse_partition_config(const strwlen32_t contents, partition_config *const l)
+{
+        for (auto &&line : contents.Split('\n'))
+        {
+                strwlen32_t k, v;
+
+                if (auto p = line.Search('#'))
+                        line.SetEnd(p);
+
+                std::tie(k, v) = line.Divided('=');
+                k.TrimWS();
+                v.TrimWS();
+
+                if (!IsBetweenRange<size_t>(v.len, 1, 128))
+                        throw Switch::data_error("Unexpected value for ", k);
+
+                // We are now using Kafka's configuration keys and semantics - for the most part - for simplicity
+                // Keep it Simple.
+                if (k && v)
+                {
+                        if (k.EqNoCase(_S("retention.segments.count")))
+                        {
+                                l->roSegmentsCnt = v.AsUint32();
+                                if (l->roSegmentsCnt < 2 && l->roSegmentsCnt)
+                                        throw Switch::range_error("Invalid value for ", k);
+                        }
+                        else if (k.EqNoCase(_S("log.cleanup.policy")))
+                        {
+                                if (v.EqNoCase(_S("cleanup")))
+                                        l->logCleanupPolicy = CleanupPolicy::CLEANUP;
+                                else if (v.EqNoCase(_S("delete")))
+                                        l->logCleanupPolicy = CleanupPolicy::DELETE;
+                                else
+                                        throw Switch::range_error("Unexpected value for ", k, ": available options are cleanup and delete");
+                        }
+                        else if (k.EqNoCase(_S("log.cleaner.min.cleanable.ratio")))
+                        {
+                                l->logCleanRatioMin = v.AsDouble();
+
+                                if (l->logCleanRatioMin < 0 || l->logCleanRatioMin > 1)
+                                        throw Switch::range_error("Invalid value for ", k);
+                        }
+                        else if (k.EqNoCase(_S("log.retention.secs")))
+                        {
+                                l->lastSegmentMaxAge = parse_duration(v);
+                        }
+                        else if (k.EqNoCase(_S("log.retention.bytes")))
+                        {
+                                l->roSegmentsSize = parse_size(v);
+                                if (l->roSegmentsSize < 128 && l->roSegmentsSize)
+                                        throw Switch::range_error("Invalid value for ", k);
+                        }
+                        else if (k.EqNoCase(_S("log.segment.bytes")))
+                        {
+                                l->maxSegmentSize = parse_size(v);
+                                if (l->maxSegmentSize < 64)
+                                        throw Switch::range_error("Invalid value for ", k);
+                        }
+                        else if (k.EqNoCase(_S("log.index.interval.bytes")))
+                        {
+                                l->indexInterval = parse_size(v);
+                                if (l->indexInterval < 128)
+                                        throw Switch::range_error("Invalid value for ", k);
+                        }
+                        else if (k.EqNoCase(_S("log.index.size.max.bytes")))
+                        {
+                                l->maxIndexSize = parse_size(v);
+                                if (l->maxIndexSize < 128)
+                                        throw Switch::range_error("Invalid value for ", k);
+                        }
+                        else if (k.EqNoCase(_S("log.roll.jitter.secs")))
+                        {
+                                l->maxRollJitterSecs = parse_duration(v);
+                        }
+                        else if (k.EqNoCase(_S("log.roll.secs")))
+                        {
+                                l->curSegmentMaxAge = parse_duration(v);
+                        }
+                        else if (k.EqNoCase(_S("flush.messages")))
+                        {
+                                // The number of messages accumulated on a log partition before messages are flushed on disk
+                                l->flushIntervalMsgs = v.AsUint32();
+                        }
+                        else if (k.EqNoCase(_S("flush.secs")))
+                        {
+                                // The amount of time the log can have dirty data before a flush is forced
+                                l->flushIntervalSecs = parse_duration(v);
+                        }
+                        else
+                                Print("Unknown topic/partition configuration key '", k, "'\n");
+                }
+        }
+}
+
+void Service::parse_partition_config(const char *const path, partition_config *const l)
 {
         int fd = open(path, O_RDONLY | O_LARGEFILE | O_NOATIME);
 
@@ -2362,111 +2431,20 @@ bool Service::parse_partition_config(const char *const path, partition_config *c
                 madvise(fileData, fileSize, MADV_SEQUENTIAL);
                 Defer({ munmap(fileData, fileSize); });
 
-                for (auto &&line : strwlen32_t((char *)fileData, fileSize).Split('\n'))
-                {
-                        strwlen32_t k, v;
-
-                        if (auto p = line.Search('#'))
-                                line.SetEnd(p);
-
-                        std::tie(k, v) = line.Divided('=');
-                        k.TrimWS();
-                        v.TrimWS();
-
-                        if (!IsBetweenRange<size_t>(v.len, 1, 128))
-                                throw Switch::data_error("Unexpected value for ", k);
-
-                        // We are now using Kafka's configuration keys and semantics - for the most part - for simplicity
-                        // Keep it Simple.
-                        if (k && v)
-                        {
-                                if (k.EqNoCase(_S("retention.segments.count")))
-                                {
-                                        l->roSegmentsCnt = v.AsUint32();
-                                        if (l->roSegmentsCnt < 2 && l->roSegmentsCnt)
-                                                throw Switch::range_error("Invalid value for ", k);
-                                }
-				else if (k.EqNoCase(_S("log.cleanup.policy")))
-				{
-					if (v.EqNoCase(_S("cleanup")))
-						l->logCleanupPolicy = CleanupPolicy::CLEANUP;
-					else if (v.EqNoCase(_S("delete")))
-						l->logCleanupPolicy = CleanupPolicy::DELETE;
-					else
-						throw Switch::range_error("Unexpected value for ", k, ": available options are cleanup and delete");
-				}
-				else if (k.EqNoCase(_S("log.cleaner.min.cleanable.ratio")))
-				{
-					l->logCleanRatioMin = v.AsDouble();
-
-					if (l->logCleanRatioMin < 0 || l->logCleanRatioMin > 1)
-                                                throw Switch::range_error("Invalid value for ", k);
-				}
-                                else if (k.EqNoCase(_S("log.retention.secs")))
-                                {
-                                        l->lastSegmentMaxAge = parse_duration(v);
-                                }
-                                else if (k.EqNoCase(_S("log.retention.bytes")))
-                                {
-                                        l->roSegmentsSize = parse_size(v);
-                                        if (l->roSegmentsSize < 128 && l->roSegmentsSize)
-                                                throw Switch::range_error("Invalid value for ", k);
-                                }
-                                else if (k.EqNoCase(_S("log.segment.bytes")))
-                                {
-                                        l->maxSegmentSize = parse_size(v);
-                                        if (l->maxSegmentSize < 64)
-                                                throw Switch::range_error("Invalid value for ", k);
-                                }
-                                else if (k.EqNoCase(_S("log.index.interval.bytes")))
-                                {
-                                        l->indexInterval = parse_size(v);
-                                        if (l->indexInterval < 128)
-                                                throw Switch::range_error("Invalid value for ", k);
-                                }
-                                else if (k.EqNoCase(_S("log.index.size.max.bytes")))
-                                {
-                                        l->maxIndexSize = parse_size(v);
-                                        if (l->maxIndexSize < 128)
-                                                throw Switch::range_error("Invalid value for ", k);
-                                }
-                                else if (k.EqNoCase(_S("log.roll.jitter.secs")))
-                                {
-                                        l->maxRollJitterSecs = parse_duration(v);
-                                }
-                                else if (k.EqNoCase(_S("log.roll.secs")))
-                                {
-                                        l->curSegmentMaxAge = parse_duration(v);
-                                }
-                                else if (k.EqNoCase(_S("flush.messages")))
-                                {
-                                        // The number of messages accumulated on a log partition before messages are flushed on disk
-                                        l->flushIntervalMsgs = v.AsUint32();
-                                }
-                                else if (k.EqNoCase(_S("flush.secs")))
-                                {
-                                        // The amount of time the log can have dirty data before a flush is forced
-                                        l->flushIntervalSecs = parse_duration(v);
-                                }
-                                else
-                                        Print("Unknown topic/partition configuration key '", k, "'\n");
-                        }
-                }
+                parse_partition_config(strwlen32_t((char *)fileData, fileSize), l);
         }
-
-        return true;
 }
 
 // TODO: respect configuration
 void Service::rebuild_index(int logFd, int indexFd)
 {
-	static constexpr bool trace{false};
+        static constexpr bool trace{false};
         const auto fileSize = lseek64(logFd, 0, SEEK_END);
         auto *const fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, logFd, 0);
         IOBuffer b;
         uint32_t relSeqNum{0};
         static constexpr size_t step{4096};
-	uint64_t firstMsgSeqNum;
+        uint64_t firstMsgSeqNum;
 
         if (fileData == MAP_FAILED)
                 throw Switch::system_error("Unable to mmap():", strerror(errno));
@@ -2492,39 +2470,38 @@ void Service::rebuild_index(int logFd, int indexFd)
 
                 expect(p <= e);
 
-		if (trace)
-			SLog("New bundle bundleFlags = ", bundleFlags, ", msgSetSize = ", msgsSetSize, "\n");
+                if (trace)
+                        SLog("New bundle bundleFlags = ", bundleFlags, ", msgSetSize = ", msgsSetSize, "\n");
 
-		if (sparseBundleBitSet)
-		{
-			uint64_t lastMsgSeqNum;
+                if (sparseBundleBitSet)
+                {
+                        uint64_t lastMsgSeqNum;
 
                         firstMsgSeqNum = *(uint64_t *)p;
                         p += sizeof(uint64_t);
 
                         if (msgsSetSize != 1)
-			{
+                        {
                                 lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p) + 1;
-			}
+                        }
                         else
-			{
+                        {
                                 lastMsgSeqNum = firstMsgSeqNum;
-			}
+                        }
 
-			if (trace)
-				SLog("bundle's sparse first ", firstMsgSeqNum, ", last ", lastMsgSeqNum, "\n");
-		}
-		else
-		{
-			firstMsgSeqNum = relSeqNum;
-			relSeqNum += msgsSetSize;
-		}
-
+                        if (trace)
+                                SLog("bundle's sparse first ", firstMsgSeqNum, ", last ", lastMsgSeqNum, "\n");
+                }
+                else
+                {
+                        firstMsgSeqNum = relSeqNum;
+                        relSeqNum += msgsSetSize;
+                }
 
                 if (p >= next)
                 {
-			if (trace)
-				SLog("Indexing ", firstMsgSeqNum, " ", bundleBase - base, "\n");
+                        if (trace)
+                                SLog("Indexing ", firstMsgSeqNum, " ", bundleBase - base, "\n");
 
                         b.Serialize<uint32_t>(firstMsgSeqNum);
                         b.Serialize<uint32_t>(bundleBase - base);
@@ -2545,8 +2522,8 @@ void Service::rebuild_index(int logFd, int indexFd)
 
         fdatasync(indexFd);
 
-	if (trace)
-		SLog("REBUILT INDEX\n");
+        if (trace)
+                SLog("REBUILT INDEX\n");
 }
 
 void Service::verify_index(int fd, const bool wideEntries)
@@ -2566,10 +2543,10 @@ void Service::verify_index(int fd, const bool wideEntries)
         Defer({ munmap(fileData, fileSize); });
         madvise(fileData, fileSize, MADV_SEQUENTIAL);
 
-	if (wideEntries)
-	{
-		IMPLEMENT_ME();
-	}
+        if (wideEntries)
+        {
+                IMPLEMENT_ME();
+        }
 
         for (const auto *p = reinterpret_cast<const uint32_t *>(fileData),
                         *const e = p + (fileSize / sizeof(uint32_t)), *const b = p;
@@ -2638,20 +2615,20 @@ uint32_t Service::verify_log(int fd)
                 if (!msgsSetSize)
                         msgsSetSize = Compression::UnpackUInt32(p);
 
-		if (sparseBundleBitSet)
+                if (sparseBundleBitSet)
                 {
                         const auto firstMsgSeqNum = *(uint64_t *)p;
 
                         p += sizeof(uint64_t);
 
                         if (msgsSetSize != 1)
-			{
+                        {
                                 lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p) + 1;
-			}
+                        }
                         else
-			{
+                        {
                                 lastMsgSeqNum = firstMsgSeqNum;
-			}
+                        }
 
                         expect(firstMsgSeqNum && lastMsgSeqNum >= firstMsgSeqNum);
                 }
@@ -2674,14 +2651,14 @@ uint32_t Service::verify_log(int fd)
                         msgSetContent.Set(p, nextBundle - p);
 
                 uint64_t msgTs{0};
-		uint32_t msgIdx{0};
+                uint32_t msgIdx{0};
 
                 for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.len; p != e; ++msgIdx)
                 {
                         // Next message set message
                         const auto flags = *p++;
 
-			if (sparseBundleBitSet)
+                        if (sparseBundleBitSet)
                         {
                                 if (msgIdx == 0 || msgIdx == msgsSetSize - 1)
                                 {
@@ -2718,10 +2695,10 @@ uint32_t Service::verify_log(int fd)
                         p += msgLen;
                 }
 
-		if (sparseBundleBitSet)
-			relSeqNum = lastMsgSeqNum;
-		else
-	                relSeqNum += msgsSetSize;
+                if (sparseBundleBitSet)
+                        relSeqNum = lastMsgSeqNum;
+                else
+                        relSeqNum += msgsSetSize;
 
                 p = nextBundle;
                 expect(p <= e);
@@ -2760,18 +2737,18 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                 // TODO: reuse roLogs, wideEntyRoLogIndices, swapped and the allocator
                 Switch::vector<rosegment_ctx> roLogs;
                 std::set<uint64_t> wideEntyRoLogIndices;
-		simple_allocator allocator{1024};
-		std::vector<strwlen32_t> swapped;
+                simple_allocator allocator{1024};
+                std::vector<strwlen32_t> swapped;
                 auto partition = Switch::make_sharedref(new topic_partition());
                 uint64_t curLogSeqNum{0};
                 uint32_t curLogCreateTS{0};
                 const strwlen32_t b(basePath, basePathLen);
                 int fd;
                 auto l = new topic_partition_log();
-		bool processSwapped{true};
+                bool processSwapped{true};
 
-		l->partition = partition;
-		l->config = partitionConf;
+                l->partition = partition;
+                l->config = partitionConf;
                 partition->distinctId = ++nextDistinctPartitionId;
 
                 partition->log_.reset(l);
@@ -2780,7 +2757,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                 l->roSegments = nullptr;
                 l->cur.index.ondisk.data = nullptr;
                 l->cur.index.ondisk.span = 0;
-		l->cur.index.haveWideEntries = false;
+                l->cur.index.haveWideEntries = false;
                 l->cur.index.ondisk.lastRecorded.relSeqNum = 0;
                 l->cur.index.ondisk.lastRecorded.absPhysical = 0;
 
@@ -2798,54 +2775,53 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
 
                         auto r = name.Divided('.');
 
-			if (r.second.StripSuffix(_S(".cleaned")))
-			{
-				// Compaction failed mid-way
-				// remove this file and make sure any .swap file files are also deleted
-				auto fullPath = Buffer::build(basePath, "/", name);
+                        if (r.second.StripSuffix(_S(".cleaned")))
+                        {
+                                // Compaction failed mid-way
+                                // remove this file and make sure any .swap file files are also deleted
+                                auto fullPath = Buffer::build(basePath, "/", name);
 
-				if (Unlink(fullPath.data()) == -1)
-					throw Switch::system_error("Failed to Unlink(", fullPath, "):", strerror(errno));
-					
-				processSwapped = false;
-				continue;
-			}
-			else if (r.second.EndsWith(_S(".swap")))
-			{
-				// Compaction failed mid-way
-				// Before we had a chance to append .old to all previous segment files, the broker crashed
-				//
-				// If any *.cleaned files are found, we didn't get to append .swap to all new segments files so we need to
-				//	undo the effects by removing all .swap and .cleaned files
-				// If no *.cleaned files are found, we got to append .swap to all new segments files, so we should
-				// 	remove the *.swap extension and remove all *.old files
-				if (processSwapped == false)
+                                if (Unlink(fullPath.data()) == -1)
+                                        throw Switch::system_error("Failed to Unlink(", fullPath, "):", strerror(errno));
+
+                                processSwapped = false;
+                                continue;
+                        }
+                        else if (r.second.EndsWith(_S(".swap")))
+                        {
+                                // Compaction failed mid-way
+                                // Before we had a chance to append .old to all previous segment files, the broker crashed
+                                //
+                                // If any *.cleaned files are found, we didn't get to append .swap to all new segments files so we need to
+                                //	undo the effects by removing all .swap and .cleaned files
+                                // If no *.cleaned files are found, we got to append .swap to all new segments files, so we should
+                                // 	remove the *.swap extension and remove all *.old files
+                                if (processSwapped == false)
                                 {
                                         auto fullPath = Buffer::build(basePath, "/", name);
 
                                         if (Unlink(fullPath.data()) == -1)
                                                 throw Switch::system_error("Failed to Unlink(", fullPath, "):", strerror(errno));
                                 }
-				else
-				{
-					// we 'll process them in the end, iff processSwapped is still true by then
-					swapped.push_back({allocator.CopyOf(name.p, name.len), name.len});
-				}
+                                else
+                                {
+                                        // we 'll process them in the end, iff processSwapped is still true by then
+                                        swapped.push_back({allocator.CopyOf(name.p, name.len), name.len});
+                                }
 
                                 continue;
-			}
-			else if (r.second.StripSuffix(_S(".old")))
-			{
-				// Compaction failed mid-way
-				//
-				// If any *.swap files are found, we didn't manage to strip the .swap extension from all new segments files
-				// but that's OK. We should still remove the .swap extension and remove all *.old files
-				// 
-				// We are just going to remove the extension and consider the file
-				if (Rename(Buffer::build(basePath, "/", name).data(), Buffer::build(basePath, "/", strwlen8_t(name.p, name.len - STRLEN(".old"))).data()) == -1)
-					throw Switch::system_error("Unable to rename .old file:", strerror(errno));
-			}
-
+                        }
+                        else if (r.second.StripSuffix(_S(".old")))
+                        {
+                                // Compaction failed mid-way
+                                //
+                                // If any *.swap files are found, we didn't manage to strip the .swap extension from all new segments files
+                                // but that's OK. We should still remove the .swap extension and remove all *.old files
+                                //
+                                // We are just going to remove the extension and consider the file
+                                if (Rename(Buffer::build(basePath, "/", name).data(), Buffer::build(basePath, "/", strwlen8_t(name.p, name.len - STRLEN(".old"))).data()) == -1)
+                                        throw Switch::system_error("Unable to rename .old file:", strerror(errno));
+                        }
 
                         if (r.second.Eq(_S("index")))
                         {
@@ -2938,11 +2914,11 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
 
                                 swapped.pop_back();
                         }
-		}
-		else
+                }
+                else
                 {
-			if (trace)
-				SLog("Can process swapped files\n");
+                        if (trace)
+                                SLog("Can process swapped files\n");
 
                         while (swapped.size())
                         {
@@ -2950,8 +2926,8 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
 
                                 name.StripSuffix(STRLEN(".swap"));
 
-				if (trace)
-					SLog("Processing swapped ", name, "\n");
+                                if (trace)
+                                        SLog("Processing swapped ", name, "\n");
 
                                 if (Rename(Buffer::build(basePath, "/", name, ".swap").data(), Buffer::build(basePath, "/", name).data()) == -1)
                                         throw Switch::system_error("Failed to rename swapped file:", strerror(errno));
@@ -3037,8 +3013,8 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         l->cur.baseSeqNum = curLogSeqNum;
                         l->cur.fileSize = lseek64(fd, 0, SEEK_END);
 
-			// TODO: check if index has wideEntries
-			// and set l->cur.index.haveWideEntries accordingly
+                        // TODO: check if index has wideEntries
+                        // and set l->cur.index.haveWideEntries accordingly
                         Snprint(basePath, sizeof(basePath), b, curLogSeqNum, ".index");
                         fd = open(basePath, O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND, 0775);
 
@@ -3064,11 +3040,11 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                 if (unlikely(l->cur.index.ondisk.data == MAP_FAILED))
                                         throw Switch::system_error("mmap() failed:", strerror(errno));
 
-				if (l->cur.index.haveWideEntries)
-				{
-					IMPLEMENT_ME();
-				}
-				else
+                                if (l->cur.index.haveWideEntries)
+                                {
+                                        IMPLEMENT_ME();
+                                }
+                                else
                                 {
                                         const auto *const p = (uint32_t *)(l->cur.index.ondisk.data + l->cur.index.ondisk.span - sizeof(uint32_t) - sizeof(uint32_t));
 
@@ -3148,7 +3124,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                         Drequire(bundleLen);
 
                                         const auto bundleFlags = *p++;
-			                const bool sparseBundleBitSet = bundleFlags & (1u << 6);
+                                        const bool sparseBundleBitSet = bundleFlags & (1u << 6);
                                         uint32_t msgSetSize = (bundleFlags >> 2) & 0xf;
 
                                         if (!msgSetSize)
@@ -3158,25 +3134,25 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                                 Drequire(msgSetSize);
                                         }
 
-					if (sparseBundleBitSet)
+                                        if (sparseBundleBitSet)
                                         {
                                                 const auto firstMsgSeqNum = *(uint64_t *)p;
-						uint64_t lastMsgSeqNum;
+                                                uint64_t lastMsgSeqNum;
                                                 p += sizeof(uint64_t);
 
                                                 if (msgSetSize != 1)
-						{
+                                                {
                                                         lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p) + 1;
-						}
+                                                }
                                                 else
-						{
+                                                {
                                                         lastMsgSeqNum = firstMsgSeqNum;
-						}
+                                                }
 
                                                 next = lastMsgSeqNum + 1;
                                         }
                                         else
-	                                        next += msgSetSize;
+                                                next += msgSetSize;
 
                                         if (trace)
                                                 SLog("bundle msgSetSize = ", msgSetSize, "\n");
@@ -3228,7 +3204,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         l->cur.sinceLastUpdate = UINT32_MAX;
                         l->cur.baseSeqNum = UINT64_MAX;
                         l->lastAssignedSeqNum = 0;
-			l->cur.index.haveWideEntries = false;
+                        l->cur.index.haveWideEntries = false;
 
                         if (l->roSegments && l->roSegments->size())
                         {
@@ -3362,7 +3338,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                                                               absSeqNum, fetchSize);
                                         const auto hwMark = res.highWatermark;
                                         range32_t range;
-					bool firstBundleIsSparse;
+                                        bool firstBundleIsSparse;
 
                                         switch (res.fault)
                                         {
@@ -3377,13 +3353,13 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
 
                                                         if (firstBundleIsSparse)
                                                         {
-								// Set special errorOrFlags to let the client know that we are not going to encode here the seq.num of the first msg of the first bundle, because
-								// the first bundle we are streaming is a 'sparse bundle', which means it encodes the absolute sequence number of its first message
-								// in the bundle header anyway
+                                                                // Set special errorOrFlags to let the client know that we are not going to encode here the seq.num of the first msg of the first bundle, because
+                                                                // the first bundle we are streaming is a 'sparse bundle', which means it encodes the absolute sequence number of its first message
+                                                                // in the bundle header anyway
                                                                 respHeader->Serialize(uint8_t(0xfe)); // errorOrFlags
 
-								if (trace)
-									SLog("Setting errorOrFlags to 0xfe\n");
+                                                                if (trace)
+                                                                        SLog("Setting errorOrFlags to 0xfe\n");
                                                         }
                                                         else
                                                         {
@@ -3509,8 +3485,8 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
         }
         catch (const std::exception &e)
         {
-		if (trace)
-			SLog("Cought exception:", e.what(), "\n");
+                if (trace)
+                        SLog("Cought exception:", e.what(), "\n");
 
                 return shutdown(c, __LINE__);
         }
@@ -3577,8 +3553,14 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
 
         p += topicName.len + sizeof(uint8_t);
 
+        partition_config partitionConfig;
+        strwlen32_t config;
         const auto partitionsCnt = *(uint16_t *)p;
         p += sizeof(uint16_t);
+
+        config.len = Compression::UnpackUInt32(p);
+        config.p = (char *)p;
+        p += config.len;
 
         if (!q)
                 q = c->outQ = get_outgoing_queue();
@@ -3588,6 +3570,20 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
 
         resp->MakeSpace(sizeof(uint32_t));
         resp->Serialize(requestId);
+
+        config.TrimWS();
+        if (config)
+        {
+                try
+                {
+                        parse_partition_config(config, &partitionConfig);
+                }
+                catch (...)
+                {
+                        resp->Serialize<uint8_t>(4); // Invalid configuration
+                        goto l1;
+                }
+        }
 
         if (topic_by_name(topicName))
                 resp->Serialize<uint8_t>(1); // already exists
@@ -3604,8 +3600,6 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
 
                         try
                         {
-                                partition_config partitionConfig;
-
                                 for (uint16_t i{0}; i != partitionsCnt; ++i)
                                 {
                                         sprintf(topicPath + topicPathLen, "%u", i);
@@ -3617,6 +3611,28 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
                                         }
 
                                         list.push_back(init_local_partition(i, topicPath, partitionConfig).release());
+                                }
+
+                                if (config)
+                                {
+                                        int fd;
+
+                                        strcpy(topicPath + topicPathLen, "config");
+                                        fd = open(topicPath, O_WRONLY | O_CREAT | O_LARGEFILE, 0775);
+                                        if (fd == -1)
+                                        {
+                                                resp->Serialize<uint8_t>(2);
+                                                goto l1;
+                                        }
+                                        else if (write(fd, config.p, config.len) != config.len)
+                                        {
+                                                close(fd);
+						unlink(topicPath);
+                                                resp->Serialize<uint8_t>(2);
+                                                goto l1;
+                                        }
+                                        else
+                                                close(fd);
                                 }
 
                                 auto t = Switch::make_sharedref(new struct topic(topicName, partitionConfig));
@@ -3648,12 +3664,12 @@ l1:
 bool Service::process_discover_partitions(connection *const c, const uint8_t *p, const size_t len)
 {
         if (unlikely(len < sizeof(uint32_t) + sizeof(uint8_t) + sizeof(uint8_t)))
-	{
-		if (trace)
-			SLog("Unexpected len = ", len, "\n");
+        {
+                if (trace)
+                        SLog("Unexpected len = ", len, "\n");
 
                 return shutdown(c, __LINE__);
-	}
+        }
 
         auto q = c->outQ;
         auto resp = get_buffer();
@@ -3665,37 +3681,37 @@ bool Service::process_discover_partitions(connection *const c, const uint8_t *p,
 
         if (!q)
                 q = c->outQ = get_outgoing_queue();
-	
-	resp->Serialize(uint8_t(TankAPIMsgType::DiscoverPartitions));
-	const auto sizeOffset = resp->length();
 
-	resp->MakeSpace(sizeof(uint32_t));
-	resp->Serialize(requestId);
+        resp->Serialize(uint8_t(TankAPIMsgType::DiscoverPartitions));
+        const auto sizeOffset = resp->length();
 
-	auto topic = topic_by_name(topicName);
+        resp->MakeSpace(sizeof(uint32_t));
+        resp->Serialize(requestId);
 
-	resp->Serialize(topicName.len);
-	resp->Serialize(topicName.p, topicName.len);
+        auto topic = topic_by_name(topicName);
 
-	if (!topic)
-		resp->Serialize(uint16_t(0));
-	else
-	{
-		const auto n = topic->partitions_->size();
+        resp->Serialize(topicName.len);
+        resp->Serialize(topicName.p, topicName.len);
 
-		resp->Serialize(uint16_t(n));
-		resp->reserve(n * (sizeof(uint64_t) + sizeof(uint64_t)));
+        if (!topic)
+                resp->Serialize(uint16_t(0));
+        else
+        {
+                const auto n = topic->partitions_->size();
 
-		for (const auto it : *topic->partitions_)
-		{
-			auto log = it->log_.get();
+                resp->Serialize(uint16_t(n));
+                resp->reserve(n * (sizeof(uint64_t) + sizeof(uint64_t)));
 
-			resp->Serialize(log->firstAvailableSeqNum);
-			resp->Serialize(log->lastAssignedSeqNum);
-		}
-	}
+                for (const auto it : *topic->partitions_)
+                {
+                        auto log = it->log_.get();
 
-	*(uint32_t *)resp->At(sizeOffset) = resp->length() - sizeOffset - sizeof(uint32_t);
+                        resp->Serialize(log->firstAvailableSeqNum);
+                        resp->Serialize(log->lastAssignedSeqNum);
+                }
+        }
+
+        *(uint32_t *)resp->At(sizeOffset) = resp->length() - sizeOffset - sizeof(uint32_t);
         q->push_back(resp);
         return try_send_ifnot_blocked(c);
 }
@@ -3784,13 +3800,13 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 
                         for (auto cnt = *p++; cnt; --cnt)
                         {
-				if (unlikely(p + sizeof(uint16_t) >= __end))
-					return shutdown(c, __LINE__);
+                                if (unlikely(p + sizeof(uint16_t) >= __end))
+                                        return shutdown(c, __LINE__);
 
-                                p += sizeof(uint16_t);             // skip partition ID
+                                p += sizeof(uint16_t); // skip partition ID
 
-				if (unlikely(!Compression::UnpackUInt32Check(p, __end)))
-					return shutdown(c, __LINE__);
+                                if (unlikely(!Compression::UnpackUInt32Check(p, __end)))
+                                        return shutdown(c, __LINE__);
 
                                 p += Compression::UnpackUInt32(p); // skip bundle
                         }
@@ -3811,22 +3827,20 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                         p += sizeof(uint16_t);
                         const auto bundleLen = Compression::UnpackUInt32(p);
                         auto partition = topic->partition(partitionId);
-			uint64_t firstMsgSeqNum{0}, lastMsgSeqNum;
+                        uint64_t firstMsgSeqNum{0}, lastMsgSeqNum;
 
                         if (unlikely(!bundleLen))
                                 return shutdown(c, __LINE__);
 
-			if (msg == TankAPIMsgType::ProduceWithBaseSeqNum)
-			{
-				// See common.h
-				firstMsgSeqNum = *(uint64_t *)p;
-				p+=sizeof(uint64_t);
+                        if (msg == TankAPIMsgType::ProduceWithBaseSeqNum)
+                        {
+                                // See common.h
+                                firstMsgSeqNum = *(uint64_t *)p;
+                                p += sizeof(uint64_t);
 
-				if (trace)
-					SLog("ProduceWithBaseSeqNum request, firstMsgSeqNum = ", firstMsgSeqNum, "\n");
-			}
-
-
+                                if (trace)
+                                        SLog("ProduceWithBaseSeqNum request, firstMsgSeqNum = ", firstMsgSeqNum, "\n");
+                        }
 
                         // TODO: Reject appending to internal topics if not allowed
 
@@ -3834,7 +3848,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                                 SLog("partitionId = ", partitionId, ",  bundleLen = ", bundleLen, "\n");
 
                         // BEGIN: bundle header
-			// See tank_encoding.md
+                        // See tank_encoding.md
                         const auto *const bundle = p;
                         const auto *const e = p + bundleLen;
 
@@ -3848,13 +3862,10 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                                 continue;
                         }
 
-
-
                         const auto bundleFlags = *p++;
                         const auto codec = bundleFlags & 3;
-			const bool sparseBundleBitSet = bundleFlags & (1u << 6);
+                        const bool sparseBundleBitSet = bundleFlags & (1u << 6);
                         uint32_t msgSetSize = uint32_t((bundleFlags >> 2) & 0xf);
-
 
                         if (!msgSetSize)
                         {
@@ -3869,43 +3880,41 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                                 }
                         }
 
-			if (sparseBundleBitSet)
-			{
-				// The abs.sequence number of the first message in the message set of this bundle
-				firstMsgSeqNum = *(uint64_t *)p;
-				p+=sizeof(uint64_t);
+                        if (sparseBundleBitSet)
+                        {
+                                // The abs.sequence number of the first message in the message set of this bundle
+                                firstMsgSeqNum = *(uint64_t *)p;
+                                p += sizeof(uint64_t);
 
-				if (msgSetSize != 1)
-				{
-					// multiple messages in the bundle
-					// compute the last message in the bundle abs.seqNumber from
-					// the encoded delta (see tank_encoding.md)
-					lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p) + 1;
-				}
-				else
-				{
-					lastMsgSeqNum = firstMsgSeqNum;
-				}
+                                if (msgSetSize != 1)
+                                {
+                                        // multiple messages in the bundle
+                                        // compute the last message in the bundle abs.seqNumber from
+                                        // the encoded delta (see tank_encoding.md)
+                                        lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p) + 1;
+                                }
+                                else
+                                {
+                                        lastMsgSeqNum = firstMsgSeqNum;
+                                }
 
-				if (trace)
-					SLog("sparseBundleBitSet set: firstMsgSeqNum = ", firstMsgSeqNum, ", lastMsgSeqNum ", lastMsgSeqNum, "\n");
+                                if (trace)
+                                        SLog("sparseBundleBitSet set: firstMsgSeqNum = ", firstMsgSeqNum, ", lastMsgSeqNum ", lastMsgSeqNum, "\n");
 
-				if (unlikely(lastMsgSeqNum < firstMsgSeqNum || !lastMsgSeqNum))
-				{
-					// Invalid; sequence number's base is (1)
-					return shutdown(c, __LINE__);
-				}
-			}
-			else
-			{
-				lastMsgSeqNum = 0;
-			}
-
+                                if (unlikely(lastMsgSeqNum < firstMsgSeqNum || !lastMsgSeqNum))
+                                {
+                                        // Invalid; sequence number's base is (1)
+                                        return shutdown(c, __LINE__);
+                                }
+                        }
+                        else
+                        {
+                                lastMsgSeqNum = 0;
+                        }
 
                         if (trace)
                                 SLog("bundleFlags = ", bundleFlags, ", codec= ", codec, ", message set messages cnt: ", msgSetSize, "\n");
                         // END: bundle header
-
 
                         if (trace)
                         {
@@ -3914,8 +3923,8 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 
                                 if (codec)
                                 {
-					if (trace)
-						SLog("codec = ", codec, ", will decompress\n");
+                                        if (trace)
+                                                SLog("codec = ", codec, ", will decompress\n");
 
                                         decompressionBuf.clear();
                                         Compression::UnCompress(Compression::Algo::SNAPPY, p, e - p, &decompressionBuf);
@@ -3926,23 +3935,22 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 
                                 // iterate bundle's message set
                                 uint64_t msgTs{0};
-				uint64_t absMsgSeqNum, prevAbsMsgSeqNum;
-				bool monotonicallyIncreasing{true};
-				uint32_t msgIdx{0};
+                                uint64_t absMsgSeqNum, prevAbsMsgSeqNum;
+                                bool monotonicallyIncreasing{true};
+                                uint32_t msgIdx{0};
 
-				if (trace)
-					SLog("Iterating ", msgSetContent.len, " bytes\n");
-
+                                if (trace)
+                                        SLog("Iterating ", msgSetContent.len, " bytes\n");
 
                                 for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.len; p != e; ++msgIdx, ++absMsgSeqNum)
                                 {
                                         // Next message set message
                                         const auto flags = *p++;
 
-					if (trace)
-						SLog("Considering ", msgIdx, " / ", msgSetSize, "\n");
+                                        if (trace)
+                                                SLog("Considering ", msgIdx, " / ", msgSetSize, "\n");
 
-					if (sparseBundleBitSet)
+                                        if (sparseBundleBitSet)
                                         {
                                                 // this is _never_ set for the first nor the last message in the set
                                                 // because we already encode that in the bundle header
@@ -3952,19 +3960,19 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                                                 {
                                                         if (msgIdx == msgSetSize - 1)
                                                                 absMsgSeqNum = lastMsgSeqNum;
-							else if (flags & uint8_t(TankFlags::BundleMsgFlags::SeqNumPrevPlusOne))
-							{
-								// incremented in for()
-							}
+                                                        else if (flags & uint8_t(TankFlags::BundleMsgFlags::SeqNumPrevPlusOne))
+                                                        {
+                                                                // incremented in for()
+                                                        }
                                                         else
-							{
-								const auto delta = Compression::UnpackUInt32(p);
+                                                        {
+                                                                const auto delta = Compression::UnpackUInt32(p);
 
-								if (trace)
-									SLog("Delta from previous (", delta, ")\n");
+                                                                if (trace)
+                                                                        SLog("Delta from previous (", delta, ")\n");
 
                                                                 absMsgSeqNum += delta;
-							}
+                                                        }
 
                                                         if (absMsgSeqNum <= prevAbsMsgSeqNum)
                                                         {
@@ -3973,38 +3981,38 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                                                         }
                                                 }
 
-						if (trace)
-							SLog("sparseBundleBitSet, absMsgSeqNum = ", absMsgSeqNum, "\n");
+                                                if (trace)
+                                                        SLog("sparseBundleBitSet, absMsgSeqNum = ", absMsgSeqNum, "\n");
 
                                                 prevAbsMsgSeqNum = absMsgSeqNum;
                                         }
 
                                         if (!(flags & uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS)))
                                         {
-						if (trace)
-							SLog("New msgTs\n");
+                                                if (trace)
+                                                        SLog("New msgTs\n");
 
                                                 msgTs = *(uint64_t *)p;
                                                 p += sizeof(uint64_t);
                                         }
-					else if (trace)
-						SLog("Using last set msgTs\n");
+                                        else if (trace)
+                                                SLog("Using last set msgTs\n");
 
                                         if (flags & uint8_t(TankFlags::BundleMsgFlags::HaveKey))
                                         {
                                                 key.Set((char *)p + 1, *p);
                                                 p += key.len + sizeof(uint8_t);
 
-						if (trace)
-							SLog("have key\n");
+                                                if (trace)
+                                                        SLog("have key\n");
                                         }
                                         else
                                                 key.Unset();
 
                                         const auto msgLen = Compression::UnpackUInt32(p);
 
-					if (trace)
-						SLog("msgLen = ", msgLen, "\n");
+                                        if (trace)
+                                                SLog("msgLen = ", msgLen, "\n");
 
                                         (void)flags;
                                         (void)msgTs;
@@ -4015,47 +4023,46 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                                 }
                         }
 
-			//
-			// XXX:
-			// If we append to a fresh partition (i.e firstAvailableSeqNum == 0) 2 msgs
-			// and right after that we append 2 more msgs to an explicit firstMsgSeqNum = 5112 using e.g tank-cli set -S 5112
-			// and then we try to e.g tank-cli get from that partition starting at 0
-			// then we 'll get 4 msgs, _but_ the client won't have a clue that the 2 later messages have a different
-			// id (starting from 5112), and instead will consider them to have ids 3 and 4 respectively, and so, it will
-			// set next.seqNum to 5. (which is wrong). Setting their ids to 3 and 4 is also wrong.
-			//
-			// If the client attempts to request again starting from 5 (because that's what next.seqNum was set to), it will get the same
-			// messages.
-			// So we need to either allow explicit firstMsgSeqNum > 0 only iff the partition is empty, or we need
-			// to explicitly use a sparse bundle if we need to do that (at least for the first bundle!)
-			//
-			// That's why we need to use TankClient::produce_with_base()
-			// Rules:
-			// 1. Always use sparse bundles when compacting
-			// 2. use TankClient::produce_with_base() for mirroring
-			// 3. Expect that everything will work out otherwise if you are just building Tank apps.
+                        //
+                        // XXX:
+                        // If we append to a fresh partition (i.e firstAvailableSeqNum == 0) 2 msgs
+                        // and right after that we append 2 more msgs to an explicit firstMsgSeqNum = 5112 using e.g tank-cli set -S 5112
+                        // and then we try to e.g tank-cli get from that partition starting at 0
+                        // then we 'll get 4 msgs, _but_ the client won't have a clue that the 2 later messages have a different
+                        // id (starting from 5112), and instead will consider them to have ids 3 and 4 respectively, and so, it will
+                        // set next.seqNum to 5. (which is wrong). Setting their ids to 3 and 4 is also wrong.
+                        //
+                        // If the client attempts to request again starting from 5 (because that's what next.seqNum was set to), it will get the same
+                        // messages.
+                        // So we need to either allow explicit firstMsgSeqNum > 0 only iff the partition is empty, or we need
+                        // to explicitly use a sparse bundle if we need to do that (at least for the first bundle!)
+                        //
+                        // That's why we need to use TankClient::produce_with_base()
+                        // Rules:
+                        // 1. Always use sparse bundles when compacting
+                        // 2. use TankClient::produce_with_base() for mirroring
+                        // 3. Expect that everything will work out otherwise if you are just building Tank apps.
                         const auto b = Timings::Microseconds::Tick();
                         const auto res = partition->append_bundle_to_leader(bundle, bundleLen, msgSetSize, expiredCtxList, firstMsgSeqNum, lastMsgSeqNum);
 
                         if (unlikely(!res.fdh))
                         {
-				if (res.dataRange.len == UINT32_MAX)
-				{
-					// Invalid request(offsets)
-					respHeader->Serialize(uint8_t(2));
-				}
-				else
-				{
-					// System error
-					respHeader->Serialize(uint8_t(10));
-				}
+                                if (res.dataRange.len == UINT32_MAX)
+                                {
+                                        // Invalid request(offsets)
+                                        respHeader->Serialize(uint8_t(2));
+                                }
+                                else
+                                {
+                                        // System error
+                                        respHeader->Serialize(uint8_t(10));
+                                }
                         }
-			else
-			{
-				// success
-                        	respHeader->Serialize(uint8_t(0));
-			}
-
+                        else
+                        {
+                                // success
+                                respHeader->Serialize(uint8_t(0));
+                        }
 
                         if (trace)
                                 SLog("Took ", duration_repr(Timings::Microseconds::Since(b)), " for ", msgSetSize, " msgs in bundle message set: ", expiredCtxList.size(), "\n");
@@ -4071,8 +4078,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                                 wakeup_wait_ctx(ctx, res, c);
                         }
 
-
-			p = e; // to next partition
+                        p = e; // to next partition
                 }
         }
         *(uint32_t *)respHeader->At(sizeOffset) = respHeader->length() - sizeOffset - sizeof(uint32_t);
@@ -4094,7 +4100,7 @@ bool Service::process_msg(connection *const c, const uint8_t msg, const uint8_t 
         switch (TankAPIMsgType(msg))
         {
                 case TankAPIMsgType::Produce:
-		case TankAPIMsgType::ProduceWithBaseSeqNum:
+                case TankAPIMsgType::ProduceWithBaseSeqNum:
                         return process_produce(TankAPIMsgType(msg), c, data, len);
 
                 case TankAPIMsgType::Consume:
@@ -4106,11 +4112,11 @@ bool Service::process_msg(connection *const c, const uint8_t msg, const uint8_t 
                 case TankAPIMsgType::RegReplica:
                         return process_replica_reg(c, data, len);
 
-		case TankAPIMsgType::DiscoverPartitions:
-			return process_discover_partitions(c, data, len);
-		
-		case TankAPIMsgType::CreateTopic:
-			return process_create_topic(c, data, len);
+                case TankAPIMsgType::DiscoverPartitions:
+                        return process_discover_partitions(c, data, len);
+
+                case TankAPIMsgType::CreateTopic:
+                        return process_create_topic(c, data, len);
 
                 default:
                         return shutdown(c, __LINE__);
@@ -4815,10 +4821,10 @@ int Service::start(int argc, char **argv)
                                                 const auto seqNum = *(uint64_t *)p;
                                                 p += sizeof(uint64_t);
 
-						SLog(topicName, " ", partition, " ", seqNum, "\n");
+                                                SLog(topicName, " ", partition, " ", seqNum, "\n");
 
-						if (seqNum)
-                                                	cleanupCheckpoints.push_back({{{a.CopyOf(topicName.p, topicName.len), topicName.len}, partition}, seqNum});
+                                                if (seqNum)
+                                                        cleanupCheckpoints.push_back({{{a.CopyOf(topicName.p, topicName.len), topicName.len}, partition}, seqNum});
                                         }
                                 }
                                 else if (*name.p != '.')
@@ -4913,7 +4919,7 @@ int Service::start(int argc, char **argv)
                                                         Snprint(path, sizeof(path), basePath_.data(), "/", t->name_, "/", partition, "/");
                                                         auto p = init_local_partition(partition, path, t->partitionConf);
 
-							//SLog("Initializing ", path, "\n"); p->log_->compact(path); exit(0);
+                                                        //SLog("Initializing ", path, "\n"); p->log_->compact(path); exit(0);
 
                                                         collectLock.lock();
                                                         list.push_back({t, std::move(p)});
@@ -4960,26 +4966,26 @@ int Service::start(int argc, char **argv)
                                         partitions.clear();
                                 }
 
-				for (const auto &it : cleanupCheckpoints)
-				{
-					const auto topic = it.first.first;
-					const auto partition = it.first.second;
-					auto seqNum = it.second;
+                                for (const auto &it : cleanupCheckpoints)
+                                {
+                                        const auto topic = it.first.first;
+                                        const auto partition = it.first.second;
+                                        auto seqNum = it.second;
 
-					if (auto t = topic_by_name(topic))
-					{
-						if (partition < t->partitions_->size())
-						{
-							auto log = t->partitions_->at(partition)->log_.get();
+                                        if (auto t = topic_by_name(topic))
+                                        {
+                                                if (partition < t->partitions_->size())
+                                                {
+                                                        auto log = t->partitions_->at(partition)->log_.get();
 
                                                         if (seqNum < log->firstAvailableSeqNum)
                                                                 seqNum = log->firstAvailableSeqNum - 1;
 
                                                         log->lastCleanupMaxSeqNum = seqNum;
-							cleanupTracker.push_back(log);	 // TODO: If we support topic/partitions deletes, we need to remove from cleanupTracker
-						}
-					}
-				}
+                                                        cleanupTracker.push_back(log); // TODO: If we support topic/partitions deletes, we need to remove from cleanupTracker
+                                                }
+                                        }
+                                }
 
                                 if (trace)
                                         SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " to initialize all partitions\n");
@@ -4996,16 +5002,16 @@ int Service::start(int argc, char **argv)
                 IMPLEMENT_ME();
         }
 
+        Print(ansifmt::bold, "<=TANK=>", ansifmt::reset, " v", TANK_VERSION / 100, ".", TANK_VERSION % 100, " ", dotnotation_repr(topics.size()), " topics registered, ", dotnotation_repr(totalPartitions), " partitions; will listen for new connections at ", listenAddr, "\n");
+        Print("(C) Phaistos Networks, S.A. - ", ansifmt::color_green, "http://phaistosnetworks.gr/", ansifmt::reset, ". Licensed under the Apache License\n");
+
         if (topics.empty())
         {
                 Print("No topics found in ", basePath_, ". You may want to create a few, like so:\n");
                 Print("mkdir -p ", basePath_, "/events/0 ", basePath_, "/orders/0 \n");
-                Print("This will create topics events and orders and define one partition with id 0 for each of them. Restart Tank after you have created a few topics/partitions\n");
-                return 1;
+                Print("This will create topics events and orders and define one partition with id 0 for each of them.\nRestart Tank after you have created a few topics/partitions\n");
+		Print("Or, you can just use tank-cli's \"create_topic\" command to create topics instead\n");
         }
-
-        Print(ansifmt::bold, "<=TANK=>", ansifmt::reset, " v", TANK_VERSION / 100, ".", TANK_VERSION % 100, " ", dotnotation_repr(topics.size()), " topics registered, ", dotnotation_repr(totalPartitions), " partitions; will listen for new connections at ", listenAddr, "\n");
-        Print("(C) Phaistos Networks, S.A. - ", ansifmt::color_green, "http://phaistosnetworks.gr/", ansifmt::reset, ". Licensed under the Apache License\n");
 
         listenFd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 
@@ -5079,7 +5085,6 @@ int Service::start(int argc, char **argv)
 
                 const auto nowMS = Timings::Milliseconds::Tick();
 
-
 #if 0
 		if (1)
 		{
@@ -5101,8 +5106,8 @@ int Service::start(int argc, char **argv)
                         }
 		}
 #endif
-	
-		if (nowMS > nextPubSubQueueDrain)
+
+                if (nowMS > nextPubSubQueueDrain)
                 {
                         if (auto it = mainThreadClosures.drain())
                         {
@@ -5123,8 +5128,8 @@ int Service::start(int argc, char **argv)
                                 {
                                         auto next = rh->next;
 
-					if (trace)
-						SLog("Executing\n");
+                                        if (trace)
+                                                SLog("Executing\n");
 
                                         (*rh)();
                                         delete rh;

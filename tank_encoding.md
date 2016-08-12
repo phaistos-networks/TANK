@@ -38,7 +38,7 @@ See below for the encoding:
 bundle
 {
 	flags:u8		       The bundle flags. Currently, 7 out of 8 bits are used. See below
-				       (7) 	: unused bit	(maybe when set means that each msg or bundle has a crc32 encoded in its header)
+				       (7) 	: unused bit	(future:when set, means another flag:u8 is defined in the bunde header, for encryption/CRC etc)
 				       (6) 	: SPARSE bundle bit - see later
 				       (2, 6] 	: those 4 bits encode the total messages in message set, iff total number of messages in the message <= 15. If not, see below
 				       (0, 2] 	: compression codec. 0 for no compression, 1 for Snappy compression. Other codecs may be supported in the future
