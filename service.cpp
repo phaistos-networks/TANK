@@ -3569,7 +3569,10 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
         const auto sizeOffset = resp->length();
 
         resp->MakeSpace(sizeof(uint32_t));
+
         resp->Serialize(requestId);
+	resp->Serialize(topicName.len);
+	resp->Serialize(topicName.p, topicName.len);
 
         config.TrimWS();
         if (config)
@@ -3650,7 +3653,7 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
                                         list.pop_back();
                                 }
 
-                                resp->Serialize<uint8_t>(1);
+                                resp->Serialize<uint8_t>(2);
                         }
                 }
         }

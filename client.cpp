@@ -1360,14 +1360,28 @@ bool TankClient::process_create_topic(connection *const c, const uint8_t *const 
         topicName.Set(resultsAllocator.CopyOf((char *)p + 1, *p), *p);
         p += topicName.len + sizeof(uint8_t);
 
-	const auto err = *p++;
+        const auto err = *p++;
 
-	if (err)
-                capturedFaults.push_back({clientReqId, fault::Type::AlreadyExists, fault::Req::Ctrl, topicName, 0});
-	else
-		createdTopicsResults.push_back({clientReqId, topicName});
+        switch (err)
+        {
+                case 4: // invalid configuration;
+                        capturedFaults.push_back({clientReqId, fault::Type::InvalidReq, fault::Req::Ctrl, topicName, 0});
+                        break;
 
-	return true;
+                case 2: // system error
+                        capturedFaults.push_back({clientReqId, fault::Type::SystemFail, fault::Req::Ctrl, topicName, 0});
+                        break;
+
+                case 1: // exists
+                        capturedFaults.push_back({clientReqId, fault::Type::AlreadyExists, fault::Req::Ctrl, topicName, 0});
+                        break;
+
+                default:
+                        createdTopicsResults.push_back({clientReqId, topicName});
+                        break;
+        }
+
+        return true;
 }
 
 bool TankClient::process_discover_partitions(connection *const c, const uint8_t *const content, const size_t len)
