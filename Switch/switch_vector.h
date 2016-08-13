@@ -21,7 +21,7 @@ namespace Switch
 
                 T &&Pop()
                 {
-                        auto last = std::move(Super::back());
+                        auto last{std::move(Super::back())};
 
                         Super::pop_back();
                         return std::move(last);

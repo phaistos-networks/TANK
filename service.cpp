@@ -93,9 +93,9 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
         if (indexFd == -1)
         {
                 if (haveWideEntries)
-                        indexFd = open(Buffer::build(base, "/", absSeqNum, "_64.index").data(), O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME);
+                        indexFd = open(Buffer::build(base, "/", absSeqNum, "_64.index").data(), O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME, 0775);
                 else
-                        indexFd = open(Buffer::build(base, "/", absSeqNum, ".index").data(), O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME);
+                        indexFd = open(Buffer::build(base, "/", absSeqNum, ".index").data(), O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME, 0775);
 
                 if (indexFd == -1)
                         throw Switch::system_error("Failed to rebuild index file:", strerror(errno));
@@ -979,7 +979,6 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                 {
                         uint8_t bundleFlags;
                         size_t outFileSize{0};
-                        size_t logPathLen;
                         size_t sinceLastUpdateBytes{UINT32_MAX}, sinceLastUpdateMsgsCnt{UINT32_MAX};
                         auto curSegment = prevSegments[curSegmentIdx];
                         const auto baseSeqNum{all[i].seqNum};
@@ -995,7 +994,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         cbuf.clear();
                         iovLen = 0;
 
-                        logPathLen = Snprint(logPath, sizeof(logPath), destPartitionPath, baseSeqNum, "-", 0, "_", 0, ".ilog.cleaned");
+                        Snprint(logPath, sizeof(logPath), destPartitionPath, baseSeqNum, "-", 0, "_", 0, ".ilog.cleaned");
                         fd = open(logPath, O_RDWR | O_CREAT | O_LARGEFILE | O_TRUNC, 0775);
                         require(fd != -1);
 
@@ -2653,6 +2652,7 @@ uint32_t Service::verify_log(int fd)
                 uint64_t msgTs{0};
                 uint32_t msgIdx{0};
 
+		(void)msgTs;
                 for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.len; p != e; ++msgIdx)
                 {
                         // Next message set message
@@ -3945,6 +3945,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                                 if (trace)
                                         SLog("Iterating ", msgSetContent.len, " bytes\n");
 
+				(void)monotonicallyIncreasing;
                                 for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.len; p != e; ++msgIdx, ++absMsgSeqNum)
                                 {
                                         // Next message set message

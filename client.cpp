@@ -2199,7 +2199,6 @@ bool TankClient::try_send(connection *const c)
                                         continue;
                                 else if (errno == EAGAIN)
                                 {
-                                unsetNeedAvail:
                                         if (!(c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))))
                                         {
                                                 c->state.flags |= 1u << uint8_t(connection::State::Flags::NeedOutAvail);
@@ -2713,7 +2712,13 @@ void TankClient::interrupt_poll()
         bool to{true};
 
         if (polling.compare_exchange_weak(to, false, std::memory_order_release, std::memory_order_relaxed))
-                write(pipeFd[1], " ", 1);
+	{
+                if (write(pipeFd[1], " ", 1) == -1) 	// write()'s declared with [[gnu::warn_unused_result]] so keep compiler happy
+		{
+			// OK compiler, we know
+			// and we don't appreciate casting to void won't be enough for you to know we get it:)
+		}
+	}
 }
 
 void TankClient::broker::set_reachability(const Reachability r)

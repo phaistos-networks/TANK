@@ -194,7 +194,7 @@ struct lookup_res
         }
 
         lookup_res(fd_handle *const f, const uint32_t c, const uint64_t seqNum, const uint32_t o, const uint64_t h)
-            : fault{Fault::NoFault}, fdh{f}, fileOffsetCeiling{c}, absBaseSeqNum{seqNum}, fileOffset{o}, highWatermark{h}
+            : fault{Fault::NoFault}, fileOffsetCeiling{c}, fdh{f}, absBaseSeqNum{seqNum}, fileOffset{o}, highWatermark{h}
         {
         }
 

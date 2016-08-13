@@ -392,7 +392,7 @@ class Buffer
         uint32_t Replace(const char needle, const char with);
 
         Buffer()
-            : length_{0}, buffer{nullptr}
+            : buffer{nullptr}, length_{0}
         {
         }
 

@@ -589,11 +589,11 @@ class TankClient final
 
 
 
-        uint32_t produce(const std::vector<std::pair<topic_partition, std::vector<msg>>> &req);
+        [[gnu::warn_unused_result]] uint32_t produce(const std::vector<std::pair<topic_partition, std::vector<msg>>> &req);
 
-        uint32_t produce(const std::pair<topic_partition, std::vector<msg>> *, const size_t);
+        [[gnu::warn_unused_result]] uint32_t produce(const std::pair<topic_partition, std::vector<msg>> *, const size_t);
 
-        uint32_t produce_to(const topic_partition &to, const std::vector<msg> &msgs);
+        [[gnu::warn_unused_result]] uint32_t produce_to(const topic_partition &to, const std::vector<msg> &msgs);
 
 
 
@@ -601,21 +601,19 @@ class TankClient final
 	// e.g tank-ctl mirroring functionality
 	//
 	// Right now, it's only required for implementing the mirroring functionality
-        uint32_t produce_with_base(const std::vector<std::pair<topic_partition, std::pair<uint64_t, std::vector<msg>>>> &req);
+        [[gnu::warn_unused_result]] uint32_t produce_with_base(const std::vector<std::pair<topic_partition, std::pair<uint64_t, std::vector<msg>>>> &req);
 
-        uint32_t produce_with_base(const std::pair<topic_partition, std::pair<uint64_t, std::vector<msg>>> *, const size_t);
-
+        [[gnu::warn_unused_result]] uint32_t produce_with_base(const std::pair<topic_partition, std::pair<uint64_t, std::vector<msg>>> *, const size_t);
 
         Switch::endpoint leader_for(const strwlen8_t topic, const uint16_t partition);
 
+        [[gnu::warn_unused_result]] uint32_t consume(const std::vector<std::pair<topic_partition, std::pair<uint64_t, uint32_t>>> &req, const uint64_t maxWait, const uint32_t minSize);
 
-        uint32_t consume(const std::vector<std::pair<topic_partition, std::pair<uint64_t, uint32_t>>> &req, const uint64_t maxWait, const uint32_t minSize);
+        [[gnu::warn_unused_result]] uint32_t consume_from(const topic_partition &from, const uint64_t seqNum, const uint32_t minFetchSize, const uint64_t maxWait, const uint32_t minSize);
 
-        uint32_t consume_from(const topic_partition &from, const uint64_t seqNum, const uint32_t minFetchSize, const uint64_t maxWait, const uint32_t minSize);
+	[[gnu::warn_unused_result]] uint32_t discover_partitions(const strwlen8_t topic);
 
-	uint32_t discover_partitions(const strwlen8_t topic);
-
-	uint32_t create_topic(const strwlen8_t topic, const uint16_t numPartitions, const strwlen32_t configuration);
+	[[gnu::warn_unused_result]] uint32_t create_topic(const strwlen8_t topic, const uint16_t numPartitions, const strwlen32_t configuration);
 
 
         void set_client_id(const char *const p, const uint32_t len)
