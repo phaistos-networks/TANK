@@ -1,12 +1,11 @@
 ## Bundle Encoding Semantics
 This document describes the encoding semantics of bundles. 
 This encoding is used for both wire-transfers between apps and brokers, and for storing data in segment log files.
-It is still a work in progress, albeit we do not foresee any significant changes in the future, except the use of
-extra flag bits. Please see later for more.
+The encoding scheme has been crystalized, although one remaining unused bit in the bundle header(see later) may be used in the future
+to signify that another flag is present, that in turn may encode other information(encyrption, etc)
 
 You may want to consider this schema to build your own consumer clients, or tooling that accesses segment logs directly, or
 just to gain a deeper understanding of Tank internals.
-
 
 ### Important Notes
 - integers are little-endian encoded
@@ -14,7 +13,6 @@ just to gain a deeper understanding of Tank internals.
 - varint encoding and decoding implementation is available in Switch/compress.h. This is based on Jeff Dean's varint encoding scheme
 	so there are many different implementations for all kinds of languages on GH and elsewhere if you are interested
 - the various flag bits are defined in common.h, in TankFlags namespace
-
 
 
 
@@ -139,14 +137,9 @@ By not having to encode that value in the bundle we can safe 4 or 8 bytes we 'd 
 We now support 'sparse bundles', where we encode information in the bundle header and the bundle message headers(if necessary) so that messages in the set are explicitly identified
 with a sequence number, as opposed to being implicitly identified based on a relative base sequence number(see above).
 This is required in order to support compactions and mirroring (a tank-cli feature). Regular applications should never produce sparse bundles (via TankClient::produce_with_base() method)
-and sparse bundlesa are properly handled by the client.
+and sparse bundles are properly handled by the client.
 Support for sparse bundles increased the complexity of the encoding and the client, but I think it's worth it, considering one only need to write the client one(and make sure
 she's got it right), while reaping the benefits of the tight encoding forever.
-
-
-
-We will ammend this document to reflect those requirements. This will likely not happen soon because there is no immediate need for it, and
-from an informal survey, we found out that users of Kafka and other such systems overwhelmingly do not need nor take advantage of compactions. It will be support though eventually.
 
 
 #### Design Goals

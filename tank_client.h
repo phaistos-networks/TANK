@@ -77,7 +77,7 @@ class TankClient final
                 uint8_t flags;
                 uint32_t __id;
 
-		// If the payload is tracked by reqs_tracker.pendingConsume or reqs_tracker.pendingProduce, then
+		// If the payload is tracked by reqs_tracker.pendingConsume or reqs_tracker.pendingProduce or another reqs_tracker tracker, then
 		// we shouldn't try to put_payload() if it's registered with outgoing_content (either in pendingRespList or in outgoing payloads list)
 		inline bool tracked_by_reqs_tracker() const
 		{

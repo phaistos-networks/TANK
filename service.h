@@ -744,7 +744,6 @@ struct connection
                 {
                         PendingIntro = 0,
                         NeedOutAvail,
-                        Busy,
 			ConsideredReqHeader
                 };
 

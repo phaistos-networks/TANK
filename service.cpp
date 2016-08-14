@@ -4755,7 +4755,7 @@ int Service::start(int argc, char **argv)
         }
         else if (!(st.st_mode & S_IFDIR))
         {
-                Print(basePath_, " not a directory\n");
+                Print(basePath_, " is not a directory\n");
                 return 1;
         }
         else if (opMode == OperationMode::Standalone)
@@ -5014,7 +5014,7 @@ int Service::start(int argc, char **argv)
                 Print("No topics found in ", basePath_, ". You may want to create a few, like so:\n");
                 Print("mkdir -p ", basePath_, "/events/0 ", basePath_, "/orders/0 \n");
                 Print("This will create topics events and orders and define one partition with id 0 for each of them.\nRestart Tank after you have created a few topics/partitions\n");
-		Print("Or, you can just use tank-cli's \"create_topic\" command to create topics instead\n");
+		Print("Or, you can just use tank-cli's \"create_topic\" command to create new topics instead\n");
         }
 
         listenFd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
@@ -5149,6 +5149,8 @@ int Service::start(int argc, char **argv)
                 {
                         if (cleanupTrackerIsDirty)
                         {
+				// TODO: maybe we should just have another thread to do this
+				// although this is a very infrequent operation and shouldn't take more than a few microseconds
                                 IOBuffer b;
                                 int fd;
 
@@ -5286,7 +5288,7 @@ int Service::start(int argc, char **argv)
                                         c->state.lastInputTS = Timings::Milliseconds::Tick();
                                 }
 
-                                for (const auto *e = (uint8_t *)b->End(); !(c->state.flags & (1u << uint8_t(connection::State::Flags::Busy)));)
+                                for (const auto *e = (uint8_t *)b->End();;)
                                 {
                                         const auto *p = (uint8_t *)b->AtOffset();
 
@@ -5366,6 +5368,8 @@ int Service::start(int argc, char **argv)
 
                 if (nowMS > nextIdleCheck)
                 {
+			// We don't currentl deal with idle connections, and I am not sure
+			// we should
                         nextIdleCheck = nowMS + 800;
 
                         for (auto it = allConnections.next; it != &allConnections;)
