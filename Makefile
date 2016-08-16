@@ -15,7 +15,7 @@ else
 		-Wunused-variable -Wunused-value -Wreturn-type -Wparentheses -Wmissing-braces -Wno-invalid-source-encoding -Wno-invalid-offsetof \
 		-Wno-unknown-pragmas -Wno-missing-field-initializers -Wno-unused-parameter -Wno-sign-compare -Wno-invalid-offsetof   \
 		-fno-rtti -std=c++14 -ffast-math  -D_REENTRANT -DREENTRANT  -g3 -ggdb -fno-omit-frame-pointer   \
-		-fno-strict-aliasing    -DLEAN_SWITCH  -ISwitch/ -O3 -funroll-loops -Wno-maybe-uninitialized -Wno-unused-function -Wno-uninitialized
+		-fno-strict-aliasing    -DLEAN_SWITCH  -ISwitch/ -Wno-maybe-uninitialized -Wno-unused-function -Wno-uninitialized -funroll-loops 
 	LDFLAGS:=-ldl -ffunction-sections -lpthread -ldl -lz -LSwitch/ext_snappy/ -lsnappy
 	SWITCH_LIB:=
 	SWITCH_DEP:=switch

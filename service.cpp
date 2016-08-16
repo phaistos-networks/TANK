@@ -5213,6 +5213,8 @@ int Service::start(int argc, char **argv)
 
                                         auto c = get_connection();
 
+					require(c);
+
                                         // Kafka's default is 1mb for both buffers
                                         if (rcvBufSize)
                                         {
