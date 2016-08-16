@@ -19,12 +19,12 @@ namespace Switch
                                 Super::erase(it, it + 1);
                 }
 
-                T &&Pop()
+                T Pop()
                 {
-                        auto last{std::move(Super::back())};
+			auto last{this->back()};
 
-                        Super::pop_back();
-                        return std::move(last);
+			this->pop_back();
+                        return last;
                 }
 
                 auto values()
@@ -72,6 +72,5 @@ namespace Switch
 
 			Super::erase(it, it + 1);
 		}
-
         };
 }

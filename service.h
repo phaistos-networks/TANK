@@ -818,7 +818,7 @@ class Service final
 
         auto get_connection()
         {
-                return connsPool.size() ? connsPool.Pop() : new connection();
+		return connsPool.size() ? connsPool.Pop() : new connection();
         }
 
         void put_connection(connection *const c)
