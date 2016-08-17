@@ -399,7 +399,7 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
 
         if (cur.index.haveWideEntries)
         {
-                // need to use the appropriate skipList64 and a different index encodig format
+                // need to use the appropriate skipList64 and a different index encoding format
                 IMPLEMENT_ME();
         }
 
