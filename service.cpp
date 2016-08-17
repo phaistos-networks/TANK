@@ -285,7 +285,7 @@ static uint32_t search_before_offset(uint64_t baseSeqNum, const uint32_t maxSize
 //
 // Kafka does something similar(see its FileMessageSet.scala#searchFor() impl.)
 //
-// If we don't adjust_range_start(), we 'll avoid the scanning I/O cost, which should be minimal anyway, but we can potentially send
+// If we don't adjust_range_start(), we'll avoid the scanning I/O cost, which should be minimal anyway, but we can potentially send
 // more data at the expense of network I/O and transfer costs
 //
 // it returns true if it parsed the first bundle to stream, and that bundle is a sparse bundle (which means
@@ -298,7 +298,7 @@ static bool adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
         {
                 if (baseSeqNum == absSeqNum || absSeqNum <= 1)
                 {
-                        // No need for any ajustements
+                        // No need for any adjustments
                         if (trace)
                                 SLog("No need for any adjustments\n");
 
