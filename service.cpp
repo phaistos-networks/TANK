@@ -283,7 +283,7 @@ static uint32_t search_before_offset(uint64_t baseSeqNum, const uint32_t maxSize
 // scan ahead from that fileOffset until we find an more appropriate file offset to begin streaming for, and adjust
 // res.fileOffset and res.baseSeqNum accordidly if we can.
 //
-// Kafka does something similar(see it's FileMessageSet.scala#searchFor() impl.)
+// Kafka does something similar(see its FileMessageSet.scala#searchFor() impl.)
 //
 // If we don't adjust_range_start(), we 'll avoid the scanning I/O cost, which should be minimal anyway, but we can potentially send
 // more data at the expense of network I/O and transfer costs
