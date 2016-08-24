@@ -282,9 +282,9 @@ static uint32_t search_before_offset(uint64_t baseSeqNum, const uint32_t maxSize
 // scan ahead from that fileOffset until we find an more appropriate file offset to begin streaming for, and adjust
 // res.fileOffset and res.baseSeqNum accordidly if we can.
 //
-// Kafka does something similar(see it's FileMessageSet.scala#searchFor() impl.)
+// Kafka does something similar(see its FileMessageSet.scala#searchFor() impl.)
 //
-// If we don't adjust_range_start(), we 'll avoid the scanning I/O cost, which should be minimal anyway, but we can potentially send
+// If we don't adjust_range_start(), we'll avoid the scanning I/O cost, which should be minimal anyway, but we can potentially send
 // more data at the expense of network I/O and transfer costs
 //
 // it returns true if it parsed the first bundle to stream, and that bundle is a sparse bundle (which means
@@ -297,7 +297,7 @@ static bool adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
         {
                 if (baseSeqNum == absSeqNum || absSeqNum <= 1)
                 {
-                        // No need for any ajustements
+                        // No need for any adjustments
                         if (trace)
                                 SLog("No need for any adjustments\n");
 
@@ -398,7 +398,7 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
 
         if (cur.index.haveWideEntries)
         {
-                // need to use the appropriate skipList64 and a different index encodig format
+                // need to use the appropriate skipList64 and a different index encoding format
                 IMPLEMENT_ME();
         }
 
@@ -1263,7 +1263,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         // We could have instead used (firstSegmentConsumedForThisNewSegment->baseSeqNum, curSegmentLastAvailSeqNum)
                         // instead of (baseSeqNum, all[i - 1].seqNum), which would have retained the filename for some segments cleaned up onto themselves
                         // and would reduce need to scan forward for a ro_segment if the query seqNum > segment.lastSeqNum and < nextSegment.baseSeqNum
-                        // but we 'd rather not do this
+                        // but we'd rather not do this
                         if (Rename(logPath, Buffer::build(destPartitionPath, baseSeqNum, "-", lastAvailSeqNum, "_", curSegment->createdTS, ".ilog.cleaned")) == -1)
                                 throw Switch::system_error("Failed to rename segment:", strerror(errno));
 
@@ -1300,7 +1300,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         SLog("Done scanning RO segments\n");
 
                 // We have created a new set of segments, so we need to replace their .cleaned extension with a .swap extension
-                // During startup, if we find any *.cleaned files, then we 'll delete them and will also remove any .swap files left around
+                // During startup, if we find any *.cleaned files, then we'll delete them and will also remove any .swap files left around
                 for (auto it : newSegments)
                 {
                         if (Rename(Buffer::build(destPartitionPath, it->baseSeqNum, "-", it->lastAvailSeqNum, "_", it->createdTS, ".ilog.cleaned").data(),
