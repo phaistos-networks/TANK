@@ -54,6 +54,11 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
         int fd, indexFd;
         struct stat64 st;
 
+	if (trace)
+		SLog("New ro_segment(this = ", ptr_repr(this), ", baseSeqNum = ", baseSeqNum, ", lastAbsSeqNum = ", lastAbsSeqNum, ", createdTS = ", createdTS, ", haveWideEntries = ", haveWideEntries, "\n");
+
+	require(lastAbsSeqNum >= baseSeqNum);	
+
         index.data = nullptr;
         if (createdTS)
                 fd = open(Buffer::build(base, "/", absSeqNum, "-", lastAbsSeqNum, "_", createdTS, ".ilog").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
@@ -150,6 +155,8 @@ std::pair<uint32_t, uint32_t> ro_segment::snapDown(const uint64_t absSeqNum) con
 {
         if (haveWideEntries)
         {
+		if (trace)
+			SLog("haveWideEntries for ", ptr_repr(this), "\n");
                 IMPLEMENT_ME();
         }
 
@@ -983,6 +990,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         const auto baseSeqNum{all[i].seqNum};
                         auto curSegmentLastAvailSeqNum = curSegment->lastAvailSeqNum;
                         index_record indexLastRecorded;
+                        auto expected = all[i].seqNum;
 
                         if (trace)
                                 SLog(ansifmt::bold, ansifmt::color_blue, "Now processing segment ", curSegmentIdx, "/", prevSegments.size(), " (", baseSeqNum, ", ", curSegment->lastAvailSeqNum, ")", ansifmt::reset, "\n");
@@ -1009,7 +1017,6 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                 const auto upto = Min<size_t>(n, i + maxBundleMsgsSetSize);
                                 bool asSparse{false};
                                 size_t sum{0};
-                                auto expected = all[i].seqNum;
 
                                 do
                                 {
@@ -1233,6 +1240,8 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                         {
                                                 // we still haven't had enough messages stored in the currently produced segment, so keep
                                                 // consuming from successive segments
+						curSegment  = prevSegments[curSegmentIdx]; 
+						curSegmentLastAvailSeqNum = curSegment->lastAvailSeqNum;
                                         }
                                 }
                         }
@@ -1591,15 +1600,17 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
                 // to properly advance to the _next_ segment, and adjust absSeqNum
                 // accordingly
                 // (TODO: we should probably come up with a binary search alternative to this linear search scan)
-                while (absSeqNum > (*it)->lastAvailSeqNum && ++it != end)
+                auto f = *it;
+
+                while (absSeqNum > f->lastAvailSeqNum && ++it != end)
                 {
                         if (trace)
                                 SLog("Adjusting ", absSeqNum, " to ", (*it)->baseSeqNum, "\n");
 
-                        absSeqNum = (*it)->baseSeqNum;
+                        f = *it;
+                        absSeqNum = f->baseSeqNum;
                 }
 
-                const auto f = *it;
                 const auto res = f->translateDown(absSeqNum, UINT32_MAX);
                 uint32_t offsetCeil;
 
@@ -3147,6 +3158,10 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                                 Drequire(msgSetSize);
                                         }
 
+
+					if (trace)
+						SLog("bundleFlags = ", bundleFlags, ", sparseBundleBitSet = ", sparseBundleBitSet, ", msgSetSize = ", msgSetSize, "\n");
+
                                         if (sparseBundleBitSet)
                                         {
                                                 const auto firstMsgSeqNum = *(uint64_t *)p;
@@ -3161,6 +3176,9 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                                 {
                                                         lastMsgSeqNum = firstMsgSeqNum;
                                                 }
+
+						if (trace)
+							SLog("sparse bundle, firstMsgSeqNum = ", firstMsgSeqNum, ", lastMsgSeqNum = ", lastMsgSeqNum, "\n");
 
                                                 next = lastMsgSeqNum + 1;
                                         }
@@ -3260,7 +3278,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
 
                 (void)clientVersion;
                 if (trace)
-                        SLog(ansifmt::bold, ansifmt::color_magenta, "New COSNUME request fro topicsCnt = ", topicsCnt, ansifmt::reset, "\n");
+                        SLog(ansifmt::bold, ansifmt::color_magenta, "New COSNUME request for topicsCnt = ", topicsCnt, ansifmt::reset, "\n");
 
                 respHeader->Serialize(uint8_t(TankAPIMsgType::Consume));
                 const auto sizeOffset = respHeader->length();
@@ -4838,7 +4856,7 @@ int Service::start(int argc, char **argv)
                                                 const auto seqNum = *(uint64_t *)p;
                                                 p += sizeof(uint64_t);
 
-                                                SLog(topicName, " ", partition, " ", seqNum, "\n");
+                                                //SLog(topicName, " ", partition, " ", seqNum, "\n");
 
                                                 if (seqNum)
                                                         cleanupCheckpoints.push_back({{{a.CopyOf(topicName.p, topicName.len), topicName.len}, partition}, seqNum});

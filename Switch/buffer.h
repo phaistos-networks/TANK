@@ -1178,7 +1178,7 @@ class IOBuffer
                 return true;
         }
 
-        void SerializeVarUInt32(const uint32_t n);
+        inline void SerializeVarUInt32(const uint32_t n);
 
         inline uint32_t UnserializeVarUInt32(void);
 
