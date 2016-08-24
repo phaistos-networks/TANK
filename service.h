@@ -94,8 +94,17 @@ struct ro_segment
         // See: https://github.com/phaistos-networks/TANK/issues/2 for rationale
         const uint64_t lastAvailSeqNum;
 
+	// For RO segments, this used to be set to the creation time of the
+	// mutable segment that was then turned into a R/O segment.
+	//
+	// This howevet tuend out to be problematic, because retention logic woulc
+	// consider that timestamp for retentions, instead of what makes more sense, the time when 
+	// the last message was appended to the mutable segment, before it was frozen as a RO segment.
+	// 
+	// We need to encode this in the file path, because a process may update the mtime of the RO segment for whatever reason
+	// and so it's important that we do not depend on the file's mtime, and instead encode it in the path.
+	// see: https://github.com/phaistos-networks/TANK/issues/37
         const uint32_t createdTS;
-        uint32_t lastModTS;
 
         Switch::shared_refptr<fd_handle> fdh;
         uint32_t fileSize;
@@ -120,7 +129,7 @@ struct ro_segment
         } index;
 
         ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, const uint32_t creationTS)
-            : baseSeqNum{absSeqNum}, lastAvailSeqNum{lastAbsSeqNum}, createdTS{creationTS}, lastModTS{0}, haveWideEntries{false}
+            : baseSeqNum{absSeqNum}, lastAvailSeqNum{lastAbsSeqNum}, createdTS{creationTS}, haveWideEntries{false}
         {
         }
 

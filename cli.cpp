@@ -1316,7 +1316,7 @@ int main(int argc, char *argv[])
 
                                 if (tankClient.consumed().size())
                                 {
-                                        Print("Go data after publishing ", dotnotation_repr(cnt), " message(s) of size ", size_repr(content.len), " (", size_repr(cnt * content.len), "), took ", duration_repr(Timings::Microseconds::Since(start)), "\n");
+                                        Print("Got data after publishing ", dotnotation_repr(cnt), " message(s) of size ", size_repr(content.len), " (", size_repr(cnt * content.len), "), took ", duration_repr(Timings::Microseconds::Since(start)), "\n");
                                         return 0;
                                 }
                         }

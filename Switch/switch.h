@@ -29,18 +29,6 @@
         __builtin_unreachable();
 }
 
-#ifdef __clang__
-static inline void assume(const bool x)
-{
-        __builtin_assume(x);
-}
-#else
-#define assume(x) \
-        if (x)    \
-                ; \
-        else      \
-        Unreachable() // XXX: use unlikely() ?
-#endif
 
 static inline size_t goodMallocSize(const size_t n) noexcept
 {
@@ -108,6 +96,29 @@ static inline T Max(const T a, const T b)
 	return std::max(a, b);
 }
 
+[[gnu::always_inline]] inline void assume(bool cond)
+{
+#if defined(__clang__)
+        __builtin_assume(cond);
+#elif defined(__GNUC__)
+        if (!cond)
+                __builtin_unreachable();
+#elif defined(_MSC_VER)
+        __assume(cond);
+#endif
+}
+
+[[ noreturn, gnu::always_inline ]] inline void assume_unreachable()
+{
+        assume(false);
+#if defined(__GNUC__)
+        __builtin_unreachable();
+#elif defined(_MSC_VER)
+        __assume(0);
+#else
+        std::abort();
+#endif
+}
 
 #define TOKEN_PASTE(x, y) x##y
 #define TOKEN_PASTE2(x, y) TOKEN_PASTE(x, y)

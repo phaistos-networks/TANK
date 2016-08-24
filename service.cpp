@@ -78,10 +78,9 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
         Drequire(size < std::numeric_limits<std::remove_reference<decltype(fileSize)>::type>::max());
 
         fileSize = size;
-        lastModTS = st.st_mtime;
 
         if (trace)
-                SLog(ansifmt::bold, "fileSize = ", fileSize, ", lastModTS = ", Date::ts_repr(lastModTS), ", createdTS = ", Date::ts_repr(creationTS), ansifmt::reset, "\n");
+                SLog(ansifmt::bold, "fileSize = ", fileSize, ", createdTS = ", Date::ts_repr(creationTS), ansifmt::reset, "\n");
 
         if (haveWideEntries)
                 indexFd = open(Buffer::build(base, "/", absSeqNum, "_64.index").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
@@ -1662,7 +1661,6 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
 
 void topic_partition_log::consider_ro_segments()
 {
-
         if (compacting)
         {
                 // Busy compacting
@@ -1858,8 +1856,19 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 
                 if (cur.fileSize != UINT32_MAX)
                 {
+			// See ro_segment::createdTS declaration comments
+#if 0
+			const auto freezeTs = cur.createdTS;
+#else
+			struct stat st;
+
+			if (fstat(cur.fdh->fd, &st) == -1)
+				throw Switch::system_error("fstat() failed:", strerror(errno));
+
+			const uint64_t freezeTs = st.st_mtime;
+#endif
                         auto newROFiles = std::make_unique<std::vector<ro_segment *>>();
-                        auto newROFile = std::make_unique<ro_segment>(cur.baseSeqNum, savedLastAssignedSeqNum, cur.createdTS);
+                        auto newROFile = std::make_unique<ro_segment>(cur.baseSeqNum, savedLastAssignedSeqNum, freezeTs);
                         const auto n = cur.fdh.use_count();
 
                         require(n >= 1);
@@ -1880,13 +1889,13 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                         if (cur.nameEncodesTS)
                         {
                                 if (Rename(Buffer::build(basePath, "/", cur.baseSeqNum, "_", cur.createdTS, ".log").data(),
-                                           Buffer::build(basePath, "/", cur.baseSeqNum, "-", savedLastAssignedSeqNum, "_", cur.createdTS, ".ilog").data()) == -1)
+                                           Buffer::build(basePath, "/", cur.baseSeqNum, "-", savedLastAssignedSeqNum, "_", freezeTs, ".ilog").data()) == -1)
                                 {
                                         throw Switch::system_error("Failed to Rename():", strerror(errno));
                                 }
                         }
                         else if (Rename(Buffer::build(basePath, "/", cur.baseSeqNum, ".log").data(),
-                                        Buffer::build(basePath, "/", cur.baseSeqNum, "-", savedLastAssignedSeqNum, "_", cur.createdTS, ".ilog").data()) == -1)
+                                        Buffer::build(basePath, "/", cur.baseSeqNum, "-", savedLastAssignedSeqNum, "_", freezeTs, ".ilog").data()) == -1)
                         {
                                 throw Switch::system_error("Failed to Rename():", strerror(errno));
                         }
@@ -2325,6 +2334,10 @@ void Service::parse_partition_config(const strwlen32_t contents, partition_confi
 
                 if (auto p = line.Search('#'))
                         line.SetEnd(p);
+
+		if (!line)
+			continue;
+
 
                 std::tie(k, v) = line.Divided('=');
                 k.TrimWS();
