@@ -3304,6 +3304,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                 uint32_t patchListSize{0};
                 uint8_t patchIndices[256];
 
+		// TODO: https://github.com/phaistos-networks/TANK/issues/12
                 patchList[0].offset = 0;
                 if (!q)
                         q = c->outQ = get_outgoing_queue();
@@ -4589,6 +4590,7 @@ bool Service::flush_iov(connection *const c, struct iovec *const iov, const uint
 
 // this method's implementation is somewhat more complex that it perhaps ought to be, but we need to
 // keep the syscalls count down to minimum and coallesce data to write
+// Related: https://github.com/phaistos-networks/TANK/issues/41
 bool Service::try_send(connection *const c)
 {
         const auto fd = c->fd;

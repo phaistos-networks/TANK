@@ -228,7 +228,7 @@ struct partition_config
         size_t indexInterval{4096};
         size_t maxIndexSize{10 * 1024 * 1024};
         size_t maxRollJitterSecs{0};
-        size_t lastSegmentMaxAge{86400 * 7}; // 1 week (soft limit)
+        size_t lastSegmentMaxAge{0};         // Kafka's default is 1 week, we don't want to explicitly specify a retention limit
         size_t curSegmentMaxAge{86400 * 7};  // 1 week (soft limit)
         size_t flushIntervalMsgs{0};         // never
         size_t flushIntervalSecs{0};         // never
@@ -572,7 +572,7 @@ struct outgoing_queue
 
                                 struct
                                 {
-                                        struct iovec iov[64];
+                                        struct iovec iov[64]; // https://github.com/phaistos-networks/TANK/issues/12
                                         uint8_t iovIdx;
                                         uint8_t iovCnt;
                                 };
