@@ -36,8 +36,10 @@ namespace Switch
 				if (it != this->end())
 				{
 					auto v = std::move(it->second);
+					const auto n = this->size();
 
 					this->erase(it);
+					require(n == this->size() + 1);
 					return {v};
 				}
 				else

@@ -7,70 +7,51 @@ namespace Switch
         class vector
             : public std::vector<T>
         {
-		using Super = std::vector<T>;
-
               public:
                 void RemoveByValue(const T v)
                 {
-			const auto e = Super::end();
-                        auto it = std::find(Super::begin(), e, v);
+                        const auto e = this->end();
+                        auto it = std::find(this->begin(), e, v);
 
                         if (it != e)
-                                Super::erase(it, it + 1);
+                        {
+                                const auto n = this->size();
+
+                                this->erase(it);
+                                require(this->size() + 1 == n);
+                        }
                 }
 
                 T Pop()
                 {
-			auto last{this->back()};
+                        auto last{this->back()};
 
-			this->pop_back();
+                        this->pop_back();
                         return last;
                 }
 
-                auto values()
+                auto values() noexcept
                 {
-                        return Super::data();
+                        return this->data();
                 }
 
-                typename std::vector<T>::iterator begin()
+                void pop_front()
                 {
-                        return Super::begin();
+                        auto it = this->begin();
+
+                        this->erase(it);
                 }
 
-                typename std::vector<T>::iterator end()
+                void Append(T *const list, const size_t n)
                 {
-                        return Super::end();
+                        this->reserve(n);
+                        for (size_t i{0}; i != n; ++i)
+                                this->push_back(list[i]);
                 }
 
-                typename std::vector<T>::const_iterator begin() const
+                void PopByIndex(const size_t idx)
                 {
-                        return Super::begin();
+                        this->erase(this->begin() + idx);
                 }
-
-                typename std::vector<T>::const_iterator end() const
-                {
-                        return Super::end();
-                }
-
-		void pop_front()
-		{
-			auto it = Super::begin();
-
-			Super::erase(it, it + 1);
-		}
-
-		void Append(T *const list, const size_t n)
-		{
-			Super::reserve(n);
-			for (size_t i{0}; i != n; ++i)
-				Super::push_back(list[i]);
-		}
-
-		void PopByIndex(const size_t idx)
-		{
-			auto it = Super::begin() + idx;
-
-			Super::erase(it, it + 1);
-		}
         };
 }

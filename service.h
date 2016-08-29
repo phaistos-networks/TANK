@@ -544,7 +544,18 @@ struct outgoing_queue
                 content_file_range &operator=(const content_file_range &o)
                 {
                         fdh = o.fdh;
+			fdh->Retain();
                         range = o.range;
+                        return *this;
+                }
+
+                content_file_range &operator=(content_file_range &&o)
+                {
+                        fdh = o.fdh;
+                        range = o.range;
+
+			o.fdh = nullptr;
+			o.range.Unset();
                         return *this;
                 }
 
@@ -555,9 +566,33 @@ struct outgoing_queue
                 bool payloadBuf;
 
                 union {
-                        IOBuffer *buf;
+                        struct
+                        {
+                                IOBuffer *buf;
+
+                                struct
+                                {
+                                        struct iovec iov[64];
+                                        uint8_t iovIdx;
+                                        uint8_t iovCnt;
+                                };
+                        };
+
                         content_file_range file_range;
                 };
+
+		void set_iov(const range32_t *const l, const uint32_t cnt)
+                {
+                        iovCnt = cnt;
+
+                        for (uint32_t i{0}; i != cnt; ++i)
+                        {
+                                auto ptr = iov + i;
+
+                                ptr->iov_base = static_cast<void *>(buf->At(l[i].offset));
+                                ptr->iov_len = l[i].len;
+                        }
+                }
 
                 payload()
                     : payloadBuf{false}
@@ -568,6 +603,7 @@ struct outgoing_queue
                 {
                         payloadBuf = true;
                         buf = b;
+			iovCnt = iovIdx = 0;
                 }
 
                 payload(fd_handle *const fdh, const range32_t r)
@@ -578,16 +614,31 @@ struct outgoing_queue
                         file_range.fdh->Retain();
                 }
 
-                payload &operator=(const payload &o)
-                {
-                        payloadBuf = o.payloadBuf;
-                        if (payloadBuf)
-                                buf = o.buf;
-                        else
-                                file_range = o.file_range;
+                payload &operator=(const payload &) = delete;
 
+		payload &operator=(payload &&o)
+		{
+                        payloadBuf = o.payloadBuf;
+
+                        if (payloadBuf)
+			{
+                                buf = o.buf;
+				iovCnt = o.iovCnt;
+				iovIdx = o.iovIdx;
+				memcpy(iov, o.iov, iovCnt * sizeof(struct iovec));
+
+				o.buf = nullptr;
+				o.iovCnt = o.iovIdx = 0;
+			}
+                        else
+			{
+                                file_range = std::move(o.file_range);
+			}
+
+			o.payloadBuf = false;
                         return *this;
-                }
+
+		}
         };
 
         using reference = payload &;
@@ -597,75 +648,74 @@ struct outgoing_queue
         uint8_t backIdx{0}, frontIdx{0}, size_{0};
         static constexpr size_t capacity{sizeof_array(A)};
 
-        inline uint32_t prev(const uint32_t idx) const
+
+        inline uint32_t prev(const uint32_t idx) const noexcept
         {
                 return (idx + (capacity - 1)) & (capacity - 1);
         }
 
-        inline uint32_t next(const uint32_t idx) const
+        [[gnu::always_inline]] inline uint32_t next(const uint32_t idx) const noexcept
         {
                 return (idx + 1) & (capacity - 1);
         }
 
-        inline reference front()
+        inline reference front() noexcept
         {
                 return A[frontIdx];
         }
 
-        inline reference_const front() const
+        inline reference_const front() const noexcept
         {
                 return A[frontIdx];
         }
 
-        inline reference back()
+        inline reference back() noexcept 
         {
                 return A[prev(backIdx)];
         }
 
-        inline reference_const back() const
+        inline reference_const back() const noexcept
         {
                 return A[prev(backIdx)];
         }
 
-        reference at(const size_t idx)
+        reference at(const size_t idx) noexcept
         {
                 return A[(frontIdx + idx) & (capacity - 1)];
         }
 
-        reference_const at(const size_t idx) const
+        reference_const at(const size_t idx) const noexcept
         {
                 return A[(frontIdx + idx) & (capacity - 1)];
         }
 
-        void push_back(const payload &v)
+	[[gnu::always_inline]] inline void did_push() noexcept
+        {
+		++size_;
+        }
+
+	[[gnu::always_inline]] inline void did_pop() noexcept
+	{
+		--size_;
+	}
+
+        payload &push_back(const payload &v) = delete;
+
+        auto push_back(payload &&v)
         {
                 if (unlikely(size_ == capacity))
                         throw Switch::system_error("Queue full");
 
-                A[backIdx] = v;
+		payload *const res = A + backIdx;
+
+                *res= std::move(v);
                 backIdx = next(backIdx);
-                ++size_;
+		did_push();
+
+		return res;
         }
 
-        void push_back(payload &&v)
-        {
-                if (unlikely(size_ == capacity))
-                        throw Switch::system_error("Queue full");
-
-                A[backIdx] = std::move(v);
-                backIdx = next(backIdx);
-                ++size_;
-        }
-
-        void push_front(const payload &v)
-        {
-                if (unlikely(size_ == capacity))
-                        throw Switch::system_error("Queue full");
-
-                frontIdx = prev(frontIdx);
-                A[frontIdx] = v;
-                ++size_;
-        }
+        void push_front(const payload &v) = delete;
 
         void push_front(payload &&v)
         {
@@ -674,32 +724,32 @@ struct outgoing_queue
 
                 frontIdx = prev(frontIdx);
                 A[frontIdx] = std::move(v);
-                ++size_;
+		did_push();
         }
 
-        void pop_back()
+        void pop_back() noexcept
         {
                 backIdx = prev(backIdx);
-                --size_;
+		did_pop();
         }
 
-        void pop_front()
+        void pop_front() noexcept
         {
                 frontIdx = next(frontIdx);
-                --size_;
+		did_pop();
         }
 
-        bool full() const
+        bool full() const noexcept
         {
                 return size_ == capacity;
         }
 
-        bool empty() const
+        bool empty() const noexcept
         {
                 return !size_;
         }
 
-        auto size() const
+        auto size() const noexcept
         {
                 return size_;
         }
@@ -787,6 +837,7 @@ class Service final
         int listenFd;
         EPoller poller;
         Switch::vector<topic_partition *> deferList;
+	range32_t patchList[1024];
 
       private:
         static void parse_partition_config(const char *, partition_config *);
@@ -923,6 +974,8 @@ class Service final
 
         bool shutdown(connection *const c, const uint32_t ref);
 
+        bool flush_iov(connection *, struct iovec *, const uint32_t);
+
         bool try_send_ifnot_blocked(connection *const c)
         {
                 if (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail)))
@@ -933,6 +986,10 @@ class Service final
                 else
                         return try_send(c);
         }
+
+	void poll_outavail(connection *);
+
+	void introduce_self(connection *, bool &);
 
         bool try_send(connection *const c);
 

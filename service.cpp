@@ -54,10 +54,10 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
         int fd, indexFd;
         struct stat64 st;
 
-	if (trace)
-		SLog("New ro_segment(this = ", ptr_repr(this), ", baseSeqNum = ", baseSeqNum, ", lastAbsSeqNum = ", lastAbsSeqNum, ", createdTS = ", createdTS, ", haveWideEntries = ", haveWideEntries, "\n");
+        if (trace)
+                SLog("New ro_segment(this = ", ptr_repr(this), ", baseSeqNum = ", baseSeqNum, ", lastAbsSeqNum = ", lastAbsSeqNum, ", createdTS = ", createdTS, ", haveWideEntries = ", haveWideEntries, "\n");
 
-	require(lastAbsSeqNum >= baseSeqNum);	
+        require(lastAbsSeqNum >= baseSeqNum);
 
         index.data = nullptr;
         if (createdTS)
@@ -155,8 +155,8 @@ std::pair<uint32_t, uint32_t> ro_segment::snapDown(const uint64_t absSeqNum) con
 {
         if (haveWideEntries)
         {
-		if (trace)
-			SLog("haveWideEntries for ", ptr_repr(this), "\n");
+                if (trace)
+                        SLog("haveWideEntries for ", ptr_repr(this), "\n");
                 IMPLEMENT_ME();
         }
 
@@ -1240,8 +1240,8 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                         {
                                                 // we still haven't had enough messages stored in the currently produced segment, so keep
                                                 // consuming from successive segments
-						curSegment  = prevSegments[curSegmentIdx]; 
-						curSegmentLastAvailSeqNum = curSegment->lastAvailSeqNum;
+                                                curSegment = prevSegments[curSegmentIdx];
+                                                curSegmentLastAvailSeqNum = curSegment->lastAvailSeqNum;
                                         }
                                 }
                         }
@@ -1867,16 +1867,16 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 
                 if (cur.fileSize != UINT32_MAX)
                 {
-			// See ro_segment::createdTS declaration comments
+// See ro_segment::createdTS declaration comments
 #if 0
 			const auto freezeTs = cur.createdTS;
 #else
-			struct stat st;
+                        struct stat st;
 
-			if (fstat(cur.fdh->fd, &st) == -1)
-				throw Switch::system_error("fstat() failed:", strerror(errno));
+                        if (fstat(cur.fdh->fd, &st) == -1)
+                                throw Switch::system_error("fstat() failed:", strerror(errno));
 
-			const uint64_t freezeTs = st.st_mtime;
+                        const uint64_t freezeTs = st.st_mtime;
 #endif
                         auto newROFiles = std::make_unique<std::vector<ro_segment *>>();
                         auto newROFile = std::make_unique<ro_segment>(cur.baseSeqNum, savedLastAssignedSeqNum, freezeTs);
@@ -2138,7 +2138,7 @@ void topic_partition::consider_append_res(append_res &res, Switch::vector<wait_c
         if (trace)
                 SLog(ansifmt::color_blue, " waitingList.size() = ", waitingList.size(), ansifmt::reset, "\n");
 
-        for (uint32_t i{0}; i < waitingList.size();)
+        for (uint32_t i{0}; i < waitingList.size();) // for all wait contexts this partition is registered with
         {
                 auto it = waitingList[i];
 
@@ -2146,39 +2146,45 @@ void topic_partition::consider_append_res(append_res &res, Switch::vector<wait_c
                 {
                         auto &ctxP = it->partitions[i];
 
-                        if (ctxP.partition == this)
+                        if (ctxP.partition != this)
+                                continue;
+
+                        if (!ctxP.fdh)
                         {
-                                if (!ctxP.fdh)
-                                {
-                                        ctxP.fdh = res.fdh.get();
-                                        ctxP.fdh->Retain();
-                                        ctxP.range = res.dataRange;
-                                        ctxP.seqNum = res.msgSeqNumRange.offset;
-                                        it->capturedSize = res.dataRange.len;
+				const auto __n = res.fdh->use_count();
 
-                                        if (trace)
-                                                SLog("Just registered fdh for wait ctx, capturedSize(", it->capturedSize, "), range = ", ctxP.range, "\n");
-                                }
-                                else if (res.fdh.get() != ctxP.fdh)
-                                {
-                                        // Switched to another log file
-                                        newLogFile = true;
+                                ctxP.fdh = res.fdh.get();
+                                ctxP.fdh->Retain();
 
-                                        if (trace)
-                                                SLog("Switched to a new fdh for wait ctx\n");
-                                }
-                                else
-                                {
-                                        // extend the range
-                                        ctxP.range.len += res.dataRange.len;
-                                        it->capturedSize += res.dataRange.len;
+				require(ctxP.fdh->use_count() == __n + 1);
 
-                                        if (trace)
-                                                SLog("Extending range, capturedSize(", it->capturedSize, "), range ", ctxP.range, "\n");
-                                }
 
-                                break;
+                                ctxP.range = res.dataRange;
+                                ctxP.seqNum = res.msgSeqNumRange.offset;
+                                it->capturedSize = res.dataRange.len;
+
+                                if (trace)
+                                        SLog("Just registered fdh for wait ctx, capturedSize(", it->capturedSize, "), range = ", ctxP.range, " ", ptr_repr(ctxP.fdh), " ", ctxP.fdh->use_count(), "\n");
                         }
+                        else if (res.fdh.get() != ctxP.fdh)
+                        {
+                                // Switched to another log file
+                                newLogFile = true;
+
+                                if (trace)
+                                        SLog("Switched to a new fdh for wait ctx\n");
+                        }
+                        else
+                        {
+                                // extend the range
+                                ctxP.range.len += res.dataRange.len;
+                                it->capturedSize += res.dataRange.len;
+
+                                if (trace)
+                                        SLog("Extending range, capturedSize(", it->capturedSize, "), range ", ctxP.range, "\n");
+                        }
+
+                        break;
                 }
 
                 if (newLogFile || it->capturedSize >= it->minBytes)
@@ -2230,9 +2236,13 @@ append_res topic_partition::append_bundle_to_leader(const uint8_t *const bundle,
                 auto res = log_->append_bundle(bundle, bundleLen, bundleMsgsCnt, firstMsgSeqNum, lastMsgSeqNum);
 
                 if (trace)
-                        SLog("Appended to ", ptr_repr(this), "\n");
+                        SLog("Appended to ", ptr_repr(this), " ", res.fdh ? res.fdh->use_count() : 0, "\n");
 
                 consider_append_res(res, waitCtxWorkL);
+
+                if (trace)
+                        SLog("after consider_append_res() ", res.fdh ? res.fdh->use_count() : 0, "\n");
+
                 return res;
         }
         catch (const std::exception &e)
@@ -2346,9 +2356,8 @@ void Service::parse_partition_config(const strwlen32_t contents, partition_confi
                 if (auto p = line.Search('#'))
                         line.SetEnd(p);
 
-		if (!line)
-			continue;
-
+                if (!line)
+                        continue;
 
                 std::tie(k, v) = line.Divided('=');
                 k.TrimWS();
@@ -2676,7 +2685,7 @@ uint32_t Service::verify_log(int fd)
                 uint64_t msgTs{0};
                 uint32_t msgIdx{0};
 
-		(void)msgTs;
+                (void)msgTs;
                 for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.len; p != e; ++msgIdx)
                 {
                         // Next message set message
@@ -3158,9 +3167,8 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                                 Drequire(msgSetSize);
                                         }
 
-
-					if (trace)
-						SLog("bundleFlags = ", bundleFlags, ", sparseBundleBitSet = ", sparseBundleBitSet, ", msgSetSize = ", msgSetSize, "\n");
+                                        if (trace)
+                                                SLog("bundleFlags = ", bundleFlags, ", sparseBundleBitSet = ", sparseBundleBitSet, ", msgSetSize = ", msgSetSize, "\n");
 
                                         if (sparseBundleBitSet)
                                         {
@@ -3177,8 +3185,8 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                                         lastMsgSeqNum = firstMsgSeqNum;
                                                 }
 
-						if (trace)
-							SLog("sparse bundle, firstMsgSeqNum = ", firstMsgSeqNum, ", lastMsgSeqNum = ", lastMsgSeqNum, "\n");
+                                                if (trace)
+                                                        SLog("sparse bundle, firstMsgSeqNum = ", firstMsgSeqNum, ", lastMsgSeqNum = ", lastMsgSeqNum, "\n");
 
                                                 next = lastMsgSeqNum + 1;
                                         }
@@ -3293,13 +3301,16 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
 
                 auto q = c->outQ;
                 size_t sum{0};
+                uint32_t patchListSize{0};
+                uint8_t patchIndices[256];
 
+                patchList[0].offset = 0;
                 if (!q)
                         q = c->outQ = get_outgoing_queue();
 
                 const auto qSize = q->size();
+                auto *const headerPayload = q->push_back(respHeader);
 
-                q->push_back(respHeader);
                 deferList.clear();
 
                 for (uint32_t i{0}; i != topicsCnt; ++i)
@@ -3358,7 +3369,11 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                 if (absSeqNum == UINT64_MAX)
                                 {
                                         // Fetch starting from whatever bundles are commited from now on
-                                        // This should be the default
+                                        const auto l = respHeader->length();
+
+                                        patchList[patchListSize++].SetEnd(l);
+                                        patchIndices[deferList.size()] = patchListSize++;
+                                        patchList[patchListSize].offset = l;
                                         deferList.push_back(partition);
                                 }
                                 else
@@ -3438,11 +3453,18 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                                         break;
 
                                                 case lookup_res::Fault::AtEOF:
+                                                {
                                                         if (trace)
                                                                 SLog("Got AtEOF; will wait\n");
 
+                                                        const auto l = respHeader->length();
+
+                                                        patchList[patchListSize++].SetEnd(l);
+                                                        patchIndices[deferList.size()] = patchListSize++;
+                                                        patchList[patchListSize].offset = l;
                                                         deferList.push_back(partition);
                                                         break;
+                                                }
 
                                                 case lookup_res::Fault::Empty:
                                                         respHeader->Serialize(uint8_t(0));
@@ -3478,11 +3500,36 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                         // - fetch request does not want to wait
                         // - fetch request does not require any data, or we already have some data to provide to the client
                         // - one or more errors were generated
-                        *(uint32_t *)respHeader->At(sizeOffset) = respHeader->length() - sizeOffset - sizeof(uint32_t) + sum;
-                        *(uint32_t *)respHeader->At(headerSizeOffset) = respHeader->length() - headerSizeOffset - sizeof(uint32_t);
+                        uint32_t extra{0};
+                        const auto n = deferList.size();
+
+                        if (trace)
+                                SLog("Responding now, n = ", deferList.size(), "\n");
+
+                        patchList[patchListSize++].SetEnd(respHeader->length());
+
+                        for (uint32_t i{0}; i != n; ++i)
+                        {
+                                const auto idx = patchIndices[i];
+                                const auto o = respHeader->length();
+                                auto p = deferList[i];
+                                auto log = p->log_.get();
+
+                                respHeader->Serialize(uint8_t(0));
+                                respHeader->Serialize(log->firstAvailableSeqNum);
+                                respHeader->Serialize(p->highwater_mark());
+                                respHeader->Serialize(uint32_t(0));
+
+                                patchList[idx] = {o, respHeader->length() - o};
+                        }
+
+                        *(uint32_t *)respHeader->At(sizeOffset) = respHeader->length() - sizeOffset - sizeof(uint32_t) + sum + extra;
+                        *(uint32_t *)respHeader->At(headerSizeOffset) = respHeader->length() - headerSizeOffset - sizeof(uint32_t) + extra;
 
                         if (trace)
                                 SLog("respHeader.length = ", respHeader->length(), " ", *(uint32_t *)respHeader->At(sizeOffset), "\n");
+
+                        headerPayload->set_iov(patchList, patchListSize);
 
                         return try_send_ifnot_blocked(c);
                 }
@@ -3490,9 +3537,16 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                 {
                         // Can't respond; we 'll need to wait until we have any data for any of those
                         // topic/partitions first
+
+			if (trace)
+				SLog("Cannot respond yet (", q->size(), ", ", qSize, ")\n");
+
                         while (q->size() != qSize)
                         {
                                 auto &p = q->back();
+
+				if (trace)
+					SLog("Dropping payload ", p.payloadBuf, "\n");
 
                                 if (p.payloadBuf)
                                         put_buffer(p.buf);
@@ -3602,8 +3656,8 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
         resp->MakeSpace(sizeof(uint32_t));
 
         resp->Serialize(requestId);
-	resp->Serialize(topicName.len);
-	resp->Serialize(topicName.p, topicName.len);
+        resp->Serialize(topicName.len);
+        resp->Serialize(topicName.p, topicName.len);
 
         config.TrimWS();
         if (config)
@@ -3661,7 +3715,7 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
                                         else if (write(fd, config.p, config.len) != config.len)
                                         {
                                                 close(fd);
-						unlink(topicPath);
+                                                unlink(topicPath);
                                                 resp->Serialize<uint8_t>(2);
                                                 goto l1;
                                         }
@@ -3691,7 +3745,12 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
 
 l1:
         *(uint32_t *)resp->At(sizeOffset) = resp->length() - sizeOffset - sizeof(uint32_t);
-        q->push_back(resp);
+
+        auto payload = q->push_back(resp);
+
+        payload->iovCnt = 1;
+        payload->iov[0] = {(void *)resp->data(), resp->length()};
+
         return try_send_ifnot_blocked(c);
 }
 
@@ -3746,7 +3805,12 @@ bool Service::process_discover_partitions(connection *const c, const uint8_t *p,
         }
 
         *(uint32_t *)resp->At(sizeOffset) = resp->length() - sizeOffset - sizeof(uint32_t);
-        q->push_back(resp);
+
+        auto payload = q->push_back(resp);
+
+        payload->iovCnt = 1;
+        payload->iov[0] = {(void *)resp->data(), resp->length()};
+
         return try_send_ifnot_blocked(c);
 }
 
@@ -3769,6 +3833,10 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                 return shutdown(c, __LINE__);
 
         const auto *const __end = p + len;
+
+        if (unlikely(p + (*p) + sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint8_t) >= __end))
+                return shutdown(c, __LINE__);
+
         const uint64_t processBegin = trace ? Timings::Microseconds::Tick() : 0;
         auto *const respHeader = get_buffer();
         auto q = c->outQ;
@@ -3777,8 +3845,6 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
         const auto requestId = *(uint32_t *)p;
         p += sizeof(uint32_t);
 
-        if (unlikely(p + (*p) + sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint8_t) >= __end))
-                return shutdown(c, __LINE__);
 
         const strwlen8_t clientId((char *)(p + 1), *p);
         p += clientId.len + sizeof(uint8_t);
@@ -3810,7 +3876,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
         // it would send this produce response respHeader before it has been built, we are going
         // to provide this connection to wakeup_wait_ctx() so that it will check if the connection it need to wake up
         // is this connection, and if so, not wake it up for we will wake it up here.
-        q->push_back(respHeader);
+        auto payload = q->push_back(respHeader);
 
         respHeader->Serialize(requestId);
 
@@ -3976,7 +4042,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                                 if (trace)
                                         SLog("Iterating ", msgSetContent.len, " bytes\n");
 
-				(void)monotonicallyIncreasing;
+                                (void)monotonicallyIncreasing;
                                 for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.len; p != e; ++msgIdx, ++absMsgSeqNum)
                                 {
                                         // Next message set message
@@ -4100,7 +4166,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                         }
 
                         if (trace)
-                                SLog("Took ", duration_repr(Timings::Microseconds::Since(b)), " for ", msgSetSize, " msgs in bundle message set: ", expiredCtxList.size(), "\n");
+                                SLog("Took ", duration_repr(Timings::Microseconds::Since(b)), " for ", msgSetSize, " msgs in bundle message set: ", expiredCtxList.size(), " ", res.fdh ? res.fdh->use_count() : 0, "\n");
 
 #ifdef LEAN_SWITCH
                         (void)b;
@@ -4117,6 +4183,9 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                 }
         }
         *(uint32_t *)respHeader->At(sizeOffset) = respHeader->length() - sizeOffset - sizeof(uint32_t);
+
+        payload->iovCnt = 1;
+        payload->iov[0] = {(void *)respHeader->data(), respHeader->length()};
 
         if (trace)
         {
@@ -4172,7 +4241,7 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes,
         if (trace)
                 SLog(ansifmt::bold, ansifmt::color_green, "Waking up wait ctx ", ptr_repr(wctx), ", ", wctx->requestId, ansifmt::reset, ansifmt::reset, "\n");
 
-        q->push_back(respHeader);
+        auto payload = q->push_back(respHeader);
 
         respHeader->Serialize(uint8_t(2));
         const auto sizeOffset = respHeader->length();
@@ -4185,8 +4254,8 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes,
 
         for (uint32_t i{0}; i != wctx->partitionsCnt;)
         {
-                auto &it = wctx->partitions[i];
-                const auto *p = it.partition;
+                auto it = wctx->partitions + i;
+                const auto *p = it->partition;
                 const auto t = p->owner;
                 const auto topicName = t->name();
                 uint8_t partitionsCnt{0};
@@ -4208,20 +4277,26 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes,
 
                         respHeader->Serialize(p->idx);
                         respHeader->Serialize(uint8_t(0));
-                        if (it.fdh)
+                        if (it->fdh)
                         {
 
                                 if (trace)
-                                        SLog("HAVE data for ", topicName, ".", p->idx, ", seqNum = ", it.seqNum, ", range ", it.range, " (", it.range.len, ")\n");
+                                        SLog("HAVE data for ", topicName, ".", p->idx, ", seqNum = ", it->seqNum, ", range ", it->range, " (", it->range.len, ") ", ptr_repr(it->fdh), " ", it->fdh->use_count(), "\n");
 
-                                respHeader->Serialize(it.seqNum);
+                                respHeader->Serialize(it->seqNum);
                                 respHeader->Serialize(p->highwater_mark());
-                                respHeader->Serialize(it.range.len);
+                                respHeader->Serialize(it->range.len);
 
-                                sum += it.range.len;
-                                q->push_back({it.fdh, it.range});
-                                it.fdh->Release();
-                                it.fdh = nullptr;
+                                sum += it->range.len;
+
+                                const auto __v = it->fdh->use_count();
+
+                                q->push_back({it->fdh, it->range});
+
+                                require(it->fdh->use_count() == __v + 1);
+
+                                it->fdh->Release(); // was retained in consider_append_res()
+                                it->fdh = nullptr;
                         }
                         else
                         {
@@ -4231,7 +4306,7 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes,
                         }
 
                         ++partitionsCnt;
-                } while (++i != wctx->partitionsCnt && (p = (it = wctx->partitions[i]).partition)->owner == t);
+                } while (++i != wctx->partitionsCnt && (p = (it = wctx->partitions + i)->partition)->owner == t);
 
                 *(uint8_t *)respHeader->At(partitionsCntOffset) = partitionsCnt;
         }
@@ -4241,6 +4316,9 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes,
         *(uint32_t *)respHeader->At(headerSizeOffset) = respHeader->length() - headerSizeOffset - sizeof(uint32_t);
 
         destroy_wait_ctx(wctx);
+
+        payload->iovCnt = 1;
+        payload->iov[0] = {static_cast<void *>(respHeader->data()), respHeader->length()};
 
         if (c != produceConnection)
         {
@@ -4269,8 +4347,8 @@ void Service::abort_wait_ctx(wait_ctx *const wctx)
 
         for (uint32_t i{0}; i != wctx->partitionsCnt;)
         {
-                auto &it = wctx->partitions[i];
-                const auto *p = it.partition;
+                auto it = wctx->partitions + i;
+                const auto *p = it->partition;
                 const auto t = p->owner;
                 const auto topicName = t->name();
                 uint8_t partitionsCnt{0};
@@ -4290,10 +4368,10 @@ void Service::abort_wait_ctx(wait_ctx *const wctx)
                         if (trace)
                                 SLog("partition ", p->idx, "\n");
 
-                        if (it.fdh)
+                        if (it->fdh)
                         {
-                                it.fdh->Release();
-                                it.fdh = nullptr;
+                                it->fdh->Release();
+                                it->fdh = nullptr;
                         }
 
                         respHeader->Serialize(p->idx);
@@ -4302,15 +4380,9 @@ void Service::abort_wait_ctx(wait_ctx *const wctx)
                         respHeader->Serialize(p->highwater_mark());
                         respHeader->Serialize(uint32_t(0));
                         ++partitionsCnt;
-                } while (++i != wctx->partitionsCnt && (p = (it = wctx->partitions[i]).partition)->owner == t);
+                } while (++i != wctx->partitionsCnt && (p = (it = wctx->partitions + i)->partition)->owner == t);
 
                 *(uint8_t *)respHeader->At(partitionsCntOffset) = partitionsCnt;
-
-                if (it.fdh)
-                {
-                        it.fdh->Release();
-                        it.fdh = nullptr;
-                }
         }
 
         *(uint8_t *)respHeader->At(topicsCntOffset) = topicsCnt;
@@ -4322,7 +4394,11 @@ void Service::abort_wait_ctx(wait_ctx *const wctx)
         if (!q)
                 q = c->outQ = get_outgoing_queue();
 
-        q->push_back(respHeader);
+        auto payload = q->push_back(respHeader);
+
+        payload->iovCnt = 1;
+        payload->iov[0] = {static_cast<void *>(respHeader->data()), respHeader->length()};
+
         destroy_wait_ctx(wctx);
         try_send_ifnot_blocked(c);
 }
@@ -4341,6 +4417,9 @@ void Service::destroy_wait_ctx(wait_ctx *const wctx)
 
                 if (it.fdh)
                 {
+			if (trace)
+				SLog("Releasing ", ptr_repr(it.fdh), " ", it.fdh->use_count(), "\n");
+
                         it.fdh->Release();
                         it.fdh = nullptr;
                 }
@@ -4392,39 +4471,134 @@ bool Service::shutdown(connection *const c, const uint32_t ref)
         return false;
 }
 
+void Service::introduce_self(connection *const c, bool &haveCork)
+{
+        uint8_t b[sizeof(uint8_t) + sizeof(uint32_t)];
+        auto q = c->outQ;
+        int fd = c->fd;
+
+        b[0] = uint8_t(TankAPIMsgType::Ping);   // msg = ping
+        *(uint32_t *)(b + sizeof(uint8_t)) = 0; // no payload
+
+        if (trace)
+                SLog("PINGING\n");
+
+        if (q && !q->empty())
+        {
+                if (trace)
+                        SLog("Activating Cork\n");
+
+                haveCork = true;
+                Switch::SetTCPCork(fd, 1);
+        }
+
+        if (write(fd, b, sizeof(b)) != sizeof(b))
+        {
+                RFLog("Failed to ping client:", strerror(errno), "\n");
+                throw Switch::system_error("Failed to ping client");
+        }
+
+        c->state.flags &= ~(1u << uint8_t(connection::State::Flags::PendingIntro));
+}
+
+void Service::poll_outavail(connection *const c)
+{
+        if (!(c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))))
+        {
+                if (trace)
+                        SLog("Introducing self\n");
+
+                c->state.flags |= (1u << uint8_t(connection::State::Flags::NeedOutAvail));
+                poller.SetDataAndEvents(c->fd, c, POLLIN | POLLOUT);
+        }
+}
+
+bool Service::flush_iov(connection *const c, struct iovec *const iov, const uint32_t iovCnt)
+{
+        const auto fd = c->fd;
+        auto q = c->outQ;
+
+	if (trace)
+		SLog(ansifmt::bold, ansifmt::color_magenta, "FLUSHING ", iovCnt, ansifmt::reset, "\n");
+
+        for (;;)
+        {
+                auto r = writev(fd, iov, iovCnt);
+
+                if (r == -1)
+                {
+                        if (errno == EINTR)
+                                continue;
+                        else if (errno == EAGAIN)
+                        {
+                                if (trace)
+                                        SLog("Deactivating Cork\n");
+
+                                Switch::SetTCPCork(fd, 0);
+                                poll_outavail(c);
+                                return true;
+                        }
+                        else
+                                return shutdown(c, __LINE__);
+                }
+
+                for (;;)
+                {
+                next_gather:
+                        auto &it = q->front();
+                        auto ptr = it.iov + it.iovIdx;
+
+                        while (r >= ptr->iov_len)
+                        {
+                                r -= ptr->iov_len;
+
+                                if (++it.iovIdx == it.iovCnt)
+                                {
+                                        put_buffer(it.buf);
+                                        q->pop_front();
+
+                                        if (!r)
+                                        {
+                                                // done
+						return true;
+                                        }
+                                        else
+                                        {
+                                                // flushed data for next payload
+                                                goto next_gather;
+                                        }
+                                }
+                                else
+                                        ++ptr;
+                        }
+
+                        ptr->iov_base = (char *)ptr->iov_base + r;
+                        ptr->iov_len -= r;
+
+                        if (trace)
+                                SLog("Deactivating Cork\n");
+
+                        Switch::SetTCPCork(fd, 0);
+                        poll_outavail(c);
+                        return true;
+                }
+
+                break;
+        }
+}
+
+// this method's implementation is somewhat more complex that it perhaps ought to be, but we need to
+// keep the syscalls count down to minimum and coallesce data to write
 bool Service::try_send(connection *const c)
 {
-        int fd = c->fd;
+        const auto fd = c->fd;
         auto q = c->outQ;
         bool haveCork{false};
+        struct iovec iov[512];
+        uint32_t iovCnt{0};
 
         if (c->state.flags & (1u << uint8_t(connection::State::Flags::PendingIntro)))
-        {
-                uint8_t b[sizeof(uint8_t) + sizeof(uint32_t)];
-
-                b[0] = uint8_t(TankAPIMsgType::Ping);   // msg = ping
-                *(uint32_t *)(b + sizeof(uint8_t)) = 0; // no payload
-
-                if (trace)
-                        SLog("PINGING\n");
-
-                if (q && !q->empty())
-                {
-                        if (trace)
-                                SLog("Enabling cork\n");
-
-                        haveCork = true;
-                        Switch::SetTCPCork(fd, 1);
-                }
-
-                if (write(fd, b, sizeof(b)) != sizeof(b))
-                {
-                        RFLog("Failed to ping client:", strerror(errno), "\n");
-                        throw Switch::system_error("Failed to ping client");
-                }
-
-                c->state.flags &= ~(1u << uint8_t(connection::State::Flags::PendingIntro));
-        }
+                introduce_self(c, haveCork);
 
         if (!q)
         {
@@ -4440,80 +4614,126 @@ bool Service::try_send(connection *const c)
         if (trace)
                 SLog("Attempting to send ", q->size(), "\n");
 
-        while (!q->empty())
+        const auto end = q->backIdx;
+
+        for (auto idx = q->frontIdx; idx != end; idx = q->next(idx))
         {
-                auto &it = q->front();
+                auto &it = q->A[idx];
 
                 if (it.payloadBuf)
                 {
+                        const auto n = Min<uint32_t>(it.iovCnt - it.iovIdx, sizeof_array(iov) - iovCnt);
+
                         if (trace)
-                                SLog("Buf = ", ptr_repr(it.buf), "\n");
+                                SLog("payload holds buffer {", it.iovCnt, "}\n");
 
-                        if (!haveCork)
+                        require(it.iovCnt);
+                        require(it.iovIdx < it.iovCnt);
+
+                        memcpy(iov + iovCnt, it.iov + it.iovIdx, sizeof(struct iovec) * n);
+                        iovCnt += n;
+
+                        if (unlikely(iovCnt == sizeof_array(iov)))
                         {
-                                if (trace)
-                                        SLog("Enabling cork\n");
+				// local iov[] is full, need to flush it now
+				if (!haveCork)
+				{
+					haveCork = true;
+					Switch::SetTCPCork(fd, 1);
+				}
 
-                                haveCork = true;
-                                Switch::SetTCPCork(fd, 1);
-                        }
-
-                        for (auto b = it.buf;;)
-                        {
-                                const auto range = b->SuffixFromOffset();
-                                int r = write(fd, range.p, range.len);
-
-                                if (r == -1)
-                                {
-                                        if (errno == EINTR)
-                                                continue;
-                                        else if (errno == EAGAIN)
-                                        {
-                                        set_need_outavail:
-                                                if (haveCork)
-                                                {
-                                                        if (trace)
-                                                                SLog("Removing cork\n");
-                                                        Switch::SetTCPCork(fd, 0);
-                                                }
-
-                                                if (!(c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))))
-                                                {
-                                                        c->state.flags |= (1u << uint8_t(connection::State::Flags::NeedOutAvail));
-                                                        poller.SetDataAndEvents(fd, c, POLLIN | POLLOUT);
-                                                }
-
-                                                return true;
-                                        }
-                                        else
-                                                return shutdown(c, __LINE__);
-                                }
-
-                                b->AdvanceOffset(r);
-
-                                if (b->IsAtEnd())
-                                {
-                                        if (trace)
-                                                SLog("Done with buf\n");
-
-                                        put_buffer(b);
-                                        q->pop_front();
-                                        break;
-                                }
-
-                                if (r != range.len)
-                                {
-                                        // if we didn't get to write() all the data we wanted to write
-                                        // it means that the socket buffer is now full, and it will almost definitely
-                                        // not be drained by the time we call write() again in this loop; we 'd insted
-                                        // get EAGAIN.
-                                        // So we 'll just consider the socket buffer full now and execute the EAGAIN logic
-                                        goto set_need_outavail;
-                                }
+				if (!flush_iov(c, iov, iovCnt))
+					return false;
+				else
+					iovCnt = 0;
                         }
                 }
                 else
                 {
+                        if (trace)
+                                SLog("payload holds content range (iovCnt = ", iovCnt, ")\n");
+
+                        if (iovCnt)
+                        {
+                                if (!haveCork)
+                                {
+                                        if (trace)
+                                                SLog("Activating Cork\n");
+
+                                        haveCork = true;
+                                        Switch::SetTCPCork(fd, 1);
+                                }
+
+                                // flush iov[]
+                                for (;;)
+                                {
+                                        auto r = writev(fd, iov, iovCnt);
+
+                                        if (r == -1)
+                                        {
+                                                if (errno == EINTR)
+                                                        continue;
+                                                else if (errno == EAGAIN)
+                                                {
+                                                        if (trace)
+                                                                SLog("Deactivating Cork\n");
+
+                                                        Switch::SetTCPCork(fd, 0);
+                                                        poll_outavail(c);
+                                                        return true;
+                                                }
+                                                else
+                                                        return shutdown(c, __LINE__);
+                                        }
+
+                                        for (;;)
+                                        {
+                                        next:
+                                                auto &it = q->front();
+                                                auto ptr = it.iov + it.iovIdx;
+
+                                                while (r >= ptr->iov_len)
+                                                {
+                                                        r -= ptr->iov_len;
+
+                                                        if (++it.iovIdx == it.iovCnt)
+                                                        {
+								put_buffer(it.buf);
+                                                                q->pop_front();
+
+                                                                if (!r)
+                                                                {
+                                                                        // done
+                                                                        goto flushed_iov;
+                                                                }
+                                                                else
+                                                                {
+                                                                        // flushed data for next payload
+                                                                        goto next;
+                                                                }
+                                                        }
+                                                        else
+                                                                ++ptr;
+                                                }
+
+                                                ptr->iov_base = (char *)ptr->iov_base + r;
+                                                ptr->iov_len -= r;
+
+                                                if (trace)
+                                                        SLog("Deactivating Cork\n");
+
+                                                Switch::SetTCPCork(fd, 0);
+                                                poll_outavail(c);
+                                                return true;
+                                        }
+
+                                        break;
+                                }
+
+                        flushed_iov:
+                                iovCnt = 0;
+                        }
+
                         // https://github.com/phaistos-networks/TANK/issues/14
                         // if only FreeBSD's great sendfile() syscall was available on Linux, with support for the
                         // extra flags based on NGINX's and Netflix's work, that'd make everything so much simpler.
@@ -4549,24 +4769,15 @@ bool Service::try_send(connection *const c)
                                                 if (trace)
                                                         SLog("EAGAIN (haveCork = ", haveCork, ", needOutAvail = ", (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))), ")\n");
 
-                                        set_need_outavail2:
                                                 if (haveCork)
                                                 {
                                                         if (trace)
-                                                                SLog("Unsetting cork\n");
+                                                                SLog("Deactivating Cork\n");
 
                                                         Switch::SetTCPCork(fd, 0);
                                                 }
 
-                                                if (!(c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))))
-                                                {
-                                                        if (trace)
-                                                                SLog("Now NeedOutAvail\n");
-
-                                                        c->state.flags |= (1u << uint8_t(connection::State::Flags::NeedOutAvail));
-                                                        poller.SetDataAndEvents(fd, c, POLLIN | POLLOUT);
-                                                }
-
+                                                poll_outavail(c);
                                                 return true;
                                         }
                                         else
@@ -4577,8 +4788,11 @@ bool Service::try_send(connection *const c)
                                         range.len -= r;
                                         range.offset += r;
 
-                                        if (!range)
+					if (0 == range.len)
                                         {
+						if (trace)
+							SLog("Releasing ", ansifmt::bold, ansifmt::color_blue, ptr_repr(it.file_range.fdh), " ", it.file_range.fdh->use_count(), ansifmt::reset, "\n");
+
                                                 it.file_range.fdh->Release();
                                                 q->pop_front();
                                                 break;
@@ -4594,10 +4808,98 @@ bool Service::try_send(connection *const c)
                                                 // not be drained by the time we call sendfile() again in this loop; we 'd insted
                                                 // get EAGAIN.
                                                 // So we 'll just consider the socket buffer full now and execute the EAGAIN logic
-                                                goto set_need_outavail2;
+                                                if (haveCork)
+                                                {
+                                                        if (trace)
+                                                                SLog("Deactivating Cork\n");
+
+                                                        Switch::SetTCPCork(fd, 0);
+                                                }
+
+                                                poll_outavail(c);
+                                                return true;
                                         }
                                 }
                         }
+                }
+        }
+
+        if (iovCnt)
+        {
+                if (trace)
+                        SLog("Sending pending outgoing iov[] ", iovCnt, "\n");
+
+                for (;;)
+                {
+                        auto r = writev(fd, iov, iovCnt);
+
+                        if (r == -1)
+                        {
+                                if (errno == EINTR)
+                                        continue;
+                                else if (errno == EAGAIN)
+                                {
+                                        if (haveCork)
+                                        {
+                                                if (trace)
+                                                        SLog("Deactivating Cork\n");
+
+                                                Switch::SetTCPCork(fd, 0);
+                                        }
+                                        poll_outavail(c);
+                                        return true;
+                                }
+                                else
+                                        return shutdown(c, __LINE__);
+                        }
+
+                        for (;;)
+                        {
+                        next2:
+                                auto &it = q->front();
+                                auto ptr = it.iov + it.iovIdx;
+
+                                while (r >= ptr->iov_len)
+                                {
+                                        r -= ptr->iov_len;
+
+                                        if (++it.iovIdx == it.iovCnt)
+                                        {
+                                                put_buffer(it.buf);
+                                                q->pop_front();
+
+                                                if (trace)
+                                                        SLog("done with payload, r now = ", r, "\n");
+
+                                                if (!r)
+                                                {
+                                                        // done with all data we we need to flush for the buffers
+                                                        break;
+                                                }
+                                                else
+                                                {
+                                                        // there's definitely more
+                                                        goto next2;
+                                                }
+                                        }
+                                        else
+                                                ++ptr;
+                                }
+
+                                ptr->iov_base = (char *)ptr->iov_base + r;
+                                ptr->iov_len -= r;
+
+                                if (haveCork)
+                                {
+                                        if (trace)
+                                                SLog("Deactivating Cork\n");
+
+                                        Switch::SetTCPCork(fd, 0);
+                                }
+                                poll_outavail(c);
+                                return true;
+                        }
+                        break;
                 }
         }
 
@@ -4607,7 +4909,7 @@ bool Service::try_send(connection *const c)
         if (haveCork)
         {
                 if (trace)
-                        SLog("Removing cork\n");
+                        SLog("Deactivating Cork\n");
 
                 Switch::SetTCPCork(fd, 0);
         }
@@ -5045,7 +5347,7 @@ int Service::start(int argc, char **argv)
                 Print("No topics found in ", basePath_, ". You may want to create a few, like so:\n");
                 Print("mkdir -p ", basePath_, "/events/0 ", basePath_, "/orders/0 \n");
                 Print("This will create topics events and orders and define one partition with id 0 for each of them.\nRestart Tank after you have created a few topics/partitions\n");
-		Print("Or, you can just use tank-cli's \"create_topic\" command to create new topics instead\n");
+                Print("Or, you can just use tank-cli's \"create_topic\" command to create new topics instead\n");
         }
 
         listenFd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
@@ -5180,8 +5482,8 @@ int Service::start(int argc, char **argv)
                 {
                         if (cleanupTrackerIsDirty)
                         {
-				// TODO: maybe we should just have another thread to do this
-				// although this is a very infrequent operation and shouldn't take more than a few microseconds
+                                // TODO: maybe we should just have another thread to do this
+                                // although this is a very infrequent operation and shouldn't take more than a few microseconds
                                 IOBuffer b;
                                 int fd;
 
@@ -5244,7 +5546,7 @@ int Service::start(int argc, char **argv)
 
                                         auto c = get_connection();
 
-					require(c);
+                                        require(c);
 
                                         // Kafka's default is 1mb for both buffers
                                         if (rcvBufSize)
@@ -5401,8 +5703,8 @@ int Service::start(int argc, char **argv)
 
                 if (nowMS > nextIdleCheck)
                 {
-			// We don't currentl deal with idle connections, and I am not sure
-			// we should
+                        // We don't currentl deal with idle connections, and I am not sure
+                        // we should
                         nextIdleCheck = nowMS + 800;
 
                         for (auto it = allConnections.next; it != &allConnections;)

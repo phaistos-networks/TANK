@@ -42,6 +42,14 @@ void TankClient::bind_fd(connection *const c, int fd)
         connectionAttempts.push_back(c);
 }
 
+bool TankClient::should_poll() const noexcept
+{
+	if (trace)
+	        SLog(connectionAttempts.size(), " ", pendingConsumeReqs.size(), " ", pendingProduceReqs.size(), " ", pendingCtrlReqs.size(), "\n");
+
+        return connectionAttempts.size() || pendingConsumeReqs.size() || pendingProduceReqs.size() || pendingCtrlReqs.size();
+}
+
 TankClient::TankClient(const strwlen32_t defaultLeader)
 {
         switch_dlist_init(&connections);

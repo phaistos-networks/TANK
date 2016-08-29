@@ -658,10 +658,7 @@ class TankClient final
 
         void interrupt_poll();
 
-        inline bool should_poll() const
-        {
-                return connectionAttempts.size() || pendingConsumeReqs.size() || pendingProduceReqs.size() || pendingCtrlReqs.size();
-        }
+        bool should_poll() const noexcept;
 };
 
 #ifdef LEAN_SWITCH
