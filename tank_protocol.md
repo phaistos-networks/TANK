@@ -203,6 +203,12 @@ msgId `0x1`  or `0x5`
 ### Publish Resp
 msgId `0x1`  
 
+You are expected to kep-track/remember the original publish request's list of (topic, partition), so that when you get back a publish response  
+you can lookup that list. 
+The publish response contains essentially an error code for every partition in that request list (of type u8), in order, except when the
+topic requested is unknown, in which case, the first parition for that topic's error code is 0xff, and the remaining matching error codes for
+that requested topic are not included in the response.
+
 ```
 {
 	request id:u32
@@ -212,7 +218,11 @@ msgId `0x1`
 
 			if (error == 0xff)
 			{
-				// topic not found
+				// Unknown topic
+				//
+				// The error code for the first partition for this requested topic == 0xff, so
+				// we should not expect any other partition error codes for the remaining partitions of this
+				// requested topic.
 			}
 			else
 			{
