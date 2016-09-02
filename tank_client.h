@@ -208,6 +208,13 @@ class TankClient final
                 uint16_t partition;
                 range_base<consumed_msg *, uint32_t> msgs;
 
+		// https://github.com/phaistos-networks/TANK/issues/1
+		// For now, this is always true, but when we implement support for pseudo-streaming (see GH issue)
+		// this may be false, in which case, the response is not complete -- more messages are expected for
+		// the request with id `clientReqId`
+		// See TankClient::set_allow_streaming_consume_responses();
+		bool respComplete;
+
                 // We can't rely on msgs.back().seqNum + 1 to compute the next sequence number
                 // to consume from, because if no message at all can be parsed because
                 // of the request fetch size, msgs will be empty()
@@ -374,6 +381,7 @@ class TankClient final
         Switch::unordered_map<Switch::endpoint, broker *> bsMap;
         Switch::unordered_map<strwlen8_t, Switch::endpoint> leadersMap;
         Switch::endpoint defaultLeader{};
+	bool allowStreamingConsumeResponses{false};
 	int sndBufSize{128 * 1024}, rcvBufSize{1 * 1024 * 1024};
         strwlen8_t clientId{"c++"};
         switch_dlist connections;
@@ -648,6 +656,11 @@ class TankClient final
 
                 defaultLeader = e;
         }
+
+	void set_allow_streaming_consume_responses(const bool v)
+	{
+		allowStreamingConsumeResponses = v;
+	}
 
         void set_default_leader(const strwlen32_t e)
         {

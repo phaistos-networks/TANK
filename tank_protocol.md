@@ -209,12 +209,18 @@ The publish response contains essentially an error code for every partition in t
 topic requested is unknown, in which case, the first parition for that topic's error code is 0xff, and the remaining matching error codes for
 that requested topic are not included in the response.
 
+Errors:
+- 0x0: No Error
+- 0xff: topic unknown
+- 0x02: invalid request
+- any other: system error
+
 ```
 {
 	request id:u32
 	For each topic specified in the matching publish request:
 		{
-			error:u8
+			error:u8 	// error for the first partition for this topic, as specified in the orginal req.
 
 			if (error == 0xff)
 			{
@@ -227,9 +233,10 @@ that requested topic are not included in the response.
 			else
 			{
 				// otherwise error is the error for the first partition of the topic specified in the matching publish request
-				for (int i{1}; i != reqTopicPartitinsCnt; ++i)
+				// and we will also consider the errors for the remaining partitions of this topic
+				for (int i{1}; i != reqPartitionsCont; ++i)
 				{
-					error for next partition in topic for this request:u8
+					error for the next partition in topic for this request:u8
 				}
 			}
 		}

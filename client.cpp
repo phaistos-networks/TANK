@@ -1957,13 +1957,13 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 if (i == topicsCnt - 1 && k == partitionsCnt - 1)
                                 {
                                         // optimization
-                                        consumedPartitionContent.push_back({clientReqId, topicName, partitionId, {consumptionList.values(), cnt}, {next, lastPartialMsgMinFetchSize}});
+                                        consumedPartitionContent.push_back({clientReqId, topicName, partitionId, {consumptionList.values(), cnt}, true, {next, lastPartialMsgMinFetchSize}});
                                 }
                                 else
                                 {
                                         auto p = resultsAllocator.CopyOf(consumptionList.values(), cnt);
 
-                                        consumedPartitionContent.push_back({clientReqId, topicName, partitionId, {p, cnt}, {next, lastPartialMsgMinFetchSize}});
+                                        consumedPartitionContent.push_back({clientReqId, topicName, partitionId, {p, cnt}, true, {next, lastPartialMsgMinFetchSize}});
                                         consumptionList.clear();
                                 }
                         }
@@ -1971,7 +1971,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                         {
                                 // We may still get an empty list of messages for a (topic, partition)
                                 // if the fetch request timed out, etc. Still need to notify the client
-                                consumedPartitionContent.push_back({clientReqId, topicName, partitionId, {nullptr, 0}, {next, lastPartialMsgMinFetchSize}});
+                                consumedPartitionContent.push_back({clientReqId, topicName, partitionId, {nullptr, 0}, true, {next, lastPartialMsgMinFetchSize}});
                         }
                 }
         }
@@ -2096,7 +2096,7 @@ bool TankClient::try_recv(connection *const c)
                                 }
 
                                 // TODO:
-                                // if msg == MSG_CONSUME, and len > threshold, then we could
+                                // if msg == MSG_CONSUME, and len > threshold, and allowStreamingConsumeResponses == true, then we could
                                 // https://github.com/phaistos-networks/TANK/issues/1
                                 if (p + len > e)
                                 {
