@@ -1,6 +1,7 @@
 Tank is [a very high performance distributed log](https://github.com/phaistos-networks/TANK/wiki/Why-Tank-and-Tank-vs-X), inspired in part by Kafka, and other similar services and technologies.
 
 #### Some Benchmarks
+##### Single Producer
 ```bash
 $> bin/kafka-run-class.sh org.apache.kafka.tools.ProducerPerformance  \
  --topic test --num-records 10000000 --record-size 100 \
@@ -13,8 +14,41 @@ Will publish 1,000,000 messages, in batches of 8,196 messages, each message cont
 Go ACK after publishing 1,000,000 message(s) of size 100b (95.37mb), took 0.296s
 ```
 
-For 1 million messages, without enabling compression(if you do, it will take upto 30% less time for Tank to complete this benchmark), it takes 1 second for Kafka, vs <0.3s for Tank.   
-Benchmark environment details:
+For 1 million messages, without enabling compression(if you do, it will take upto 30% less time for Tank to complete this benchmark), it takes 1 second for Kafka, vs <0.3s for Tank.
+
+##### Multiple Producers (3x)
+```
+1000000 records sent, 177967.609895 records/sec (16.97 MB/sec), 1029.78 ms avg latency, 2008.00 ms max latency, 989 ms 50th, 1902 ms 95th, 1930 ms 99th, 2007 ms 99.9th.
+1000000 records sent, 176118.351532 records/sec (16.80 MB/sec), 1026.09 ms avg latency, 2003.00 ms max latency, 888 ms 50th, 1912 ms 95th, 1990 ms 99th, 2002 ms 99.9th.
+1000000 records sent, 173550.850399 records/sec (16.55 MB/sec), 1096.54 ms avg latency, 1953.00 ms max latency, 1023 ms 50th, 1883 ms 95th, 1935 ms 99th, 1952 ms 99.9th.
+```
+
+```
+Go ACK after publishing 1,000,000 message(s) of size 100b (95.37mb), took 0.413s
+Go ACK after publishing 1,000,000 message(s) of size 100b (95.37mb), took 0.474s
+Go ACK after publishing 1,000,000 message(s) of size 100b (95.37mb), took 0.519s
+```
+
+Produced with
+```bash
+#!/bin/bash
+bin/kafka-run-class.sh org.apache.kafka.tools.ProducerPerformance --topic test --num-records 1000000 --record-size 100 --throughput -1 --producer-props acks=1 bootstrap.servers=127.0.0.1:9092 &
+bin/kafka-run-class.sh org.apache.kafka.tools.ProducerPerformance --topic test --num-records 1000000 --record-size 100 --throughput -1 --producer-props acks=1 bootstrap.servers=127.0.0.1:9092 &
+bin/kafka-run-class.sh org.apache.kafka.tools.ProducerPerformance --topic test --num-records 1000000 --record-size 100 --throughput -1 --producer-props acks=1 bootstrap.servers=127.0.0.1:9092 &
+```
+and
+
+```bash
+#!/bin/bash
+tank-cli  -b 127.0.0.1:11011 -t test  bm p2b  -s 100 -c 1000000 -B 8196 -R &
+tank-cli  -b 127.0.0.1:11011 -t test  bm p2b  -s 100 -c 1000000 -B 8196 -R &
+tank-cli  -b 127.0.0.1:11011 -t test  bm p2b  -s 100 -c 1000000 -B 8196 -R &
+```
+
+For Kafka, we get 177k messages/second/producer. For Tank, we get about 2mil messages/second/producer.
+
+
+##### Benchmark environment details:
 ```
 Ubuntu 16.04 LTS
 Dell Poweredge R630
