@@ -85,43 +85,37 @@ struct strwithlen
                 return p == nullptr || ::IsConstant(p);
         }
 
-        inline uint8_t constexpr Length() const
+	inline constexpr auto size() const noexcept
+	{
+		return len;
+	}
+
+	inline constexpr auto data() const noexcept
+	{
+		return p;
+	}
+
+        const CT *First(const CT c) const
         {
-                return len;
+                for (const CT *it = p, *const e = p + len; it != e; ++it)
+                {
+                        if (*it == c)
+                                return it;
+                }
+
+                return nullptr;
         }
 
-        strwithlen SubstringFrom(const CT *const s) const
+        constexpr strwithlen SubstringFrom(const CT *const s) const
         {
                 return strwithlen(s, (p + len) - s);
         }
 
-        strwithlen SubstringFrom(const LT o) const // Equivalent to SuffixFrom()
+        constexpr strwithlen SubstringFrom(const LT o) const // Equivalent to SuffixFrom()
         {
                 return strwithlen(p + o, len - o);
         }
 
-        [[gnu::always_inline]] inline constexpr CT LastChar() const
-        {
-                return p[len - 1];
-        }
-
-        typename std::enable_if<std::is_same<char, CT>::value, LT>::type AsEscaped(CT *const out, const uint32_t available) const
-        {
-
-                return AsEscapedImpl((char *)p, len, (char *)out, available);
-        }
-
-        static inline uint8_t ToDec(const char c)
-        {
-                if (c >= 'a' && c <= 'f')
-                        return c - 'a' + 10;
-                else if (c >= 'A' && c <= 'F')
-                        return c - 'A' + 10;
-                else if (isdigit(c))
-                        return c - '0';
-                else
-                        return UINT8_MAX;
-        }
 
         LT CountOf(const CT c) const
         {
@@ -153,6 +147,21 @@ struct strwithlen
                 p = nullptr;
         }
 
+        void Print() const
+        {
+                printf("%.*s\n", len, p);
+        }
+
+	constexpr auto front() const
+	{
+		return *p;
+	}
+
+	constexpr auto back() const
+	{
+		return p[len - 1];
+	}
+
         inline const CT *Search(const CT c) const
         {
                 if (sizeof(CT) != sizeof(char))
@@ -182,6 +191,10 @@ struct strwithlen
 
         inline const CT *Search(const strwithlen needle) const
         {
+                // Apparently, http://volnitsky.com/project/str_search/
+                // std::search() is _MUCH_ faster than glibc's memmem(), to the extent that it #including <algorithm> for it
+                // XXX: std::search() is giving us end sometimes? is this what we should expect
+                // Maybe we should just use std::find_first_of()
                 if (sizeof(CT) == sizeof(char))
                 {
                         return (char *)memmem(p, len, needle.p, needle.len);
@@ -210,7 +223,7 @@ struct strwithlen
         {
         }
 
-        strwithlen(const char *const s, const char *const e)
+        constexpr strwithlen(const char *const s, const char *const e)
             : p{s}, len{LT(e - s)}
         {
         }
@@ -222,65 +235,83 @@ struct strwithlen
                                           : ({const auto r = memcmp(p, s, l); r == 0 ? 1 : r; });
         }
 
-        inline int constexpr Cmp(const strwithlen *const o) const
+        constexpr int Cmp(const strwithlen *const o) const
         {
                 return Cmp(o->p, o->len);
         }
 
-        inline int constexpr Cmp(const strwithlen &o) const
+        constexpr int Cmp(const strwithlen &o) const
         {
                 return Cmp(o.p, o.len);
         }
 
-        inline constexpr bool operator<(const strwithlen &o) const
+        constexpr bool operator<(const strwithlen &o) const
         {
                 return Cmp(&o) < 0;
         }
 
-        inline constexpr bool operator>(const strwithlen &o) const
+        constexpr bool operator>(const strwithlen &o) const
         {
                 return Cmp(&o) > 0;
         }
 
-        [[gnu::always_inline]] inline static uint32_t MaxLength()
+         [[gnu::always_inline]]  constexpr static uint32_t MaxLength() noexcept
         {
-                static const uint64_t lens[] = {0, UINT8_MAX, UINT16_MAX, 0, UINT32_MAX, 0, 0, 0, UINT64_MAX};
+                constexpr uint64_t lens[] = {0, UINT8_MAX, UINT16_MAX, 0, UINT32_MAX, 0, 0, 0, UINT64_MAX};
                 return lens[sizeof(LT)];
+        }
+
+        [[ gnu::noinline, noreturn ]] static void fail_len_check(const uint32_t l)
+        {
+                std::abort();
         }
 
         // using const uint32_t l not const LT l to silence compiler warnings
         strwithlen(const CT *const s, const uint32_t l)
-            : p(s)
+            : p{s}
         {
-                assert(l <= MaxLength());
+		if (sizeof(LT) < sizeof(uint32_t) && unlikely(l > MaxLength()))
+			fail_len_check(l);
 
                 len = l;
         }
 
-        [[gnu::always_inline]] inline constexpr operator bool() const
+	enum class NoMaxLenCheck
+	{
+
+	};
+
+	// A special variant; if you *know* l<=MaxLength(), use this constuctor instead
+	// It's constexpr
+        constexpr strwithlen(const CT *const s, const uint32_t l, const NoMaxLenCheck)
+            : p{s}, len{LT(l)}
+        {
+        }
+
+        constexpr operator bool() const
         {
                 return len;
         }
 
-        inline bool constexpr operator==(const strwithlen<LT> &o) const
+        constexpr bool operator==(const strwithlen<LT> &o) const
         {
                 return len == o.len && memcmp(p, o.p, len) == 0;
         }
 
-        inline bool constexpr operator!=(const strwithlen<LT> &o) const
+        constexpr bool operator!=(const strwithlen<LT> &o) const
         {
                 return len != o.len || memcmp(p, o.p, len);
         }
 
         // See range_base::Contains()
-        inline bool constexpr Contains(const CT *const ptr) const
+        constexpr bool Contains(const CT *const ptr) const
         {
                 return sizeof(CT) == 8
                            ? ptr >= p && ptr < (p + len)
                            : uint32_t(ptr - p) < len;
         }
 
-        inline bool constexpr Contains(const char *const op, const LT olen) const
+        constexpr bool Contains(const char *const op, const LT olen) const
         {
                 return op >= p && op + olen <= p + len;
         }
@@ -297,19 +328,19 @@ struct strwithlen
                 const auto n = l + r;
 
                 assert(n <= len);
-
                 assert(n <= len);
+
                 return {p + l, len - n};
         }
 
         template <typename T>
-        inline bool constexpr Contains(const T &s) const
+        constexpr bool Contains(const T &s) const
         {
                 return Contains(s.p, s.len);
         }
 
         template <typename T>
-        inline bool constexpr Contains(const T *const s) const
+        constexpr bool Contains(const T *const s) const
         {
                 return Contains(*s);
         }
@@ -333,14 +364,15 @@ struct strwithlen
                 return Intersects(*s);
         }
 
-        void Unset()
-        {
-                p = nullptr;
-                len = 0;
-        }
+	constexpr void reset() noexcept
+	{
+		p = nullptr;
+		len = 0;
+	}
+		
 
         // Not using const LT l, so that compiler won't have to complain about missing casts
-        void Set(const CT *const ptr, const uint32_t l)
+        constexpr void Set(const CT *const ptr, const uint32_t l)
         {
                 len = l;
                 p = ptr;
@@ -350,6 +382,11 @@ struct strwithlen
         {
                 p = ptr;
                 SetLengthExpl(strlen((char *)p));
+        }
+
+        typename std::enable_if<std::is_same<char, CT>::value, bool>::type printable() const noexcept
+        {
+                return printable_impl(p, len);
         }
 
         inline bool IsDigits() const
@@ -366,20 +403,17 @@ struct strwithlen
                 return len;
         }
 
-        bool operator==(const CT *ptr) const
+        bool operator==(const CT *ptr) const noexcept
         {
-                const auto *it = p;
-                const auto *const end = p + len;
+                const auto *it = p, *const end = p + len;
 
-                while (it != end)
+                while (it != end && *it == *ptr)
                 {
-                        if (*it != *ptr)
-                                return false;
                         ++it;
                         ++ptr;
                 }
 
-                return *ptr == '\0';
+                return it == end && *ptr == '\0';
         }
 
         double AsDouble() const
@@ -477,14 +511,6 @@ struct strwithlen
                 {
                         const auto d = unsigned(p[k++]) - '0';
 
-#if 0
-                        if (unlikely(d >= 10))
-                        {
-                                // throw something?
-                                return 0;
-                        }
-#endif
-
                         res += pow10[i] * d;
                 }
 
@@ -517,7 +543,6 @@ struct strwithlen
                 return 0;
         }
 
-        // See AsUint32() comments
         typename std::enable_if<std::is_same<char, CT>::value, uint64_t>::type AsUint64() const
         {
                 static constexpr uint64_t pow10[20] __attribute__((__aligned__(64))) = // 20 because 20 digits are enough for a 64bit number
@@ -563,17 +588,17 @@ struct strwithlen
                 return res;
         }
 
-        [[gnu::always_inline]] inline bool Eq(const CT *const ptr) const
+        inline bool Eq(const CT *const ptr) const
         {
                 return operator==(ptr);
         }
 
-        [[gnu::always_inline]] inline bool Eq(const CT *const v, const LT l) const
+        inline bool Eq(const CT *const v, const LT l) const
         {
                 return l == len && memcmp(v, p, l) == 0;
         }
 
-        [[gnu::always_inline]] inline typename std::enable_if<std::is_same<char, CT>::value, bool>::type EqNoCase(const CT *const v, const LT l) const
+        inline typename std::enable_if<std::is_same<char, CT>::value, bool>::type EqNoCase(const CT *const v, const LT l) const
         {
                 return l == len ? !strncasecmp((char *)v, (char *)p, l) : false;
         }
@@ -596,7 +621,7 @@ struct strwithlen
                 return EqNoCase(o.p, o.len);
         }
 
-        [[gnu::always_inline]] inline bool IsEqual(const CT *const ptr, const LT l) const
+        inline bool IsEqual(const CT *const ptr, const LT l) const
         {
                 return l == len && memcmp(p, ptr, l) == 0;
         }
@@ -604,17 +629,6 @@ struct strwithlen
         inline bool EndsWith(const CT *const v, const LT l) const
         {
                 return l <= len && memcmp(p + len - l, v, l) == 0;
-        }
-
-        // useful for hostnames, e.g
-        // delimEndsWith(_S(".google.com")) will return true for both "google.com", "www.google.com"
-        // the first character is considered the delimeter
-        bool delimEndsWith(const CT *const v, const LT lt) const
-        {
-                if (!lt)
-                        return true;
-
-                return EndsWith(v + 1, lt - 1) && (len == lt - 1 || p[len - lt] == v[0]);
         }
 
         inline bool EndsWithButNoExactMatch(const CT *const v, const LT l) const
@@ -662,17 +676,17 @@ struct strwithlen
                 return BeginsWith(c);
         }
 
-        strwithlen Prefix(const LT l) const
+        constexpr strwithlen Prefix(const LT l) const
         {
-                return strwithlen(p, std::min<LT>(len, l));
+                return strwithlen(p, std::min(len, l));
         }
 
-        strwithlen Suffix(const LT l) const
+        constexpr strwithlen Suffix(const LT l) const
         {
                 return strwithlen(End() - l, l);
         }
 
-        strwithlen SuffixFrom(const CT *const offset) const
+        constexpr strwithlen SuffixFrom(const CT *const offset) const
         {
                 return strwithlen(offset, End() - offset);
         }
@@ -695,12 +709,12 @@ struct strwithlen
                 return {};
         }
 
-        strwithlen SuffixFrom(const LT o) const
+        constexpr strwithlen SuffixFrom(const LT o) const
         {
                 return SuffixFrom(p + o);
         }
 
-        strwithlen PrefixUpto(const CT *const o) const
+        constexpr strwithlen PrefixUpto(const CT *const o) const
         {
                 return strwithlen(p, o - p);
         }
@@ -737,7 +751,7 @@ struct strwithlen
                 return *ptr == '\0';
         }
 
-        bool HasPrefix(const CT *ptr) const
+        constexpr bool HasPrefix(const CT *ptr) const
         {
                 return BeginsWith(ptr);
         }
@@ -760,7 +774,7 @@ struct strwithlen
                 return EndsWith(*s);
         }
 
-        [[gnu::always_inline]] inline const CT *End() const
+        constexpr const CT *End() const
         {
                 return p + len;
         }
@@ -772,7 +786,9 @@ struct strwithlen
 
         inline void SetLengthExpl(const LT l)
         {
-                assert(l <= MaxLength());
+		if (sizeof(LT) < sizeof(uint32_t) && unlikely(l > MaxLength()))
+			fail_len_check(l);
+
                 len = l;
         }
 
@@ -855,16 +871,29 @@ struct strwithlen
                 InitWithCopy(o->p, o->len);
         }
 
-        inline void AdjustRight(const LT v)
+        constexpr void AdjustRight(const LT v)
         {
                 len -= v;
         }
 
-        inline void AdjustLeft(const LT v)
+        constexpr void AdjustLeft(const LT v)
         {
                 p += v;
                 len -= v;
         }
+
+        auto &strip_prefix(const LT v) noexcept
+        {
+                p += v;
+                len -= v;
+                return *this;
+        }
+
+	auto &strip_suffix(const LT v) noexcept
+	{
+		len-=v;
+		return *this;
+	}
 
         LT CommonPrefixLen(const strwithlen o) const
         {
@@ -880,9 +909,7 @@ struct strwithlen
                 return it - p;
         }
 
-        // This really only makes sense in very specific situations
-        // for usually p[len] is not accessible
-        inline auto isNullTerminated() const
+        constexpr auto isNullTerminated() const
         {
                 return !p[len];
         }
@@ -907,8 +934,6 @@ struct strwithlen
                 return e - it;
         }
 
-        // Excluding common prefix and suffixes of @o
-        // e.g "STARWARSCRAFT".IntersectionOf("STARCRAFT") = "WARS"
         inline strwithlen IntersectionOf(const strwithlen o) const
         {
                 const auto *const from = p + CommonPrefixLen(o);
@@ -946,6 +971,16 @@ struct strwithlen
                         return false;
         }
 
+	strwithlen digits_prefix() const noexcept
+        {
+                const auto *it = p;
+
+                for (const auto *const e = it + len; it != e && isdigit(*it); ++it)
+                        continue;
+
+                return {p, LT(it - p), NoMaxLenCheck{}};
+        }
+
         bool StripSuffix(const CT *const s, const LT l)
         {
                 if (EndsWith(s, l))
@@ -977,18 +1012,27 @@ struct strwithlen
                 AdjustRight(v);
         }
 
-        bool InRange(const CT *const s) const
+        constexpr bool InRange(const CT *const s) const
         {
                 return s >= p && s < p + len;
         }
 
-        inline void AdvanceTo(const CT *const to)
+        constexpr void AdvanceTo(const CT *const to)
         {
                 len -= to - p;
                 p = to;
         }
 
-        void SetEnd(const CT *const e)
+	constexpr void advance_to(const CT *const to) noexcept
+	{
+                len -= to - p;
+                p = to;
+	}
+		
+
+
+
+        constexpr void SetEnd(const CT *const e)
         {
                 len = e - p;
         }
@@ -1009,17 +1053,17 @@ struct strwithlen
                 return nullptr;
         }
 
-        inline LT OffsetAt(const CT *const it) const
+        constexpr inline LT OffsetAt(const CT *const it) const
         {
                 return it - p;
         }
 
-        inline strwithlen Replica() const
+        constexpr inline strwithlen Replica() const
         {
                 return {p, len};
         }
 
-        strwithlen &TrimWS()
+        strwithlen &TrimWS() noexcept
         {
                 while (len && isspace(*p))
                 {
@@ -1031,7 +1075,20 @@ struct strwithlen
                 return *this;
         }
 
-        bool IsBlank() const
+        strwithlen ws_trimmed() noexcept
+        {
+                strwithlen res(p, len);
+
+                res.TrimWS();
+                return res;
+        }
+
+        auto as_length_limited(const uint32_t maxLen) const noexcept
+        {
+                return strwithlen(p, std::min<LT>(len, maxLen));
+        }
+
+        bool IsBlank() const noexcept
         {
                 for (const auto *it = p, *const end = p + len; it != end; ++it)
                 {
@@ -1041,19 +1098,19 @@ struct strwithlen
                 return true;
         }
 
-        const CT *begin() const
+        constexpr bool empty() const noexcept
+        {
+                return !len;
+        }
+
+        constexpr const CT *begin() const
         {
                 return p;
         }
 
-        const CT *end() const
+        constexpr const CT *end() const
         {
                 return p + len;
-        }
-
-        const CT *data() const
-        {
-                return p;
         }
 
         struct _segments
@@ -1227,15 +1284,40 @@ struct strwithlen
 
                 return n;
         }
-
-        // TODO:
-        // __keyvalues KeyValues(const char sep = ',', const bool ignoreBlanks = true, const bool kvSep = '=') const
 };
 
 typedef strwithlen<uint64_t> strwithlen64_t, strwlen64_t;
 typedef strwithlen<uint32_t> strwithlen32_t, strwlen32_t;
 typedef strwithlen<uint16_t> strwithlen16_t, strwlen16_t;
 typedef strwithlen<uint8_t> strwithlen8_t, strwlen8_t;
+
+
+inline auto operator"" _s8(const char *const s, const size_t len)
+{
+        return strwlen8_t(s, len);
+}
+
+inline auto operator"" _s16(const char *const s, const size_t len)
+{
+        return strwlen16_t(s, len);
+}
+
+constexpr auto operator"" _s32(const char *const s, const size_t len)
+{
+        return strwlen32_t(s, len, strwlen32_t::NoMaxLenCheck{});
+}
+
+constexpr size_t operator"" _len(const char *const, const size_t len)
+{
+        return len;
+}
+
+
+
+
+
+
+
 
 [[gnu::always_inline]] inline static auto S32(const char *const p, const uint32_t len)
 {

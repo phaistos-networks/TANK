@@ -79,7 +79,7 @@ class TankClient final
 
 		// If the payload is tracked by reqs_tracker.pendingConsume or reqs_tracker.pendingProduce or another reqs_tracker tracker, then
 		// we shouldn't try to put_payload() if it's registered with outgoing_content (either in pendingRespList or in outgoing payloads list)
-		inline bool tracked_by_reqs_tracker() const
+		constexpr bool tracked_by_reqs_tracker() const noexcept
 		{
                         return flags & ((1u << uint8_t(Flags::ReqIsIdempotent)) | (1u << uint8_t(Flags::ReqMaybeRetried)));
 		}
@@ -309,7 +309,7 @@ class TankClient final
                 {
                         outgoing_payload *front_{nullptr}, *back_{nullptr};
 
-                        void push_front(outgoing_payload *const p)
+                        void push_front(outgoing_payload *const p) noexcept
                         {
                                 p->iovIdx = 0;
                                 p->next = front_;
@@ -347,12 +347,12 @@ class TankClient final
                                 back_ = p;
                         }
 
-                        auto front()
+                        constexpr auto front() const noexcept
                         {
                                 return front_;
                         }
 
-                        void pop_front()
+                        constexpr void pop_front() noexcept
                         {
                                 front_ = front_->next;
                                 if (!front_)
@@ -414,7 +414,7 @@ class TankClient final
         Switch::unordered_map<uint32_t, active_ctrl_req> pendingCtrlReqs;
         struct reschedule_queue_entry_cmp
         {
-                bool operator()(const broker *const b1, const broker *const b2)
+                bool operator()(const broker *const b1, const broker *const b2) noexcept
                 {
                         return b1->block_ctx.until > b2->block_ctx.until;
                 }

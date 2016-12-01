@@ -45,9 +45,9 @@ struct size_repr
 
 static inline void PrintImpl(Buffer &out, const size_repr &s)
 {
-        out.EnsureCapacity(32);
+        out.reserve(32);
 
-        out.AdvanceLength(s.Get(out.end()).len);
+        out.advance_size(s.Get(out.end()).len);
 }
 
 struct dotnotation_repr
@@ -86,7 +86,7 @@ struct dotnotation_repr
 
 static inline void PrintImpl(Buffer &out, const dotnotation_repr &r)
 {
-        out.EnsureCapacity(32);
-        out.AdvanceLength(r.Get(out.End()).len);
+        out.reserve(32);
+        out.advance_size(r.Get(out.end()).len);
 }
 

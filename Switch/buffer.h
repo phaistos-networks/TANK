@@ -4,13 +4,41 @@
 #endif
 #include <stdarg.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <sys/time.h>
 
 class Buffer
 {
-      public:
+      private:
+        static const uint32_t sizeOf;
+
+      private:
+        static long double ToDoubleImpl(const char *p)
+        {
+                char *e;
+                const auto res = strtold(p, &e);
+
+                errno = 0;
+                if ((res == HUGE_VAL || res == HUGE_VALL) && errno == ERANGE)
+                        return NAN;
+                else if (res == 0 && errno == ERANGE)
+                        return NAN;
+                else if (*e)
+                        return NAN;
+                else
+                        return res;
+        }
+
+      protected:
+        inline void SetAsEmpty()
+        {
+                length_ = 0;
+                buffer = nullptr;
+                SetReserved(0);
+        }
+
+      public: //std::string API
         using iterator = char *;
         using const_iterator = const char *;
         using reference = char &;
@@ -20,60 +48,43 @@ class Buffer
         static constexpr uint32_t npos = UINT32_MAX;
 
       public: // std::string API
-        iterator begin() noexcept
+        inline iterator begin() noexcept
         {
                 return buffer;
         }
 
-        const_iterator cbegin() const noexcept
+        inline const_iterator cbegin() const noexcept
         {
                 return buffer;
         }
 
-        iterator end() noexcept
+        inline iterator end() noexcept
         {
                 return buffer + length_;
         }
 
-        const_iterator end() const noexcept
+        inline const_iterator end() const noexcept
         {
                 return buffer + length_;
         }
 
-        uint32_t size() const noexcept
-        {
-                return length_;
-        }
-
-        uint32_t max_size() const noexcept
+        inline uint32_t max_size() const noexcept
         {
                 return UINT32_MAX - 1;
         }
 
-        void resize(const uint32_t n)
+        inline auto &clear() noexcept
         {
-                if (unlikely(n < max_size()))
-                        SetLength(n);
-                else
-                        EnsureCapacity(n);
+                if (length_)
+                {
+                        if (buffer)
+                                *buffer = '\0';
+                        length_ = 0;
+                }
+                return *this;
         }
 
-        uint32_t capacity() const noexcept
-        {
-                return max_size();
-        }
-
-        void reserve(const uint32_t n)
-        {
-                EnsureCapacity(n + 1);
-        }
-
-        void clear() noexcept
-        {
-                length_ = 0;
-        }
-
-        bool empty() const noexcept
+        inline bool empty() const noexcept
         {
                 return !length_;
         }
@@ -83,32 +94,32 @@ class Buffer
                 // NO-OP for now
         }
 
-        char &at(const uint32_t pos)
+        inline char &at(const uint32_t pos) noexcept
         {
                 return buffer[pos];
         }
 
-        const char &at(const uint32_t pos) const
+        const char &at(const uint32_t pos) const noexcept
         {
                 return buffer[pos];
         }
 
-        char &back()
+        inline char &back() noexcept
         {
                 return buffer[length_ - 1];
         }
 
-        const char &back() const
+        inline const char &back() const noexcept
         {
                 return buffer[length_ - 1];
         }
 
-        char &front()
+        inline char &front() noexcept
         {
                 return *buffer;
         }
 
-        const char &front() const
+        inline const char &front() const noexcept
         {
                 return *buffer;
         }
@@ -127,7 +138,7 @@ class Buffer
 
         inline Buffer &operator+=(std::initializer_list<char> il)
         {
-                EnsureCapacity(il.size());
+                reserve(il.size());
                 for (const auto it : il)
                         Append(it);
                 return *this;
@@ -136,6 +147,123 @@ class Buffer
         void push_back(const char c)
         {
                 Append(c);
+        }
+
+        Buffer &assign(const Buffer &str)
+        {
+                length_ = 0;
+                Append(str);
+                return *this;
+        }
+
+        Buffer &assign(const Buffer &str, const uint32_t pos, const uint32_t len)
+        {
+                length_ = 0;
+                Append(str.buffer + pos, len);
+                return *this;
+        }
+
+        Buffer &assign(const char *const s)
+        {
+                length_ = 0;
+                Append(s);
+                return *this;
+        }
+
+        Buffer &assign(const uint32_t n, const char c)
+        {
+                length_ = 0;
+                reserve(n);
+
+                for (uint32_t i = 0; i != n; ++i)
+                        buffer[i] = c;
+
+                length_ = n;
+                buffer[length_] = '\0';
+                return *this;
+        }
+
+        Buffer &assign(const_iterator first, const_iterator last)
+        {
+                const uint32_t n = last - first;
+
+                Append(first, n);
+                return *this;
+        }
+
+        Buffer &assign(Buffer &&str)
+        {
+                buffer = str.buffer;
+                length_ = str.length_;
+                SetReserved(str.Reserved());
+
+                str.buffer = nullptr;
+                str.length_ = 0;
+                str.SetReserved(0);
+
+                return *this;
+        }
+
+        Buffer &insert(const uint32_t pos, const Buffer &str)
+        {
+                InsertChunk(pos, str.AsS32());
+                return *this;
+        }
+
+        Buffer &insert(const uint32_t pos, const Buffer &str, const uint32_t subpos, const uint32_t sublen)
+        {
+                InsertChunk(pos, strwlen32_t{str.buffer + subpos, sublen});
+                return *this;
+        }
+
+        Buffer &insert(const uint32_t pos, const char *const s, const uint32_t n)
+        {
+                InsertChunk(pos, strwlen32_t(s, n));
+                return *this;
+        }
+
+        Buffer &insert(const uint32_t pos, const uint32_t n, const char c)
+        {
+                InsertSpace(pos, n);
+                for (uint32_t i = 0; i != n; ++i)
+                        buffer[pos + i] = c;
+
+                return *this;
+        }
+
+        void insert_space(const uint32_t o, const uint32_t n)
+        {
+                require(o <= length_);
+                const auto newLen = length_ + n;
+                const auto upto = o + n;
+
+                reserve(newLen);
+                memmove(buffer + upto, buffer + o, sizeof(char) * (length_ - o));
+                resize(newLen);
+        }
+
+        Buffer &insert(const_iterator pos, const char c)
+        {
+                return insert(pos - buffer, 1, c);
+        }
+
+        Buffer &insert(iterator pos, const_iterator first, const_iterator last)
+        {
+                return insert(pos - buffer, first, last - first);
+        }
+
+        Buffer &insert(const_iterator pos, std::initializer_list<char> il)
+        {
+                const auto index = pos - buffer;
+
+                InsertSpace(index, il.size());
+
+                char *out = buffer + index;
+
+                for (const auto it : il)
+                        *out++ = it;
+
+                return *this;
         }
 
         Buffer &erase(const uint32_t pos = 0, const uint32_t len = npos)
@@ -156,34 +284,259 @@ class Buffer
                 return *this;
         }
 
-        void pop_back()
+        Buffer &replace(const uint32_t pos, const uint32_t len, const Buffer &str)
         {
-                AdjustLength(1);
+                ReplaceChunk({pos, len}, str.AsS32());
+                return *this;
         }
 
-        const char *c_str() const noexcept
+        Buffer &replace(const_iterator i1, const_iterator i2, const Buffer &str)
+        {
+                ReplaceChunk(i1 - buffer, i2 - i1, str.buffer, str.length_);
+                return *this;
+        }
+
+        Buffer &replace(const uint32_t pos, const uint32_t len, const Buffer &str, const uint32_t subpos, const uint32_t sublen)
+        {
+                ReplaceChunk(pos, len, str.buffer + subpos, sublen);
+                return *this;
+        }
+
+        Buffer &replace(const_iterator i1, const_iterator i2, const char *const s)
+        {
+                ReplaceChunk(i1 - buffer, i2 - i1, strwlen32_t{s});
+                return *this;
+        }
+
+        Buffer &replace(const uint32_t pos, const uint32_t len, const char *const s, const uint32_t n)
+        {
+                ReplaceChunk(pos, len, s, n);
+                return *this;
+        }
+
+        Buffer &replace(const_iterator i1, const_iterator i2, const char *const s, const uint32_t n)
+        {
+                return replace(i1 - buffer, i2 - i1, s, n);
+        }
+
+        Buffer &replace(const uint32_t pos, const uint32_t len, const uint32_t n, const char c)
+        {
+                PrepareReplacement(pos, len, n);
+
+                for (uint32_t i = 0; i != n; ++i)
+                        buffer[pos + i] = c;
+
+                return *this;
+        }
+
+        Buffer &replace(const_iterator i1, const_iterator i2, const uint32_t n, const uint32_t c)
+        {
+                return replace(i1 - buffer, i2 - buffer, n, c);
+        }
+
+        Buffer &replace(const_iterator i1, const_iterator i2, const_iterator i3, const_iterator i4)
+        {
+                ReplaceChunk(i1 - buffer, i2 - i1, i3, i4 - i3);
+                return *this;
+        }
+
+        void pop_back()
+        {
+                shrink_by(1);
+        }
+
+        void makeNullTerminated()
+        {
+                if (length_ < Reserved())
+                {
+                        buffer[length_] = '\0';
+                        return;
+                }
+                else
+                {
+                        WillInsert(1);
+                        buffer[length_] = '\0';
+                }
+        }
+
+        inline bool null_terminated() const noexcept
+        {
+                return buffer && buffer[length_] == '\0';
+        }
+
+        void make_null_terminated()
+        {
+                makeNullTerminated();
+        }
+
+        inline const char *c_str() const noexcept
         {
                 return buffer;
         }
 
-      public:
-        [[gnu::always_inline]] inline uint32_t Reserved() const
+        inline char *c_str() noexcept
         {
-#ifdef SWITCH_HAVE_MALLOC_USABLE_SIZE
-                return likely(buffer) ? malloc_usable_size(buffer) : 0;
-#else
-		return reserved_;
-#endif
+                return buffer;
         }
 
-        [[gnu::always_inline]] inline auto length() const
+        uint32_t find(const Buffer &str, const uint32_t pos = 0) const noexcept
+        {
+                if (const char *const p = strwlen32_t(buffer + pos, length_ - pos).Search(str.AsS32()))
+                        return p - buffer;
+                else
+                        return npos;
+        }
+
+        uint32_t find(const char *const s, const uint32_t pos = 0) const
+        {
+                if (const char *const p = strwlen32_t(buffer + pos, length_ - pos).Search(strwlen32_t(s)))
+                        return p - buffer;
+                else
+                        return npos;
+        }
+
+        uint32_t find(const char *const s, const uint32_t pos, const uint32_t n) const
+        {
+                if (const char *const p = strwlen32_t(buffer + pos, length_ - pos).Search(strwlen32_t(s, n)))
+                        return p - buffer;
+                else
+                        return npos;
+        }
+
+        uint32_t find(const char c, const uint32_t pos = 0) const
+        {
+                if (const char *const p = strwlen32_t(buffer + pos, length_ - pos).Search(c))
+                        return p - buffer;
+                else
+                        return npos;
+        }
+
+        uint32_t rfind(const Buffer &str, const uint32_t pos = 0) const noexcept
+        {
+                if (const char *const p = strwlen32_t(buffer + pos, length_ - pos).SearchR(str.AsS32()))
+                        return p - buffer;
+                else
+                        return npos;
+        }
+
+        uint32_t rfind(const char *const s, const uint32_t pos = 0) const
+        {
+                if (const char *const p = strwlen32_t(buffer + pos, length_ - pos).SearchR(strwlen32_t(s)))
+                        return p - buffer;
+                else
+                        return npos;
+        }
+
+        uint32_t rfind(const char *const s, const uint32_t pos, const uint32_t n) const
+        {
+                if (const char *const p = strwlen32_t(buffer + pos, length_ - pos).SearchR(strwlen32_t(s, n)))
+                        return p - buffer;
+                else
+                        return npos;
+        }
+
+        uint32_t rfind(const char c, const uint32_t pos = 0) const
+        {
+                if (const char *const p = strwlen32_t(buffer + pos, length_ - pos).SearchR(c))
+                        return p - buffer;
+                else
+                        return npos;
+        }
+
+        // TODO: find_first_of()
+        // TODO: find_last_of()
+        // TODO: find_first_not_of()
+        // TODO: find_last_not_of()
+
+        Buffer substr(const uint32_t pos, const uint32_t len = npos) const
+        {
+                return Buffer(buffer + pos, len != npos ? length_ : len);
+        }
+
+        int compare(const Buffer &str) const noexcept
+        {
+                return AsS32().Cmp(str.AsS32());
+        }
+
+        int compare(const uint32_t pos, const uint32_t len, const Buffer &str) const
+        {
+                return strwlen32_t(buffer + pos, len).Cmp(str.AsS32());
+        }
+
+        int compare(const uint32_t pos1, const uint32_t cnt1, const Buffer &str, const uint32_t pos2, const uint32_t cnt2) const
+        {
+                return strwlen32_t(buffer + pos1, cnt1).Cmp(strwlen32_t(str.buffer + pos2, cnt2 - pos2));
+        }
+
+        int compare(const char *const s) const
+        {
+                return AsS32().Cmp(strwlen32_t(s));
+        }
+
+      public:
+        // _includes_ space reserved for \0
+        [[gnu::always_inline]] inline uint32_t Reserved() const
+        {
+                // no need to check for (buffer != nullptr), malloc_usable_size() does that
+                // The problem with this arrangement is that if we are going to use, e.g SetData() to memory we
+                // have e.g alloca()ed or mmmap()ed, this will fail
+                // UPDATE: we sometimes use SetData() to explicitly set the buffer, and that memory was never allocated from the allocator; it could
+                // have been allocated with alloca() or mmap(), and malloc_usable_size() on that ptr would either return bogus values or would result in crashes
+                // we can use the unusted pointer upper bits for that -- this adds a small overhead, but it's very convenient
+                // https://en.wikipedia.org/wiki/Tagged_pointer
+                // UPDATE: not doing it
+                return likely(buffer) ? malloc_usable_size(buffer) : 0;
+        }
+
+        inline auto reserved() const noexcept
+        {
+                return Reserved();
+        }
+
+        inline auto size() const noexcept
         {
                 return length_;
         }
 
-        [[gnu::always_inline]] inline auto data() const
+        inline const char *data() const noexcept
         {
                 return buffer;
+        }
+
+        inline char *data() noexcept
+        {
+                return buffer;
+        }
+
+        inline auto data_at(const uint32_t o) const noexcept
+        {
+                return buffer + o;
+        }
+
+        char *Copy() const
+        {
+                if (length_)
+                {
+                        char *const res = (char *)malloc(length_);
+
+                        memcpy(res, buffer, length_);
+                        return res;
+                }
+                else
+                        return nullptr;
+        }
+
+        // TODO: to text
+        static char GetUpper(const char c) noexcept;
+
+        [[gnu::always_inline]] inline static char UppercaseISO88597(const char c)
+        {
+                return GetUpper(c);
+        }
+
+        void Print() const
+        {
+                AsS32().Print();
         }
 
         inline strwlen8_t AsS8() const
@@ -196,77 +549,115 @@ class Buffer
                 return strwlen16_t(buffer, length_);
         }
 
-        inline strwlen32_t AsS32() const
+        inline strwlen32_t AsS32() const noexcept
         {
-                return strwlen32_t(buffer, length_);
+                return strwlen32_t(buffer, length_, strwlen32_t::NoMaxLenCheck{});
         }
 
-        inline void FreeBuf()
+        inline uint32_t AsUInt32() const
         {
-                WillUpdate();
-                if (likely(buffer))
-                {
-                        ::free(buffer);
-                        buffer = nullptr;
-                        SetReserved(0);
-                        length_ = 0;
-                }
+                return strwlen32_t(buffer, length_).AsUint32();
         }
 
-        [[gnu::always_inline]] inline bool IsNullTerminated() const
+        inline double AsFloat() const
+        {
+                if (likely(IsNullTerminated()))
+                        return atof(buffer);
+                else
+                        return AsS32().AsDouble();
+        }
+
+        inline void SetToEmpty()
+        {
+                length_ = 0;
+        }
+
+        inline bool IsNullTerminated() const noexcept
         {
                 return buffer && buffer[length_] == '\0';
         }
 
-        [[gnu::always_inline]] inline operator char *()
+        inline void JustFreeBuf()
+        {
+                WillUpdate();
+                if (likely(buffer))
+                        ::free(buffer);
+        }
+
+        inline operator char *() noexcept
         {
                 return buffer ?: const_cast<char *>(""); // Too many uses so we need to do it
         }
 
-        [[gnu::always_inline]] inline bool operator==(const char *const data) const
+        inline operator const char *() const noexcept
         {
-                if (buffer == data && data == nullptr)
-                        return true;
-                else if (likely(buffer))
-                        return AsS32().Eq(data, strlen(data));
-		else
-			return false;
+                return buffer ?: "";
         }
 
-        auto operator!=(const Buffer &o) const
+        inline bool operator==(const char *const data) const noexcept
+        {
+                return AsS32() == data;
+        }
+
+        inline auto operator!=(const Buffer &o) const noexcept
         {
                 return AsS32() != o.AsS32();
         }
 
-        [[gnu::always_inline]] inline bool operator!=(const char *const data) const
+        inline bool operator!=(const char *const data) const noexcept
         {
                 return !(operator==(data));
         }
 
-        [[gnu::always_inline]] inline bool operator==(const Buffer &other) const
+        inline bool operator==(const Buffer &other) const noexcept
         {
                 return length_ == other.length_ ? !memcmp(buffer, other.buffer, length_) : false;
         }
 
+        inline bool IsEqInsensitive(const char *const str) const
+        {
+                return AsS32().EqNoCase(str);
+        }
+
+        inline bool IsNum() const noexcept
+        {
+                return AsS32().IsDigits();
+        }
+
+        inline bool Eq(const char *const p, const uint32_t l) const noexcept
+        {
+                return length_ == l ? !memcmp(buffer, p, l) : false;
+        }
+
+        inline bool IsEqual(const char *const data) noexcept
+        {
+                return (!data && !buffer) || (data && buffer ? AsS32().Eq(data) : false);
+        }
+
         inline Buffer &operator=(const char *const data)
         {
-                Flush();
+                clear();
                 Append(data);
 
                 return *this;
         }
 
+        auto ToCString(char *out, const size_t outCapacity) const
+        {
+                return AsS32().ToCString(out, outCapacity);
+        }
+
         inline Buffer &operator=(const Buffer &other)
         {
-                Flush();
-                Append(other.data(), other.length());
+                clear().Append(other.data(), other.size());
 
                 return *this;
         }
 
+        void AppendTimes(const char *text, const uint32_t len, const uint32_t times);
+
         inline Buffer &operator+(const char *const data)
         {
-
                 Append(data);
                 return *this;
         }
@@ -303,41 +694,33 @@ class Buffer
 
         inline Buffer &operator+(const Buffer &other)
         {
-                Append(other.data(), other.length());
+                Append(other.data(), other.size());
                 return *this;
         }
 
         inline Buffer &operator+=(const Buffer &other)
         {
-                Append(other.data(), other.length());
+                Append(other.data(), other.size());
                 return *this;
         }
 
-        [[gnu::always_inline]] inline char *At(const uint32_t offset) const
+        inline const char *At(const uint32_t offset) const
         {
                 WillReference(offset);
 
                 return buffer + offset;
         }
 
-        [[gnu::always_inline]] inline char *End() const
+        inline char *At(const uint32_t offset)
         {
-                return buffer + length_;
+                WillReference(offset);
+
+                return buffer + offset;
         }
 
-        [[gnu::always_inline]] inline uint32_t OffsetOf(const char *const ptr)
+        inline uint32_t OffsetOf(const char *const ptr) noexcept
         {
                 return ptr - buffer;
-        }
-
-        inline uint8_t LastChar() const
-        {
-                return likely(length_) ? buffer[length_ - 1] : 0;
-        }
-
-        inline char FirstChar() const
-        {
-                return likely(length_) ? *buffer : 0;
         }
 
         inline char operator[](const uint32_t index) const
@@ -345,56 +728,75 @@ class Buffer
                 if (likely(index <= length_))
                         return buffer[index];
 
-                abort();
+                std::abort();
                 return 0;
         }
 
-        /** Releases the internal buffer, and resets the structure, causing the internal buffer to 
-		 *  be reallocated on further requests . Useful in some scenarios where we need to 
-		 *  get for oursleves the internal buffer
-		 */
-
-        inline void ReleaseBuffer()
+        auto release()
         {
-                buffer = nullptr;
-                SetReserved(0);
-                length_ = 0;
-        }
-
-        inline char *GetAndReleaseBuffer()
-        {
-                char *const b = buffer;
+                auto ptr = buffer;
 
                 buffer = nullptr;
                 SetReserved(0);
                 length_ = 0;
-
-                return b;
+                return ptr;
         }
 
-        inline void FreeResources()
+        void reset()
         {
-                FreeBuf();
-                length_ = 0;
+                if (buffer)
+                {
+                        ::free(buffer);
+                        buffer = nullptr;
+                        SetReserved(0);
+                        length_ = 0;
+                }
         }
-
-        void Exchange(Buffer *other);
-
-        int32_t IndexOf(const char *const needle);
 
         uint32_t CountOf(const char c) const
         {
-                return strwlen32_t(buffer, length_).CountOf(c);
+                return AsS32().CountOf(c);
         }
+
+        inline char CharAt(const uint32_t index) const
+        {
+                if (likely(buffer && index <= length_))
+                        return buffer[index];
+
+                assert(!"Invalid args for CharAt()");
+                return 0;
+        }
+
+        auto RoomFor(const size_t s)
+        {
+                WillInsert(s);
+
+                auto *const ptr = buffer + length_;
+
+                length_ += s;
+                return reinterpret_cast<uint8_t *>(ptr);
+        }
+
+        void InsertSpace(const uint32_t o, const uint32_t s)
+        {
+                assert(o <= length_);
+
+                WillInsert(s);
+                WillTouch(o, length_ - o);
+                WillTouch(o, s);
+
+                length_ += s;
+                const auto dest = o + s;
+
+                memmove(buffer + dest, buffer + o, length_ - dest);
+                buffer[length_] = '\0';
+        }
+
+        int ReplacePortion(uint32_t start_offset, uint32_t end_offset, const char *data, const uint32_t l);
 
         int32_t Replace(const strwlen32_t from, const strwlen32_t to);
 
         uint32_t Replace(const char needle, const char with);
-
-        Buffer()
-            : buffer{nullptr}, length_{0}
-        {
-        }
 
         Buffer(Buffer &&o)
         {
@@ -429,6 +831,14 @@ class Buffer
                 return *this;
         }
 
+        Buffer()
+            : length_{0}
+        {
+                buffer = nullptr;
+                SetOwnsBuffer(false);
+                SetReserved(0);
+        }
+
         Buffer(const uint32_t initSize);
 
         Buffer(const char *const p, const uint32_t l);
@@ -449,7 +859,7 @@ class Buffer
         }
 
         Buffer(const Buffer &other)
-            : Buffer(other.data(), other.length())
+            : Buffer(other.data(), other.size())
         {
         }
 
@@ -457,43 +867,6 @@ class Buffer
         {
                 if (likely(OwnsBuffer()) && buffer)
                         free(buffer);
-        }
-
-        void AppendFmt(const char *fmt, ...)
-            __attribute__((format(printf, 2, 3)))
-        {
-                WillUpdate();
-
-                va_list args;
-                const int32_t capacity = Capacity();
-
-                va_start(args, fmt);
-                const auto len = vsnprintf(buffer + length_, capacity, fmt, args);
-
-                if (unlikely(len < 0))
-                {
-                        (void)va_end(args);
-                        return;
-                }
-                else if (len >= capacity)
-                {
-                        EnsureCapacity(len + 1);
-
-                        va_end(args);
-                        va_start(args, fmt);
-
-                        const auto r = vsnprintf(buffer + length_, len + 1, fmt, args);
-
-                        if (unlikely(r < 0))
-                        {
-                                va_end(args);
-                                return;
-                        }
-                }
-                va_end(args);
-
-                length_ += len;
-                buffer[length_] = '\0';
         }
 
         static inline uint32_t ComputeNewSize(const uint32_t requestedSize)
@@ -509,24 +882,22 @@ class Buffer
 #pragma mark Will/Did delegates
         [[gnu::always_inline]] inline void WillTouch(const uint32_t o, const uint32_t l) const
         {
-                //expect(o + l < Reserved());
                 (void)o;
                 (void)l;
         }
 
         [[gnu::always_inline]] inline void WillSetLength(const uint32_t l) const {
-            //expect_reason(OwnsBuffer() && length_ < Reserved(), "Unexpected");
+
         }
 
-            [[gnu::always_inline]] inline void WillReference(const uint32_t offset) const {
-                //expect_reason(offset == 0 || (likely(OwnsBuffer()) && offset < Reserved()), "Unexpected DataWithOffset()");
-            }
+            [[gnu::always_inline]] inline void WillReference(const uint32_t offset) const {}
 
                 [[gnu::always_inline]] inline void WillUpdate()
         {
-                // Enable this if you want to track down an issue; otherwise it's too expensive, and, it makes using this pattern an issue
-                // expect_reason(OwnsBuffer(), "Attempting to update an immutable Buffer");
         }
+
+        inline void AppendFmt(const char *fmt, ...)
+            __attribute__((format(printf, 2, 3)));
 
         void EnsureSize(const uint32_t newMin)
         {
@@ -538,13 +909,15 @@ class Buffer
                 {
                         uint32_t newSize = ComputeNewSize(newMin);
 
+                        assert(newSize >= newMin && newSize > length_);
+
                         try
                         {
                                 if (buffer == nullptr || unlikely(!OwnsBuffer()))
                                         buffer = (char *)malloc(sizeof(char) * newSize);
                                 else if (length_ == 0)
                                 {
-                                        ::free(buffer);
+                                        free(buffer);
                                         buffer = (char *)malloc(sizeof(char) * newSize);
                                 }
                                 else
@@ -560,31 +933,42 @@ class Buffer
                         if (unlikely(!buffer))
                                 std::abort();
 
-#ifdef SWITCH_HAVE_MALLOC_USABLE_SIZE
                         newSize = malloc_usable_size(buffer);
-#endif
 
                         SetReserved(newSize);
+
+                        assert(Reserved() >= newSize);
+                        assert(length_ + 1 <= Reserved());
+
+                        if (unlikely(buffer == nullptr))
+                        {
+                                std::abort();
+                        }
+
                         SetOwnsBuffer(true);
 
+                        // Realloc did NOT copy '\0', for length_ doesn't account for it
+                        // We are responsible for setting it whenever we realloc()
                         buffer[length_] = '\0';
                 }
         }
 
-        [[gnu::always_inline]] inline void EnsureCapacity(const uint32_t n)
+        [[gnu::always_inline]] inline void reserve(const uint32_t n)
         {
                 EnsureSize(length_ + n + 1); // +1 for trailing \0
         }
 
         [[gnu::always_inline]] inline void WillInsert(const uint32_t n)
         {
-                EnsureCapacity(n);
+                reserve(n);
         }
 
         inline void Append(const char *const data, const uint32_t len)
         {
                 WillInsert(len);
+
                 memcpy(buffer + length_, data, len);
+
                 length_ += len;
                 buffer[length_] = '\0';
         }
@@ -596,42 +980,28 @@ class Buffer
 
         inline void Append(const Buffer &buf)
         {
-                Append(buf.data(), buf.length());
+                Append(buf.data(), buf.size());
         }
+
+        void Append(const char c);
 
         void Append(const char c, const uint32_t cnt);
 
-        void Append(const char c)
+        void Append(const uint8_t c);
+
+        void Append(const float f);
+
+        void Append(const int i);
+
+        void Append(const uint32_t i);
+
+        inline void __SetLength(const uint32_t newLength)
         {
-                WillInsert(1);
-                buffer[length_++] = c;
-                buffer[length_] = '\0';
+                // tread carefuly
+                length_ = newLength;
         }
 
-        void Append(const uint8_t c)
-        {
-                WillInsert(1);
-
-                buffer[length_++] = c;
-                buffer[length_] = '\0';
-        }
-
-        void Append(const float f)
-        {
-                AppendFmt("%lf", f);
-        }
-
-        void Append(const int i)
-        {
-                AppendFmt("%i", i);
-        }
-
-        void Append(const uint32_t i)
-        {
-                AppendFmt("%u", i);
-        }
-
-        [[gnu::always_inline]] inline void SetLengthAndTerm(const uint32_t l)
+        void SetLengthAndTerm(const uint32_t l)
         {
                 length_ = l;
 
@@ -639,7 +1009,7 @@ class Buffer
                 buffer[length_] = '\0';
         }
 
-        inline void SetLength(const uint32_t newLength)
+        void resize(const uint32_t newLength)
         {
                 WillSetLength(newLength);
 
@@ -653,12 +1023,17 @@ class Buffer
 
         void TrimWSAll();
 
-        inline bool IsBlank() const
+        inline bool IsBlank() const noexcept
         {
-                return strwlen32_t(buffer, length_).IsBlank();
+                return AsS32().IsBlank();
         }
 
-        inline void AdjustLength(const uint32_t factor)
+        inline void StripSuffix(const uint32_t n)
+        {
+                shrink_by(n);
+        }
+
+        void shrink_by(const uint32_t factor)
         {
                 assert(length_ >= factor);
 
@@ -674,11 +1049,23 @@ class Buffer
 
         inline void AdvanceLength(const uint32_t factor)
         {
-                assert(length_ + factor < Reserved());
-                assert(OwnsBuffer());
+                Drequire(length_ + factor < reserved());
+                Drequire(OwnsBuffer());
 
                 length_ += factor;
                 buffer[length_] = '\0';
+        }
+
+        inline void advance_size(const uint32_t by)
+        {
+                AdvanceLength(by);
+        }
+
+        void InsertChunk(const uint32_t pos, const char *data, const uint32_t dataLength);
+
+        void InsertChunk(const uint32_t pos, const strwlen32_t v)
+        {
+                InsertChunk(pos, v.p, v.len);
         }
 
         void DeleteChunk(const uint32_t pos, uint32_t gapLength)
@@ -695,6 +1082,30 @@ class Buffer
                 }
         }
 
+        void erase(const range32_t range)
+        {
+                DeleteChunk(range.offset, range.len);
+        }
+
+        int32_t PrepareReplacement(const uint32_t pos, const uint32_t chunkLen, const uint32_t newChunkLen);
+
+        int32_t ReplaceChunk(const uint32_t pos, const uint32_t chunkLen, const char *newChunkData, const uint32_t newChunkLen);
+
+        int32_t ReplaceChunk(const uint32_t pos, const uint32_t chunkLen, const strwlen32_t s)
+        {
+                return ReplaceChunk(pos, chunkLen, s.p, s.len);
+        }
+
+        int32_t ReplaceChunk(const range32_t range, const strwlen32_t s)
+        {
+                return ReplaceChunk(range.offset, range.len, s.p, s.len);
+        }
+
+        inline strwlen32_t Substr(const range32_t r)
+        {
+                return {buffer + r.offset, r.len};
+        }
+
         // Includes space reserved for \0
         [[gnu::always_inline]] inline uint32_t ActualCapacity() const
         {
@@ -702,7 +1113,7 @@ class Buffer
                 return Reserved() - length_;
         }
 
-        [[gnu::always_inline]] inline uint32_t Capacity() const
+        inline auto capacity() const
         {
                 const uint32_t r = Reserved();
 
@@ -714,97 +1125,70 @@ class Buffer
                 buffer = d;
         }
 
-        inline void Reset()
+        inline auto AsUint32() const
         {
-                if (length_)
-                {
-                        if (likely(buffer))
-                                *buffer = '\0';
-
-                        length_ = 0;
-                }
+                return AsS32().AsUint32();
         }
 
-        inline void Flush()
+        auto AsUint64() const
         {
-                Reset();
+                return AsS32().AsUint64();
         }
 
-        [[gnu::always_inline]] inline void SetZeroLength()
+        inline auto AsInt32() const
         {
-                length_ = 0;
+                return AsS32().AsInt32();
         }
 
-        inline void PushIntUnsafe(const int v)
+        inline void set_data(const char *const d, const uint32_t l)
         {
-                WillUpdate();
-
-                *(int *)(buffer + length_) = v;
-                length_ += sizeof(int);
-        }
-
-        inline uint32_t AsUint32() const
-        {
-                return strwlen32_t(buffer, length_).AsUint32();
-        }
-
-        uint64_t AsUint64() const
-        {
-                return strwlen32_t(buffer, length_).AsUint64();
-        }
-
-        inline int32_t AsInt32() const
-        {
-                return strwlen32_t(buffer, length_).AsInt32();
-        }
-
-        bool IsAllDigits() const
-        {
-                for (const char *p = buffer, *const e = p + length_; p != e; ++p)
-                {
-                        if (!isdigit(*p))
-                                return false;
-                }
-                return true;
-        }
-
-        inline void PushIntsPairUnsafe(const int v1, const int v2)
-        {
-                WillUpdate();
-
-                *(int *)(buffer + length_) = v1;
-                length_ += sizeof(int);
-                *(int *)(buffer + length_) = v2;
-                length_ += sizeof(int);
-        }
-        void SetDataAndLength(char *const d, const uint32_t l)
-        {
-                // Make sure you know what you are doing
-                buffer = d;
+                buffer = const_cast<char *>(d);
                 length_ = l;
         }
 
-        void SetDataAndSize(char *const d, const uint32_t s)
+        // Be careful
+        void set_data_and_size(char *const d, const uint32_t s)
         {
                 buffer = d;
                 length_ = 0;
                 SetReserved(s);
         }
 
-        void *MakeSpace(const uint32_t s)
+        void StripInvalidTextCharacters();
+
+        inline bool BeginsWithNoCase(const char *const p, const uint32_t l) const
         {
-                void *ptr;
+                return AsS32().BeginsWithNoCase(p, l);
+        }
 
-                WillInsert(s);
-                ptr = buffer + length_;
+        inline bool BeginsWith(const char *p) const
+        {
+                return AsS32().BeginsWith(p);
+        }
 
-                if (likely(s))
-                {
-                        length_ += s;
-                        buffer[length_] = '\0';
-                }
+        inline auto BeginsWith(const char c) const
+        {
+                return AsS32().BeginsWith(c);
+        }
 
-                return ptr;
+        inline bool BeginsWith(const char *const p, const uint32_t l) const
+        {
+                return AsS32().BeginsWith(p, l);
+        }
+
+        inline bool EndsWith(const char *const p, const uint32_t l) const
+        {
+                return AsS32().EndsWith(p, l);
+        }
+
+        inline bool EndsWith(const char *const p)
+        {
+                return AsS32().EndsWith(p);
+        }
+        auto &pad(const uint32_t n)
+        {
+                memset(RoomFor(n), 0, n);
+                return *this;
         }
 
         void PadUptoWith(uint32_t n, const char c)
@@ -814,7 +1198,7 @@ class Buffer
                 if (n <= length_)
                         return;
 
-                EnsureCapacity(n - length_ + 8);
+                reserve(n - length_ + 8);
                 memset(buffer + length_, c, n - length_);
                 length_ = n;
                 buffer[length_] = '\0';
@@ -831,7 +1215,7 @@ class Buffer
         }
 
         template <typename... Arg>
-        auto &append(Arg &&... args)
+        inline auto &append(Arg &&... args)
         {
                 ToBuffer(*this, std::forward<Arg>(args)...);
                 return *this;
@@ -849,21 +1233,9 @@ class Buffer
                 return *this;
         }
 
-        inline auto &append(const uint32_t n, const char c)
-        {
-                EnsureCapacity(n);
-
-                for (uint32_t i{0}; i != n; ++i)
-                        buffer[length_ + i] = c;
-
-                length_ += n;
-                buffer[length_] = '\0';
-                return *this;
-        }
-
         inline auto &append(std::initializer_list<char> il)
         {
-                EnsureCapacity(il.size());
+                reserve(il.size());
                 for (const auto it : il)
                         Append(it);
 
@@ -872,16 +1244,18 @@ class Buffer
 
         [[gnu::always_inline]] inline virtual bool OwnsBuffer() const
         {
+                // Ref: SGL ImmutableString
+                // We need to know if we own the buffer, for otherwise Reserved() will fail (malloc_usable_size(const char*) will abort)
+
                 return true;
         }
 
       protected:
         char *buffer;
         uint32_t length_;
-#ifndef SWITCH_HAVE_MALLOC_USABLE_SIZE
-	uint32_t reserved_{0};
+#ifndef USE_MALLOC_USABLE_SIZE
+        uint32_t _reserved;
 #endif
-
         [[gnu::always_inline]] inline void SetOwnsBuffer(const bool v)
         {
                 (void)v; // NO-OP for now
@@ -889,13 +1263,22 @@ class Buffer
 
         inline void SetReserved(const uint32_t newSize)
         {
-#ifndef SWITCH_HAVE_MALLOC_USABLE_SIZE
-		reserved_ = newSize;
-#else
+#ifdef USE_MALLOC_USABLE_SIZE
                 (void)newSize;
+#else
+                _reserved = newSize;
 #endif
         }
 };
+
+template <typename... Args>
+static inline auto makeBuffer(Args &&... args)
+{
+        Buffer b;
+
+        ToBuffer(b, std::forward<Args>(args)...);
+        return b;
+}
 
 class IOBuffer
     : public Buffer
@@ -908,7 +1291,7 @@ class IOBuffer
 
       public:
         // Specialized for IOBuffer()
-        // Buffer::EnsureCapacity() asks for length_ + n + 1 because
+        // Buffer::reserve() asks for length_ + n + 1 because
         // it needs to set the trailing \0
         //
         // UPDATE: we _need_ +1 for \0, otherwise Buffer::SetLength() fails because
@@ -925,52 +1308,33 @@ class IOBuffer
                 Buffer::SetLengthAndTerm(l);
         }
 
-        void SetLength(const uint32_t nl)
+        void resize(const uint32_t n)
         {
-                Drequire(nl <= Reserved());
-
-                length_ = nl;
+                Drequire(n <= Reserved());
+                length_ = n;
         }
 
-        void makeNullTerminated()
+        inline auto offsetToEndRange() const noexcept
         {
-                if (length_ < Reserved())
-                {
-                        buffer[length_] = '\0';
-                        return;
-                }
-                else
-                {
-                        WillInsert(1);
-                        buffer[length_] = '\0';
-                }
+                return Switch::make_range(buffer + position, length_ - position);
         }
 
-        uint8_t *RoomFor(const size_t s)
-        {
-                WillInsert(s);
-
-                auto *const ptr = buffer + length_;
-
-                length_ += s;
-
-                return (uint8_t *)ptr;
-        }
-
-        void DumpStrings() const;
-
-        [[gnu::always_inline]] inline char *AtOffset() const
+        inline auto data_at_offset() const noexcept
         {
                 return buffer + position;
         }
 
-        void FreeBuf()
+        inline void CheckMemUsage(const uint32_t maxAllowed)
         {
-                Buffer::FreeBuf();
-                position = 0;
+                if (unlikely(Reserved() > maxAllowed))
+                {
+                        JustFreeBuf();
+                        SetAsEmpty();
+                        position = 0;
+                }
         }
 
-        void SetDataAndLength(char *const d, const uint32_t l)
+        inline void set_data(char *const d, const uint32_t l) noexcept
         {
                 buffer = d;
                 length_ = l;
@@ -995,8 +1359,8 @@ class IOBuffer
         IOBuffer(IOBuffer &&b)
             : Buffer(std::move(b)), position{b.position}
         {
-                b.ReleaseBuffer();
-                b.SetOffset(uint64_t(0));
+                b.release();
+                b.reset_offset();
         }
 
         IOBuffer(const IOBuffer &b)
@@ -1015,46 +1379,23 @@ class IOBuffer
 
         auto &operator=(IOBuffer &&o)
         {
-                FreeBuf();
+                reset();
 
                 buffer = o.buffer;
                 length_ = o.length_;
                 position = o.position;
                 SetReserved(o.Reserved());
 
-                o.ReleaseBuffer();
-                o.position = 0;
+                o.release();
+                o.reset_offset();
 
                 return *this;
         }
 
-        inline void Reset()
-        {
-                position = 0;
-                Buffer::Reset();
-        }
-
-        inline void QuickFlush()
-        {
-                length_ = 0;
-                position = 0;
-        }
-
-        inline void Flush()
-        {
-                Buffer::Flush();
-                position = 0;
-        }
-
         void clear()
         {
-                Buffer::Flush();
+                Buffer::clear();
                 position = 0;
-        }
-
-        auto Offset() const
-        {
-                return position;
         }
 
         int ReadFromSocket(const int fd, const uint32_t chunkSize = 8192);
@@ -1075,22 +1416,12 @@ class IOBuffer
 
         int WriteRangeToSocket(const int fd, uint32_t &bytesLeft);
 
-        inline void SetPosition(const uint32_t pos)
-        {
-                position = pos;
-        }
-
-        inline void ResetPosition()
-        {
-                position = 0;
-        }
-
-        inline void AdvancePosition(const uint32_t pos)
+        inline void AdvancePosition(const uint32_t pos) noexcept
         {
                 position += pos;
         }
 
-        inline void SetOffset(const uint64_t o)
+        void SetOffset(const uint64_t o) noexcept
         {
                 position = (uint32_t)o;
         }
@@ -1100,17 +1431,32 @@ class IOBuffer
                 position = p - buffer;
         }
 
-        inline uint64_t GetOffset() const
+        inline void set_offset(const uint64_t o)
+        {
+                position = o;
+        }
+
+        inline void reset_offset() noexcept
+        {
+                position = 0;
+        }
+
+        inline void set_offset(const char *const p) noexcept
+        {
+                position = p - buffer;
+        }
+
+        inline auto offset() const noexcept
         {
                 return position;
         }
 
-        inline void AdvanceOffset(const uint64_t s)
+        inline void advance_offset(const uint64_t s) noexcept
         {
                 position += s;
         }
 
-        void AdvanceOffsetTo(const char *const p)
+        void AdvanceOffsetTo(const char *const p) noexcept
         {
                 position = p - buffer;
         }
@@ -1120,23 +1466,19 @@ class IOBuffer
                 position += by;
         }
 
+        // Make sure you know what you are doing here
         void AdjustOffsetAndLength(const uint32_t n)
         {
                 position += n;
                 length_ -= n;
         }
 
-        inline uint32_t Position() const
-        {
-                return position;
-        }
-
-        [[gnu::always_inline]] inline bool IsPositionAtEnd() const
+        inline bool IsPositionAtEnd() const
         {
                 return position == length_;
         }
 
-        inline operator char *()
+        inline operator char *() noexcept
         {
                 return data() ?: const_cast<char *>("");
         }
@@ -1170,18 +1512,52 @@ class IOBuffer
                 return *this;
         }
 
-        inline bool RetrieveBinarySafe(void *const d, const uint32_t d_size)
+        inline void EnsureLengthRoundedTo(const uint32_t roundedTo)
         {
-                memcpy(d, buffer + position, d_size);
-                position += d_size;
-
-                return true;
+                pad(RoundToMultiple(capacity(), roundedTo));
         }
 
+        inline void SetDataAt(const uint32_t offset, const void *const b, const uint32_t bSize)
+        {
+                assert(offset <= length_);
+
+                const uint32_t upto = offset + bSize;
+                if (upto < length_)
+                {
+                        memcpy(buffer + offset, b, bSize);
+                        return;
+                }
+
+                const uint32_t need = upto - length_;
+
+                WillInsert(need);
+
+                memcpy(buffer + offset, b, bSize);
+                length_ = upto;
+                buffer[length_] = '\0';
+        }
+
+        inline void SetDataAtWithPadding(const uint32_t offset, const void *b, const uint32_t bSize, const uint8_t padWith)
+        {
+                const uint32_t upto = offset + bSize;
+
+                if (upto > length_)
+                {
+                        EnsureSize(upto + 1);
+                        memset(buffer + length_, padWith, upto - length_);
+                }
+                SetDataAt(offset, b, bSize);
+        }
+
+        inline void SerializePackedUInt32WithLenPrefix(const uint32_t n);
+        inline uint32_t UnserializePackedUInt32WithLenPrefix();
         inline void SerializeVarUInt32(const uint32_t n);
+        inline uint32_t UnserializeVarUInt32();
 
-        inline uint32_t UnserializeVarUInt32(void);
-
+        // we are no longer using PushBinary(). clang will optimize away memcpy() for size (1,2,4,8)
+        // to e.g *(uin64_t *)ptr = v
+        // Using PushBinary() is another call and doesn't give the chance to the compiler to deterministically(compile time)
+        // compile it away. This works way better.
         [[gnu::always_inline]] inline void Serialize(const uint8_t v)
         {
                 *(typename std::remove_const<decltype(v)>::type *)RoomFor(sizeof(v)) = v;
@@ -1247,18 +1623,18 @@ class IOBuffer
                 memcpy(RoomFor(size), p, size);
         }
 
-        [[gnu::always_inline]] inline void *Peek(const uint32_t size)
+        inline void *Peek(const uint32_t size) noexcept
         {
                 return buffer + position;
         }
 
-        [[gnu::always_inline]] inline bool IsAtEnd() const
+        inline bool at_end() const noexcept
         {
                 return position == length_;
         }
 
         template <typename T>
-        [[gnu::always_inline]] inline T Unserialize()
+        inline T Unserialize() noexcept
         {
                 const T r = *(T *)(buffer + position);
 
@@ -1267,47 +1643,72 @@ class IOBuffer
         }
 
         template <typename T>
-        [[gnu::always_inline]] inline void Unserialize(T *const dst)
+        inline void Unserialize(T *const dst) noexcept
         {
                 memcpy(dst, buffer + position, sizeof(T));
                 position += sizeof(T);
         }
 
-        template <typename T>
-        [[gnu::always_inline]] inline bool UnserializeSafe(T *const dst)
-        {
-                return RetrieveBinarySafe(dst, sizeof(T));
-        }
-
-        [[gnu::always_inline]] inline void Unserialize(void *const p, const uint32_t size)
+        inline void Unserialize(void *const p, const uint32_t size)
         {
                 memcpy(p, buffer + position, size);
                 position += size;
         }
 
-        [[gnu::always_inline]] inline bool UnserializeSafe(void *const p, const uint32_t size)
-        {
-                memcpy(p, buffer + position, size);
-                position += size;
-
-                return true;
-        }
-
-        inline uint32_t ToEndSpanLen() const
+        inline auto offset_end_span() const noexcept
         {
                 return length_ - position;
         }
 
-        inline strwlen32_t SuffixFromOffset() const
+        inline strwlen32_t suffix_from_offset() const noexcept
         {
-                return {buffer + position, length_ - position};
+                return {buffer + position, length_ - position, strwlen32_t::NoMaxLenCheck{}};
+        }
+
+        // http://en.wikipedia.org/wiki/Variadic_template
+        // http://en.cppreference.com/w/cpp/language/parameter_pack
+        // e.g
+        // b->pack(10, var, var2...)
+        auto &pack()
+        {
+                return *this;
+        }
+
+        void unpack()
+        {
+        }
+
+        template <typename T, typename... Args>
+        auto &pack(const T v, Args &&... args)
+        {
+                Serialize(v);
+                pack(std::forward<Args>(args)...);
+                return *this;
+        }
+
+        template <typename T, typename... Args>
+        void unpack(T &v, Args &... args)
+        {
+                Unserialize(&v);
+                unpack(args...);
+        }
+
+        [[gnu::always_inline]] inline bool IsAtEnd() const
+        {
+                return position == length_;
+        }
+
+        void reset()
+        {
+                Buffer::reset();
+                position = 0;
         }
 };
 
 template <typename VT, typename LT>
 static inline void PrintImpl(Buffer &out, const range_base<VT, LT> &r)
 {
-	out.AppendFmt("[%" PRIu64 ", %" PRIu64 ")", uint64_t(r.Left()), uint64_t(r.Right()));
+        out.AppendFmt("[%" PRIu64 ", %" PRIu64 ")", uint64_t(r.start()), uint64_t(r.stop()));
 }
 
 struct _srcline_repr
@@ -1341,7 +1742,6 @@ static inline void PrintImpl(Buffer &out, const _srcline_repr &r)
 {
         out.AppendFmt("<%s:%u %s>", r.file, r.line, r.func);
 }
-
 
 struct duration_repr
 {
@@ -1402,6 +1802,42 @@ struct duration_repr
                 return {out, len};
         }
 };
+
+void Buffer::AppendFmt(const char *fmt, ...)
+{
+        WillUpdate();
+
+        va_list args;
+        const int32_t capacity = this->capacity();
+
+        (void)va_start(args, fmt);
+        const auto len = vsnprintf(buffer + length_, capacity, fmt, args);
+
+        if (unlikely(len < 0))
+        {
+                (void)va_end(args);
+                return;
+        }
+        else if (len >= capacity)
+        {
+                reserve(len + 1);
+
+                va_end(args);
+                va_start(args, fmt);
+
+                const auto r = vsnprintf(buffer + length_, len + 1, fmt, args);
+
+                if (unlikely(r < 0))
+                {
+                        va_end(args);
+                        return;
+                }
+        }
+        va_end(args);
+
+        length_ += len;
+        buffer[length_] = '\0';
+}
 
 static inline void PrintImpl(Buffer &out, const duration_repr &r)
 {

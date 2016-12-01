@@ -92,13 +92,6 @@ struct simple_allocator
                 curBankUtilization_ = bankSize();
         }
 
-        // Using a mmmap backed allocator is a _great_ way to deal with memory utilizatiomm issues.
-        // Whenever stdlib (or any other allocator) allocates memmory, it ends up reserving a VMA via mmap, and then provides from that area
-        // to callee, until its freed. While 1+ chunks from the same VMA are not freed(pending allocations from that VMA), the allocator cannot munmap() the
-        // VMA, so it's very possible that if you e.g allocate many small chunks, then a big one, then some other one etc, even if only one chunk is allocated
-        // from a VMA, it never gets dropped so RES goes up.
-        // Using this mmmap backed custom allocator helps, because when we are done, we just munmap() that one VMA and we are done.
-        // e.g simple_allocator(size, simple_allocator::BackingStore{})
         simple_allocator(const uint32_t bc, const enum BackingStore)
             : bankCapacity_(buildBankCapacity(RoundToMultiple(bc, getpagesize()), true))
         {
@@ -109,10 +102,6 @@ struct simple_allocator
         {
                 _FlushBanks();
         }
-
-	simple_allocator(const simple_allocator&) = delete;
-	simple_allocator &operator=(const simple_allocator &) = delete;
-	simple_allocator &operator=(simple_allocator&&) = delete;
 
         inline bool canFitInCurBank(const uint32_t size) const // for debugging
         {
@@ -140,20 +129,15 @@ struct simple_allocator
 
         void allocNewBank_(const uint32_t bs)
         {
-
                 if (cur_ == last_)
                 {
                         int8_t *newBank;
 
                         if (bankCapacity_ & (1u << 31))
                         {
-
                                 newBank = (int8_t *)mmap(nullptr, bs, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
-                                if (unlikely(newBank == MAP_FAILED))
-					throw std::system_error({}, "mmap() failed");
-                                else
-                                {
+				require(newBank != MAP_FAILED);
 #ifdef MADV_NOHUGEPAGE
                                         // This is important, read:
                                         // Via @mattsta: https://twitter.com/mattsta/status/529327782351097856
@@ -175,7 +159,6 @@ struct simple_allocator
                                         // > This is not a behavior you want to see from a database server.
                                         madvise(newBank, bs, MADV_NOHUGEPAGE);
 #endif
-                                }
                         }
                         else
                         {
@@ -188,8 +171,7 @@ struct simple_allocator
                                         newBank = nullptr;
                                 }
 
-                                if (unlikely(!newBank))
-					throw std::system_error({}, "Unable to allocate memory");
+				assert(newBank);
 
                                 // We can't use capacity = malloc_usable_size(curBank) here, because we won't always get the same
                                 // usable size for each bank allocated (no guarantees, may be more or less). So, unless we keep
@@ -221,8 +203,7 @@ struct simple_allocator
                 curBankUtilization_ += size;
                 if (unlikely(curBankUtilization_ > bs))
                 {
-                        if (unlikely(size > bankCapacity()))
-				throw std::range_error("Requested more bytes than bank's capacity");
+			require(size <= bankCapacity());
 
                         // it is important that we do not inline allocNewBank_() code here
                         // in order to reduce ICache miss rate -- because we almost never need to execute that code
@@ -245,8 +226,7 @@ struct simple_allocator
 
                 if (unlikely(curBankUtilization_ + size > bs))
                 {
-                        if (unlikely(size > bankCapacity()))
-				throw std::range_error("Requested more bytes than bank's capacity");
+			require(size <= bankCapacity());
 
                         lock.lock();
 
@@ -273,7 +253,7 @@ struct simple_allocator
                 }
         }
 
-        inline void Reuse()
+        inline void reuse()
         {
                 if (first_)
                 {
@@ -286,6 +266,7 @@ struct simple_allocator
                         curBankUtilization_ = bankSize();
                 }
         }
+
 
         void _FlushBanks()
         {
@@ -316,15 +297,7 @@ struct simple_allocator
                 first_ = last_ = cur_ = nullptr;
         }
 
-        void Clean()
-        {
-                _FlushBanks();
-
-                curBankUtilization_ = bankSize();
-                cur_ = first_ = last_ = nullptr;
-        }
-
-        void Reset()
+        void reset()
         {
                 _FlushBanks();
 
@@ -351,6 +324,12 @@ struct simple_allocator
                 memcpy(res, v, n * sizeof(T));
                 return res;
         }
+
+	template <typename LT, typename CT = char>
+	CT *CopyOf(const strwithlen<LT, CT> &s)
+	{
+		return CopyOf(s.p, s.len);
+	}
 
         template <typename T>
         T *CopyOf(const T *const v)
@@ -388,7 +367,6 @@ struct simple_allocator
                 return new (allocWithLock(sizeof(T), lock)) T(std::forward<Args>(args)...);
         }
 
-        // http://en.cppreference.com/w/cpp/memory/allocator/destroy
         template <typename T>
         inline void destroy(T *const ptr)
         {

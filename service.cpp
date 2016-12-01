@@ -618,7 +618,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         return a.key.Cmp(b.key) < 0;
                 });
 
-                auto *out = msgs.values();
+                auto *out = msgs.data();
 
                 for (const auto *it = out, *const e = it + msgs.size(); it != e;)
                 {
@@ -770,12 +770,12 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                         pool.push_back(std::move(owner));
                                 }
 
-                                const auto len = cur->length();
+                                const auto len = cur->size();
 
                                 if (!Compression::UnCompress(Compression::Algo::SNAPPY, p, nextBundle - p, cur))
                                         throw Switch::system_error("failed to decompress message set");
 
-                                msgSetContent.Set(reinterpret_cast<const uint8_t *>(cur->at(len)), cur->length() - len);
+                                msgSetContent.Set(reinterpret_cast<const uint8_t *>(cur->at(len)), cur->size() - len);
                         }
                         else
                         {
@@ -842,7 +842,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                 }
                                 else
                                 {
-                                        key.Unset();
+                                        key.reset();
                                 }
 
                                 const auto msgLen = Compression::UnpackUInt32(p);
@@ -1049,7 +1049,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                 }
 
                                 const uint32_t msgSetSize = i - base;
-                                const auto bundleHeaderFlagsOffset = out.length();
+                                const auto bundleHeaderFlagsOffset = out.size();
                                 const auto bundleLengthIOVIdx = iovLen++;
 
                                 out.reserve(sum + 1024);
@@ -1094,9 +1094,9 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                 }
 
                                 const auto savedOutFileSize = outFileSize;
-                                const auto bundleHeaderLength = out.length() - bundleHeaderFlagsOffset;
+                                const auto bundleHeaderLength = out.size() - bundleHeaderFlagsOffset;
                                 uint64_t lastTS{0};
-                                const auto msgSetOffset = out.length();
+                                const auto msgSetOffset = out.size();
 
                                 sinceLastUpdateMsgsCnt += msgSetSize;
                                 outFileSize += bundleHeaderLength;
@@ -1165,19 +1165,19 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                         out.Serialize(m.content.p, m.content.len);
                                 }
 
-                                const auto msgSetLen = out.length() - msgSetOffset;
+                                const auto msgSetLen = out.size() - msgSetOffset;
 
                                 if (trace)
                                         SLog("msgSetLen = ", msgSetLen, ", bundleFlags = ", bundleFlags, "\n");
 
                                 if (msgSetLen > 1024) // XXX: arbitrary
                                 {
-                                        const auto offset = cbuf.length();
+                                        const auto offset = cbuf.size();
 
                                         if (!Compression::Compress(Compression::Algo::SNAPPY, out.At(msgSetOffset), msgSetLen, &cbuf))
                                                 throw Switch::system_error("Compression failed");
 
-                                        const auto span = cbuf.length() - offset;
+                                        const auto span = cbuf.size() - offset;
 
                                         if (span >= msgSetLen)
                                         {
@@ -1185,13 +1185,13 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                                 if (trace)
                                                         SLog("Not worth compressing bundle msgs set\n");
 
-                                                cbuf.SetLength(offset);
+                                                cbuf.resize(offset);
                                                 goto l10;
                                         }
                                         else
                                         {
                                                 iov[iovLen++] = {(void *)uintptr_t(offset | (1u << 30)), span};
-                                                out.SetLength(msgSetOffset);
+                                                out.resize(msgSetOffset);
 
                                                 *(uint8_t *)out.At(bundleHeaderFlagsOffset) |= 1; // set codec
                                                 outFileSize += span;
@@ -1208,10 +1208,10 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                 }
 
                                 const auto bundleLength = outFileSize - savedOutFileSize;
-                                const auto _l = out.length();
+                                const auto _l = out.size();
 
                                 out.SerializeVarUInt32(bundleLength);
-                                const auto bundleLengthReprLen = out.length() - _l;
+                                const auto bundleLengthReprLen = out.size() - _l;
                                 iov[bundleLengthIOVIdx] = {(void *)uintptr_t(_l | (1u << 31)), bundleLengthReprLen};
 
                                 outFileSize += bundleLengthReprLen;
@@ -1260,7 +1260,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                 throw Switch::system_error("Failed to access new segment's index:", strerror(errno));
                         }
 
-                        if (write(fd, index.data(), index.length()) != index.length())
+                        if (write(fd, index.data(), index.size()) != index.size())
                         {
                                 close(logFd);
                                 close(fd);
@@ -1282,8 +1282,8 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         require(newSegment->fdh.use_count() == 2);
                         newSegment->fdh->Release();
                         newSegment->fileSize = outFileSize;
-                        newSegment->index.data = reinterpret_cast<const uint8_t *>(mmap(nullptr, index.length(), PROT_READ, MAP_SHARED, fd, 0));
-                        newSegment->index.fileSize = index.length();
+                        newSegment->index.data = reinterpret_cast<const uint8_t *>(mmap(nullptr, index.size(), PROT_READ, MAP_SHARED, fd, 0));
+                        newSegment->index.fileSize = index.size();
                         newSegment->index.lastRecorded = indexLastRecorded;
 
                         if (trace)
@@ -1702,7 +1702,7 @@ void topic_partition_log::consider_ro_segments()
                         basePath.append(basePath_, "/", partition->owner->name(), "/", partition->idx, "/");
 
                         auto segment = roSegments->front();
-                        const auto basePathLen = basePath.length();
+                        const auto basePathLen = basePath.size();
 
                         if (trace)
                                 SLog(ansifmt::bold, ansifmt::color_red, "Removing ", segment->baseSeqNum, ansifmt::reset, "\n");
@@ -1713,14 +1713,14 @@ void topic_partition_log::consider_ro_segments()
                         else if (trace)
                                 SLog("Removed ", basePath, "\n");
 
-                        basePath.SetLength(basePathLen);
+                        basePath.resize(basePathLen);
                         basePath.append("/", segment->baseSeqNum, ".index");
                         if (Unlink(basePath.data()) == -1)
                                 Print("Failed to unlink ", basePath, ": ", strerror(errno), "\n");
                         else if (trace)
                                 SLog("Removed ", basePath, "\n");
 
-                        basePath.SetLength(basePathLen);
+                        basePath.resize(basePathLen);
 
                         segment->fdh.reset(nullptr);
 
@@ -1860,7 +1860,7 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
 
                 basePath.append(basePath_, "/", partition->owner->name(), "/", partition->idx, "/");
 
-                const auto basePathLen = basePath.length();
+                const auto basePathLen = basePath.size();
 
                 if (trace)
                         SLog("Need to switch to another commit log (", cur.fileSize, "> ", config.maxSegmentSize, ") ", cur.index.skipList.size(), "\n");
@@ -1976,10 +1976,10 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 if (cur.fdh->fd == -1)
                         throw Switch::system_error("open(", basePath, ") failed:", strerror(errno), ". Cannot load segment log");
 
-                basePath.SetLength(basePathLen);
+                basePath.resize(basePathLen);
                 basePath.append(cur.baseSeqNum, ".index");
                 cur.index.fd = open(basePath.data(), O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND, 0775);
-                basePath.SetLength(basePathLen);
+                basePath.resize(basePathLen);
 
                 if (cur.index.fd == -1)
                         throw Switch::system_error("open(", basePath, ") failed:", strerror(errno), ". Cannot load segment index");
@@ -2545,11 +2545,11 @@ void Service::rebuild_index(int logFd, int indexFd)
         }
 
         if (trace)
-                SLog("Rebuilt index ", size_repr(b.length()), ", last ", relSeqNum, ", ", b.length(), "\n");
+                SLog("Rebuilt index ", size_repr(b.size()), ", last ", relSeqNum, ", ", b.size(), "\n");
 
-        if (pwrite64(indexFd, b.data(), b.length(), 0) != b.length())
+        if (pwrite64(indexFd, b.data(), b.size(), 0) != b.size())
                 throw Switch::system_error("Failed to store index:", strerror(errno));
-        if (ftruncate(indexFd, b.length()))
+        if (ftruncate(indexFd, b.size()))
                 throw Switch::system_error("Failed to truncate index file:", strerror(errno));
 
         fdatasync(indexFd);
@@ -2677,7 +2677,7 @@ uint32_t Service::verify_log(int fd)
                         cb.clear();
                         if (!Compression::UnCompress(Compression::Algo::SNAPPY, p, nextBundle - p, &cb))
                                 throw Switch::system_error("Failed to decompress content");
-                        msgSetContent.Set((uint8_t *)cb.data(), cb.length());
+                        msgSetContent.Set((uint8_t *)cb.data(), cb.size());
                 }
                 else
                         msgSetContent.Set(p, nextBundle - p);
@@ -2720,7 +2720,7 @@ uint32_t Service::verify_log(int fd)
                                 p += key.len + sizeof(uint8_t);
                         }
                         else
-                                key.Unset();
+                                key.reset();
 
                         const auto msgLen = Compression::UnpackUInt32(p);
 
@@ -2772,7 +2772,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                 std::set<uint64_t> wideEntyRoLogIndices;
                 simple_allocator allocator{1024};
                 std::vector<strwlen32_t> swapped;
-                auto partition = Switch::make_sharedref(new topic_partition());
+		auto partition = Switch::make_sharedref<topic_partition>();
                 uint64_t curLogSeqNum{0};
                 uint32_t curLogCreateTS{0};
                 const strwlen32_t b(basePath, basePathLen);
@@ -3289,13 +3289,13 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                         SLog(ansifmt::bold, ansifmt::color_magenta, "New COSNUME request for topicsCnt = ", topicsCnt, ansifmt::reset, "\n");
 
                 respHeader->Serialize(uint8_t(TankAPIMsgType::Consume));
-                const auto sizeOffset = respHeader->length();
-                respHeader->MakeSpace(sizeof(uint32_t));
+                const auto sizeOffset = respHeader->size();
+                respHeader->RoomFor(sizeof(uint32_t));
 
                 // This is an optimization for the client
                 // we 'll store the response length header
-                const auto headerSizeOffset = respHeader->length();
-                respHeader->MakeSpace(sizeof(uint32_t));
+                const auto headerSizeOffset = respHeader->size();
+                respHeader->RoomFor(sizeof(uint32_t));
                 respHeader->Serialize(requestId);
                 respHeader->Serialize(topicsCnt);
 
@@ -3370,7 +3370,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                 if (absSeqNum == UINT64_MAX)
                                 {
                                         // Fetch starting from whatever bundles are commited from now on
-                                        const auto l = respHeader->length();
+                                        const auto l = respHeader->size();
 
                                         patchList[patchListSize++].SetEnd(l);
                                         patchIndices[deferList.size()] = patchListSize++;
@@ -3392,7 +3392,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                                 case lookup_res::Fault::NoFault:
                                                         firstBundleIsSparse = adjust_range_start(res, absSeqNum);
                                                         range.Set(res.fileOffset, fetchSize);
-                                                        if (range.End() > res.fileOffsetCeiling)
+                                                        if (range.stop() > res.fileOffsetCeiling)
                                                                 range.SetEnd(res.fileOffsetCeiling);
 
                                                         if (trace)
@@ -3458,7 +3458,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                                         if (trace)
                                                                 SLog("Got AtEOF; will wait\n");
 
-                                                        const auto l = respHeader->length();
+                                                        const auto l = respHeader->size();
 
                                                         patchList[patchListSize++].SetEnd(l);
                                                         patchIndices[deferList.size()] = patchListSize++;
@@ -3507,12 +3507,12 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                         if (trace)
                                 SLog("Responding now, n = ", deferList.size(), "\n");
 
-                        patchList[patchListSize++].SetEnd(respHeader->length());
+                        patchList[patchListSize++].SetEnd(respHeader->size());
 
                         for (uint32_t i{0}; i != n; ++i)
                         {
                                 const auto idx = patchIndices[i];
-                                const auto o = respHeader->length();
+                                const auto o = respHeader->size();
                                 auto p = deferList[i];
                                 auto log = p->log_.get();
 
@@ -3521,14 +3521,14 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                 respHeader->Serialize(p->highwater_mark());
                                 respHeader->Serialize(uint32_t(0));
 
-                                patchList[idx] = {o, respHeader->length() - o};
+                                patchList[idx] = {o, respHeader->size() - o};
                         }
 
-                        *(uint32_t *)respHeader->At(sizeOffset) = respHeader->length() - sizeOffset - sizeof(uint32_t) + sum + extra;
-                        *(uint32_t *)respHeader->At(headerSizeOffset) = respHeader->length() - headerSizeOffset - sizeof(uint32_t) + extra;
+                        *(uint32_t *)respHeader->At(sizeOffset) = respHeader->size() - sizeOffset - sizeof(uint32_t) + sum + extra;
+                        *(uint32_t *)respHeader->At(headerSizeOffset) = respHeader->size() - headerSizeOffset - sizeof(uint32_t) + extra;
 
                         if (trace)
-                                SLog("respHeader.length = ", respHeader->length(), " ", *(uint32_t *)respHeader->At(sizeOffset), "\n");
+                                SLog("respHeader.length = ", respHeader->size(), " ", *(uint32_t *)respHeader->At(sizeOffset), "\n");
 
                         headerPayload->set_iov(patchList, patchListSize);
 
@@ -3566,7 +3566,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                 c->outQ = nullptr;
                         }
 
-                        return register_consumer_wait(c, requestId, maxWait, minBytes, deferList.values(), deferList.size());
+                        return register_consumer_wait(c, requestId, maxWait, minBytes, deferList.data(), deferList.size());
                 }
         }
         catch (const std::exception &e)
@@ -3588,6 +3588,7 @@ bool Service::register_consumer_wait(connection *const c, const uint32_t request
         switch_dlist_init(&ctx->list);
         switch_dlist_init(&ctx->expList);
         ctx->requestId = requestId;
+	ctx->scheduledForDtor = false;
         ctx->c = c;
         ctx->partitionsCnt = totalPartitions;
         ctx->minBytes = minBytes;
@@ -3614,7 +3615,7 @@ bool Service::register_consumer_wait(connection *const c, const uint32_t request
 
                 out->partition = p;
                 out->fdh = nullptr;
-                out->range.Unset();
+                out->range.reset();
                 out->seqNum = 0;
         }
 
@@ -3652,9 +3653,9 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
                 q = c->outQ = get_outgoing_queue();
 
         resp->Serialize(uint8_t(TankAPIMsgType::CreateTopic));
-        const auto sizeOffset = resp->length();
+        const auto sizeOffset = resp->size();
 
-        resp->MakeSpace(sizeof(uint32_t));
+        resp->RoomFor(sizeof(uint32_t));
 
         resp->Serialize(requestId);
         resp->Serialize(topicName.len);
@@ -3724,7 +3725,9 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
                                                 close(fd);
                                 }
 
-                                auto t = Switch::make_sharedref(new struct topic(topicName, partitionConfig));
+				auto t = Switch::make_sharedref<topic>(topicName, partitionConfig);
+
+				require(t->use_count() == 1);
 
                                 t->register_partitions(list.data(), list.size());
 
@@ -3745,12 +3748,12 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
         }
 
 l1:
-        *(uint32_t *)resp->At(sizeOffset) = resp->length() - sizeOffset - sizeof(uint32_t);
+        *(uint32_t *)resp->At(sizeOffset) = resp->size() - sizeOffset - sizeof(uint32_t);
 
         auto payload = q->push_back(resp);
 
         payload->iovCnt = 1;
-        payload->iov[0] = {(void *)resp->data(), resp->length()};
+        payload->iov[0] = {(void *)resp->data(), resp->size()};
 
         return try_send_ifnot_blocked(c);
 }
@@ -3777,9 +3780,9 @@ bool Service::process_discover_partitions(connection *const c, const uint8_t *p,
                 q = c->outQ = get_outgoing_queue();
 
         resp->Serialize(uint8_t(TankAPIMsgType::DiscoverPartitions));
-        const auto sizeOffset = resp->length();
+        const auto sizeOffset = resp->size();
 
-        resp->MakeSpace(sizeof(uint32_t));
+        resp->RoomFor(sizeof(uint32_t));
         resp->Serialize(requestId);
 
         auto topic = topic_by_name(topicName);
@@ -3805,12 +3808,12 @@ bool Service::process_discover_partitions(connection *const c, const uint8_t *p,
                 }
         }
 
-        *(uint32_t *)resp->At(sizeOffset) = resp->length() - sizeOffset - sizeof(uint32_t);
+        *(uint32_t *)resp->At(sizeOffset) = resp->size() - sizeOffset - sizeof(uint32_t);
 
         auto payload = q->push_back(resp);
 
         payload->iovCnt = 1;
-        payload->iov[0] = {(void *)resp->data(), resp->length()};
+        payload->iov[0] = {(void *)resp->data(), resp->size()};
 
         return try_send_ifnot_blocked(c);
 }
@@ -3856,11 +3859,11 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
         strwlen8_t topicName;
         strwlen32_t msgContent;
 
-        Drequire(!respHeader->length());
+        Drequire(!respHeader->size());
 
         respHeader->Serialize(uint8_t(TankAPIMsgType::Produce));
-        const auto sizeOffset = respHeader->length();
-        respHeader->MakeSpace(sizeof(uint32_t));
+        const auto sizeOffset = respHeader->size();
+        respHeader->RoomFor(sizeof(uint32_t));
 
         (void)clientVersion;
         (void)requiredAcks;
@@ -4029,7 +4032,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 
                                         decompressionBuf.clear();
                                         Compression::UnCompress(Compression::Algo::SNAPPY, p, e - p, &decompressionBuf);
-                                        msgSetContent.Set(reinterpret_cast<const uint8_t *>(decompressionBuf.data()), decompressionBuf.length());
+                                        msgSetContent.Set(reinterpret_cast<const uint8_t *>(decompressionBuf.data()), decompressionBuf.size());
                                 }
                                 else
                                         msgSetContent.Set(p, e - p);
@@ -4109,7 +4112,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                                                         SLog("have key\n");
                                         }
                                         else
-                                                key.Unset();
+                                                key.reset();
 
                                         const auto msgLen = Compression::UnpackUInt32(p);
 
@@ -4145,7 +4148,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                         // 2. use TankClient::produce_with_base() for mirroring
                         // 3. Expect that everything will work out otherwise if you are just building Tank apps.
                         const auto b = Timings::Microseconds::Tick();
-                        const auto res = partition->append_bundle_to_leader(bundle, bundleLen, msgSetSize, expiredCtxList, firstMsgSeqNum, lastMsgSeqNum);
+                        const auto res = partition->append_bundle_to_leader(bundle, bundleLen, msgSetSize, expiredCtxList3, firstMsgSeqNum, lastMsgSeqNum);
 
                         if (unlikely(!res.fdh))
                         {
@@ -4167,15 +4170,15 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                         }
 
                         if (trace)
-                                SLog("Took ", duration_repr(Timings::Microseconds::Since(b)), " for ", msgSetSize, " msgs in bundle message set: ", expiredCtxList.size(), " ", res.fdh ? res.fdh->use_count() : 0, "\n");
+                                SLog("Took ", duration_repr(Timings::Microseconds::Since(b)), " for ", msgSetSize, " msgs in bundle message set: ", expiredCtxList3.size(), " ", res.fdh ? res.fdh->use_count() : 0, "\n");
 
 #ifdef LEAN_SWITCH
                         (void)b;
 #endif
 
-                        while (expiredCtxList.size())
+                        while (expiredCtxList3.size())
                         {
-                                auto ctx = expiredCtxList.Pop();
+                                auto ctx = expiredCtxList3.Pop();
 
                                 wakeup_wait_ctx(ctx, res, c);
                         }
@@ -4183,10 +4186,10 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                         p = e; // to next partition
                 }
         }
-        *(uint32_t *)respHeader->At(sizeOffset) = respHeader->length() - sizeOffset - sizeof(uint32_t);
+        *(uint32_t *)respHeader->At(sizeOffset) = respHeader->size() - sizeOffset - sizeof(uint32_t);
 
         payload->iovCnt = 1;
-        payload->iov[0] = {(void *)respHeader->data(), respHeader->length()};
+        payload->iov[0] = {(void *)respHeader->data(), respHeader->size()};
 
         if (trace)
         {
@@ -4245,13 +4248,13 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes,
         auto payload = q->push_back(respHeader);
 
         respHeader->Serialize(uint8_t(2));
-        const auto sizeOffset = respHeader->length();
-        respHeader->MakeSpace(sizeof(uint32_t));
-        const auto headerSizeOffset = respHeader->length();
-        respHeader->MakeSpace(sizeof(uint32_t));
+        const auto sizeOffset = respHeader->size();
+        respHeader->RoomFor(sizeof(uint32_t));
+        const auto headerSizeOffset = respHeader->size();
+        respHeader->RoomFor(sizeof(uint32_t));
         respHeader->Serialize(wctx->requestId);
-        const auto topicsCntOffset = respHeader->length();
-        respHeader->MakeSpace(sizeof(uint8_t));
+        const auto topicsCntOffset = respHeader->size();
+        respHeader->RoomFor(sizeof(uint8_t));
 
         for (uint32_t i{0}; i != wctx->partitionsCnt;)
         {
@@ -4268,8 +4271,8 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes,
                 if (trace)
                         SLog("Topic [", topicName, "]\n");
 
-                const auto partitionsCntOffset = respHeader->length();
-                respHeader->MakeSpace(sizeof(uint8_t));
+                const auto partitionsCntOffset = respHeader->size();
+                respHeader->RoomFor(sizeof(uint8_t));
 
                 do
                 {
@@ -4313,13 +4316,13 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes,
         }
 
         *(uint8_t *)respHeader->At(topicsCntOffset) = topicsCnt;
-        *(uint32_t *)respHeader->At(sizeOffset) = respHeader->length() - sizeOffset - sizeof(uint32_t) + sum;
-        *(uint32_t *)respHeader->At(headerSizeOffset) = respHeader->length() - headerSizeOffset - sizeof(uint32_t);
+        *(uint32_t *)respHeader->At(sizeOffset) = respHeader->size() - sizeOffset - sizeof(uint32_t) + sum;
+        *(uint32_t *)respHeader->At(headerSizeOffset) = respHeader->size() - headerSizeOffset - sizeof(uint32_t);
 
         destroy_wait_ctx(wctx);
 
         payload->iovCnt = 1;
-        payload->iov[0] = {static_cast<void *>(respHeader->data()), respHeader->length()};
+        payload->iov[0] = {static_cast<void *>(respHeader->data()), respHeader->size()};
 
         if (c != produceConnection)
         {
@@ -4330,6 +4333,9 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes,
 
 void Service::abort_wait_ctx(wait_ctx *const wctx)
 {
+	if (wctx->scheduledForDtor)
+		return;
+
         auto respHeader = get_buffer();
         uint8_t topicsCnt{0};
         auto c = wctx->c;
@@ -4338,13 +4344,13 @@ void Service::abort_wait_ctx(wait_ctx *const wctx)
                 SLog("Aborting wait ctx ", ptr_repr(wctx), ", ", wctx->requestId, "\n");
 
         respHeader->Serialize(uint8_t(2));
-        const auto sizeOffset = respHeader->length();
-        respHeader->MakeSpace(sizeof(uint32_t));
-        const auto headerSizeOffset = respHeader->length();
-        respHeader->MakeSpace(sizeof(uint32_t));
+        const auto sizeOffset = respHeader->size();
+        respHeader->RoomFor(sizeof(uint32_t));
+        const auto headerSizeOffset = respHeader->size();
+        respHeader->RoomFor(sizeof(uint32_t));
         respHeader->Serialize(wctx->requestId);
-        const auto topicsCntOffset = respHeader->length();
-        respHeader->MakeSpace(sizeof(uint8_t));
+        const auto topicsCntOffset = respHeader->size();
+        respHeader->RoomFor(sizeof(uint8_t));
 
         for (uint32_t i{0}; i != wctx->partitionsCnt;)
         {
@@ -4361,8 +4367,8 @@ void Service::abort_wait_ctx(wait_ctx *const wctx)
                 if (trace)
                         SLog("Topic [", topicName, "]\n");
 
-                const auto partitionsCntOffset = respHeader->length();
-                respHeader->MakeSpace(sizeof(uint8_t));
+                const auto partitionsCntOffset = respHeader->size();
+                respHeader->RoomFor(sizeof(uint8_t));
 
                 do
                 {
@@ -4387,8 +4393,8 @@ void Service::abort_wait_ctx(wait_ctx *const wctx)
         }
 
         *(uint8_t *)respHeader->At(topicsCntOffset) = topicsCnt;
-        *(uint32_t *)respHeader->At(sizeOffset) = respHeader->length() - sizeOffset - sizeof(uint32_t);
-        *(uint32_t *)respHeader->At(headerSizeOffset) = respHeader->length() - headerSizeOffset - sizeof(uint32_t);
+        *(uint32_t *)respHeader->At(sizeOffset) = respHeader->size() - sizeOffset - sizeof(uint32_t);
+        *(uint32_t *)respHeader->At(headerSizeOffset) = respHeader->size() - headerSizeOffset - sizeof(uint32_t);
 
         auto q = c->outQ;
 
@@ -4398,7 +4404,20 @@ void Service::abort_wait_ctx(wait_ctx *const wctx)
         auto payload = q->push_back(respHeader);
 
         payload->iovCnt = 1;
-        payload->iov[0] = {static_cast<void *>(respHeader->data()), respHeader->length()};
+        payload->iov[0] = {static_cast<void *>(respHeader->data()), respHeader->size()};
+
+	// XXX: hypotethetical scenario where this could fail
+	// 1. client sets wait time for consume request e.g 10ms
+	// 2. tank accepts the connection, sets NeedOutAvail and add with (POLLIN|POLLOUT)
+	// 3. tank reads the request, processes it, and because there is no content available
+	// 	register_consumer_wait() to be fired in about 10ms
+	// 4. (nowMS > nextExpWaitCtxCheck) is true, and wait context is now aborted
+	//  but this try_send_ifnot_blocked() won't schedule data immediately
+	// because NeedOutAvail is still set, because POLLOUT hasn't yet become available.
+	//
+	// If for some reason we don't get POLLOUT, and thus, invoke try_send()
+	// then we 'll never get to respond to the client
+
 
         destroy_wait_ctx(wctx);
         try_send_ifnot_blocked(c);
@@ -4406,6 +4425,9 @@ void Service::abort_wait_ctx(wait_ctx *const wctx)
 
 void Service::destroy_wait_ctx(wait_ctx *const wctx)
 {
+	if (wctx->scheduledForDtor)
+		return;
+
         switch_dlist_del(&wctx->list);
 
         if (trace)
@@ -4430,8 +4452,10 @@ void Service::destroy_wait_ctx(wait_ctx *const wctx)
 
         if (switch_dlist_any(&wctx->expList))
                 switch_dlist_del(&wctx->expList);
-
-        put_waitctx(wctx);
+	
+	// Defer put_waitctx() until the next iteration
+	wctx->scheduledForDtor = true;
+	waitCtxDeferredGC.push_back(wctx);
 }
 
 void Service::cleanup_connection(connection *const c)
@@ -4440,6 +4464,7 @@ void Service::cleanup_connection(connection *const c)
         close(c->fd);
         c->fd = -1;
 
+	// For simplicity, place in a vector and drain it instead
         expiredCtxList.clear();
         for (auto it = c->waitCtxList.next; it != &c->waitCtxList; it = it->next)
                 expiredCtxList.push_back(switch_list_entry(wait_ctx, list, it));
@@ -5078,7 +5103,7 @@ int Service::start(int argc, char **argv)
                 return 1;
         }
 
-        if (!basePath_.length())
+        if (!basePath_.size())
         {
                 Print("Base path not specified. Use -p path to specify it\n");
                 return 1;
@@ -5099,7 +5124,7 @@ int Service::start(int argc, char **argv)
                 {
                         // We will parallelize this across multiple threads so that we can support many thousands of topics and partitions
                         // without incurring a long startup-sequence time
-                        const auto basePathLen = basePath_.length();
+                        const auto basePathLen = basePath_.size();
                         std::vector<std::pair<topic *, size_t>> pendingPartitions;
                         uint64_t before;
                         simple_allocator a{8192};
@@ -5216,7 +5241,9 @@ int Service::start(int argc, char **argv)
                                                         if (min != 0 && max != partitionsCnt - 1)
                                                                 throw Switch::system_error("Unexpected partitions list; expected [0, ", partitionsCnt - 1, "]");
 
-                                                        auto t = Switch::make_sharedref(new topic(name, partitionConfig));
+							auto t = Switch::make_sharedref<topic>(name, partitionConfig);
+
+							require(t->use_count() == 1);
 
                                                         collectLock.lock();
                                                         pendingPartitions.push_back({t.get(), partitionsCnt});
@@ -5232,7 +5259,7 @@ int Service::start(int argc, char **argv)
                         for (auto &it : futures)
                                 it.get();
 
-                        basePath_.SetLength(basePathLen);
+                        basePath_.resize(basePathLen);
 
                         if (trace)
                                 SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " for topics\n");
@@ -5349,7 +5376,7 @@ int Service::start(int argc, char **argv)
                 Print("No topics found in ", basePath_, ". You may want to create a few, like so:\n");
                 Print("mkdir -p ", basePath_, "/events/0 ", basePath_, "/orders/0 \n");
                 Print("This will create topics events and orders and define one partition with id 0 for each of them.\nRestart Tank after you have created a few topics/partitions\n");
-                Print("Or, you can just use tank-cli's \"create_topic\" command to create new topics instead\n");
+		Print(R"EOF(Or, you can use tank-cli's "create topic" command to create new topics instread)EOF", "\n");
         }
 
         listenFd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
@@ -5411,6 +5438,17 @@ int Service::start(int argc, char **argv)
         signal(SIGINT, sig_handler);
         while (likely(running))
         {
+		// Deferred , see waitCtxDeferredGC decl. comments
+		for (auto wctx : waitCtxDeferredGC)
+		{
+			require(wctx->scheduledForDtor);
+			if (trace)
+				SLog(ansifmt::bold, "Releasing deferred wctx ", ptr_repr(wctx), ansifmt::reset, "\n");
+			put_waitctx(wctx);
+		}
+		waitCtxDeferredGC.clear();
+
+
                 const auto r = poller.Poll(500);
 
                 if (r == -1)
@@ -5502,7 +5540,7 @@ int Service::start(int argc, char **argv)
                                 fd = open(Buffer::build(basePath_, "/.cleanup.log.int").data(), O_WRONLY | O_TRUNC | O_CREAT, 0775);
                                 if (fd == -1)
                                         Print("Failed to update cleanup log:", strerror(errno), "\n");
-                                else if (write(fd, b.data(), b.length()) != b.length())
+                                else if (write(fd, b.data(), b.size()) != b.size())
                                 {
                                         Print("Failed to update cleanup log:", strerror(errno), "\n");
                                         close(fd);
@@ -5600,7 +5638,7 @@ int Service::start(int argc, char **argv)
                                         return 1;
                                 }
                                 b->reserve(n);
-                                r = read(fd, b->End(), n);
+                                r = read(fd, b->end(), n);
 
                                 if (r == -1)
                                 {
@@ -5625,9 +5663,9 @@ int Service::start(int argc, char **argv)
                                         c->state.lastInputTS = Timings::Milliseconds::Tick();
                                 }
 
-                                for (const auto *e = (uint8_t *)b->End();;)
+                                for (const auto *e = (uint8_t *)b->end();;)
                                 {
-                                        const auto *p = (uint8_t *)b->AtOffset();
+                                        const auto *p = (uint8_t *)b->data_at_offset();
 
                                         if (e - p >= sizeof(uint8_t) + sizeof(uint32_t))
                                         {
@@ -5653,7 +5691,7 @@ int Service::start(int argc, char **argv)
                                                         b->reserve(msgLen);
 
                                                         p = (uint8_t *)b->At(o);
-                                                        e = (uint8_t *)b->End();
+                                                        e = (uint8_t *)b->end();
 
                                                         c->state.flags |= 1u << uint8_t(connection::State::Flags::ConsideredReqHeader);
                                                 }
@@ -5674,13 +5712,13 @@ int Service::start(int argc, char **argv)
                                                 if (p == e)
                                                 {
                                                         b->clear();
-                                                        Drequire(b->Offset() == 0);
+                                                        Drequire(b->offset() == 0);
                                                         c->inB = nullptr;
                                                         put_buffer(b);
                                                         break;
                                                 }
                                                 else
-                                                        b->SetOffset((char *)p);
+                                                        b->set_offset((char *)p);
                                         }
                                         else
                                                 break;
@@ -5688,9 +5726,9 @@ int Service::start(int argc, char **argv)
 
                                 if (auto b = c->inB)
                                 {
-                                        if (b->Offset() > 4 * 1024 * 1024)
+                                        if (b->offset() > 4 * 1024 * 1024)
                                         {
-                                                b->DeleteChunk(0, b->Offset());
+                                                b->DeleteChunk(0, b->offset());
                                                 b->SetOffset(uint64_t(0));
                                         }
                                 }
@@ -5712,29 +5750,40 @@ int Service::start(int argc, char **argv)
                         for (auto it = allConnections.next; it != &allConnections;)
                         {
                                 auto next = it->next;
-                                auto c = switch_list_entry(connection, connectionsList, it);
+                                [[maybe_unused]] auto c = switch_list_entry(connection, connectionsList, it);
 
-                                (void)c;
                                 it = next;
                         }
                 }
 
                 if (nowMS > nextExpWaitCtxCheck)
                 {
+			if (trace)
+				SLog("Considering waitExpList\n");
+
                         nextExpWaitCtxCheck = nowMS + 512;
 
+			expiredCtxList2.clear();
                         for (auto it = waitExpList.prev; it != &waitExpList; it = it->prev)
                         {
                                 auto ctx = switch_list_entry(wait_ctx, expList, it);
 
                                 if (nowMS > ctx->expiration)
-                                        expiredCtxList.push_back(ctx);
-                                else
-                                        break;
+				{
+                                        expiredCtxList2.push_back(ctx);
+					if (trace)
+						SLog("Will expire ", ptr_repr(ctx), "\n");
+				}
+
+				// In the past, we 'd break if nowMS <= ctx->expiration
+				// This assumption holds iff all expirations were for the same time
+				// but it often is not, so that leads to all kinds of problems.
+				//
+				// TODO: we need a timer wheel here
                         }
 
-                        while (expiredCtxList.size())
-                                abort_wait_ctx(expiredCtxList.Pop());
+                        while (expiredCtxList2.size())
+                                abort_wait_ctx(expiredCtxList2.Pop());
                 }
         }
 

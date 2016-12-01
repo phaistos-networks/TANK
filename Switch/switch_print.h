@@ -198,7 +198,7 @@ static void Print(const T &v, const Args&... args)
 	b.clear();
 	PrintImpl(b, v);
 	PrintImpl(b, args...);
-	const auto r = write(STDOUT_FILENO, b.data(), b.length());
+	const auto r = write(STDOUT_FILENO, b.data(), b.size());
 
 	(void)r; // (void)write triggers warning if  -Wunused-result is set
 		 // and write() is declared like so
@@ -255,7 +255,7 @@ static size_t Snprint(char *out, const size_t outLen, Args&&... args)
 	b.clear();
 	ToBuffer(b, std::forward<Args>(args)...);
 
-	const auto l = b.length();
+	const auto l = b.size();
 
 	b.AsS32().ToCString(out, outLen);
 	return l;

@@ -205,8 +205,8 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
         b.Serialize(uint8_t(0));  // required acks
         b.Serialize(uint32_t(0)); // ack timeout
 
-        const auto topicsCntOffset = b.length();
-        b.MakeSpace(sizeof(uint8_t));
+        const auto topicsCntOffset = b.size();
+        b.RoomFor(sizeof(uint8_t));
 
         for (uint32_t i{0}; i != cnt;)
         {
@@ -219,13 +219,13 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
                 b.Serialize(topic.len);
                 b.Serialize(topic.p, topic.len);
 
-                const auto partitionsCntOffset = b.length();
-                b.MakeSpace(sizeof(uint8_t));
+                const auto partitionsCntOffset = b.size();
+                b.RoomFor(sizeof(uint8_t));
 
                 produceCtx.Serialize(topic.len);
                 produceCtx.Serialize(topic.p, topic.len);
-                const auto produceCtxPartitionsCntOffset = produceCtx.length();
-                produceCtx.MakeSpace(sizeof(uint8_t));
+                const auto produceCtxPartitionsCntOffset = produceCtx.size();
+                produceCtx.RoomFor(sizeof(uint8_t));
 
                 if (trace)
                         SLog("For topic [", topic, "]\n");
@@ -239,7 +239,7 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
                         ++partitionsCnt;
                         b.Serialize<uint16_t>(it->partitionId);
 
-                        const auto bundleOffset = b.length();
+                        const auto bundleOffset = b.size();
                         ranges.push_back({base, bundleOffset - base});
 
 			if (baseSeqNum)
@@ -294,7 +294,7 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
 
                         produceCtx.Serialize<uint16_t>(it->partitionId);
 
-                        const auto msgSetOffset = b.length();
+                        const auto msgSetOffset = b.size();
                         uint64_t lastTS{0};
                         size_t required{0};
 
@@ -394,21 +394,21 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
 
                         if (!compressionCodec)
                         {
-                                const auto offset = b.length();
+                                const auto offset = b.size();
                                 const auto bundleSize = offset - bundleOffset;
                                 const range32_t r(bundleOffset, bundleSize);
 
                                 b.SerializeVarUInt32(bundleSize);
                                 b.Serialize<uint64_t>(it->baseSeqNum);
-                                base = b.length();
+                                base = b.size();
                                 ranges.push_back({offset, base - offset});
                                 ranges.push_back(r);
                         }
                         else
                         {
-                                const auto msgSetLen = b.length() - msgSetOffset, bundleHeaderLength = msgSetOffset - bundleOffset;
+                                const auto msgSetLen = b.size() - msgSetOffset, bundleHeaderLength = msgSetOffset - bundleOffset;
                                 auto &cmpBuf = b2;
-                                const auto o = cmpBuf.length();
+                                const auto o = cmpBuf.size();
                                 const uint64_t start = trace ? Timings::Microseconds::Tick() : 0;
 
                                 if (unlikely(!Compression::Compress(Compression::Algo::SNAPPY, b.At(msgSetOffset), msgSetLen, &cmpBuf)))
@@ -418,19 +418,19 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
                                 }
 
                                 if (trace)
-                                        SLog(size_repr(msgSetLen), " => ", size_repr(cmpBuf.length()), ", in ", duration_repr(Timings::Microseconds::Since(start)), "\n");
+                                        SLog(size_repr(msgSetLen), " => ", size_repr(cmpBuf.size()), ", in ", duration_repr(Timings::Microseconds::Since(start)), "\n");
 
-                                // TODO: if cmpBuf.length() > msgSetLen, don't use compressed content(not worth it) - also unset flags compression codec bits
+                                // TODO: if cmpBuf.size() > msgSetLen, don't use compressed content(not worth it) - also unset flags compression codec bits
 
-                                const auto compressedMsgSetLen = cmpBuf.length() - o;
+                                const auto compressedMsgSetLen = cmpBuf.size() - o;
 
-                                b.SetLength(msgSetOffset);
-                                const auto offset = b.length();
+                                b.resize(msgSetOffset);
+                                const auto offset = b.size();
                                 b.SerializeVarUInt32(compressedMsgSetLen + bundleHeaderLength);
                                 b.Serialize<uint64_t>(it->baseSeqNum);
 
-                                base = b.length();
-                                ranges.push_back({offset, b.length() - offset});         // (bundle length:varint + maybe startSeqNum:u64)
+                                base = b.size();
+                                ranges.push_back({offset, b.size() - offset});         // (bundle length:varint + maybe startSeqNum:u64)
                                 ranges.push_back({bundleOffset, bundleHeaderLength});    // bundle header
                                 ranges.push_back({o | (1u << 30), compressedMsgSetLen}); // compressed bundle messages set
                         }
@@ -442,15 +442,15 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
         }
         *(uint8_t *)b.At(topicsCntOffset) = topicsCnt;
 
-        const auto reqSize = b.length() + b2.length();
+        const auto reqSize = b.size() + b2.size();
 
         if (trace)
-                SLog("b.length = ", b.length(), ", b2.length = ", b2.length(), "\n");
+                SLog("b.length = ", b.size(), ", b2.length = ", b2.size(), "\n");
 
         require(payload->iovCnt + 1 + ranges.size() <= sizeof_array(payload->iov));
 
         b.reserve(sizeof(uint8_t) + sizeof(uint32_t));
-        payload->iov[payload->iovCnt++] = {b.End(), sizeof(uint8_t) + sizeof(uint32_t)};
+        payload->iov[payload->iovCnt++] = {b.end(), sizeof(uint8_t) + sizeof(uint32_t)};
         b.Serialize(uint8_t(TankAPIMsgType::ProduceWithBaseSeqNum)); 	// req.msgtype
         b.Serialize<uint32_t>(reqSize);        				// req.size
 
@@ -464,7 +464,7 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
                         payload->iov[payload->iovCnt++] = {(void *)b2.At(o), r.len};
         }
 
-        auto ctx = (uint8_t *)malloc(produceCtx.length());
+        auto ctx = (uint8_t *)malloc(produceCtx.size());
 
         if (unlikely(!ctx))
 	{
@@ -477,11 +477,11 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
 	// the payload in pendingProduceReqs
 	payload->flags = 1u << uint8_t(outgoing_payload::Flags::ReqMaybeRetried);
 	Drequire(payload->tracked_by_reqs_tracker());
-        memcpy(ctx, produceCtx.data(), produceCtx.length());
+        memcpy(ctx, produceCtx.data(), produceCtx.size());
 
         bs->reqs_tracker.pendingProduce.insert(reqId);
         bs->outgoing_content.push_back(payload);
-        pendingProduceReqs.Add(reqId, {clientReqId, payload, nowMS, ctx, produceCtx.length()});
+        pendingProduceReqs.Add(reqId, {clientReqId, payload, nowMS, ctx, produceCtx.size()});
         track_inflight_req(reqId, nowMS, TankAPIMsgType::Produce);
 
         if (trace)
@@ -519,8 +519,8 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
         b.Serialize(uint8_t(0));  // required acks
         b.Serialize(uint32_t(0)); // ack timeout
 
-        const auto topicsCntOffset = b.length();
-        b.MakeSpace(sizeof(uint8_t));
+        const auto topicsCntOffset = b.size();
+        b.RoomFor(sizeof(uint8_t));
 
         for (uint32_t i{0}; i != cnt;)
         {
@@ -533,13 +533,13 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
                 b.Serialize(topic.len);
                 b.Serialize(topic.p, topic.len);
 
-                const auto partitionsCntOffset = b.length();
-                b.MakeSpace(sizeof(uint8_t));
+                const auto partitionsCntOffset = b.size();
+                b.RoomFor(sizeof(uint8_t));
 
                 produceCtx.Serialize(topic.len);
                 produceCtx.Serialize(topic.p, topic.len);
-                const auto produceCtxPartitionsCntOffset = produceCtx.length();
-                produceCtx.MakeSpace(sizeof(uint8_t));
+                const auto produceCtxPartitionsCntOffset = produceCtx.size();
+                produceCtx.RoomFor(sizeof(uint8_t));
 
                 if (trace)
                         SLog("For topic [", topic, "]\n");
@@ -552,7 +552,7 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
                         ++partitionsCnt;
                         b.Serialize<uint16_t>(it->partitionId);
 
-                        const auto bundleOffset = b.length();
+                        const auto bundleOffset = b.size();
                         ranges.push_back({base, bundleOffset - base});
 
                         // BEGIN:bundle header
@@ -579,7 +579,7 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
 
                         produceCtx.Serialize<uint16_t>(it->partitionId);
 
-                        const auto msgSetOffset = b.length();
+                        const auto msgSetOffset = b.size();
                         uint64_t lastTS{0};
                         size_t required{0};
 
@@ -628,20 +628,20 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
 
                         if (!compressionCodec)
                         {
-                                const auto offset = b.length();
+                                const auto offset = b.size();
                                 const auto bundleSize = offset - bundleOffset;
                                 const range32_t r(bundleOffset, bundleSize);
 
                                 b.SerializeVarUInt32(bundleSize);
-                                base = b.length();
+                                base = b.size();
                                 ranges.push_back({offset, base - offset});
                                 ranges.push_back(r);
                         }
                         else
                         {
-                                const auto msgSetLen = b.length() - msgSetOffset, bundleHeaderLength = msgSetOffset - bundleOffset;
+                                const auto msgSetLen = b.size() - msgSetOffset, bundleHeaderLength = msgSetOffset - bundleOffset;
                                 auto &cmpBuf = b2;
-                                const auto o = cmpBuf.length();
+                                const auto o = cmpBuf.size();
                                 const uint64_t start = trace ? Timings::Microseconds::Tick() : 0;
 
                                 if (unlikely(!Compression::Compress(Compression::Algo::SNAPPY, b.At(msgSetOffset), msgSetLen, &cmpBuf)))
@@ -651,19 +651,19 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
                                 }
 
                                 if (trace)
-                                        SLog(size_repr(msgSetLen), " => ", size_repr(cmpBuf.length()), ", in ", duration_repr(Timings::Microseconds::Since(start)), "\n");
+                                        SLog(size_repr(msgSetLen), " => ", size_repr(cmpBuf.size()), ", in ", duration_repr(Timings::Microseconds::Since(start)), "\n");
 
-                                // TODO: if cmpBuf.length() > msgSetLen, don't use compressed content(not worth it) - also unset flags compression codec bits
+                                // TODO: if cmpBuf.size() > msgSetLen, don't use compressed content(not worth it) - also unset flags compression codec bits
 
-                                const auto compressedMsgSetLen = cmpBuf.length() - o;
+                                const auto compressedMsgSetLen = cmpBuf.size() - o;
 
-                                b.SetLength(msgSetOffset);
-                                const auto offset = b.length();
+                                b.resize(msgSetOffset);
+                                const auto offset = b.size();
                                 b.SerializeVarUInt32(compressedMsgSetLen + bundleHeaderLength);
 
 
-                                base = b.length();
-                                ranges.push_back({offset, b.length() - offset});         // (bundle length:varint)
+                                base = b.size();
+                                ranges.push_back({offset, b.size() - offset});         // (bundle length:varint)
                                 ranges.push_back({bundleOffset, bundleHeaderLength});    // bundle header
                                 ranges.push_back({o | (1u << 30), compressedMsgSetLen}); // compressed bundle messages set
                         }
@@ -675,15 +675,15 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
         }
         *(uint8_t *)b.At(topicsCntOffset) = topicsCnt;
 
-        const auto reqSize = b.length() + b2.length();
+        const auto reqSize = b.size() + b2.size();
 
         if (trace)
-                SLog("b.length = ", b.length(), ", b2.length = ", b2.length(), "\n");
+                SLog("b.length = ", b.size(), ", b2.length = ", b2.size(), "\n");
 
         require(payload->iovCnt + 1 + ranges.size() <= sizeof_array(payload->iov));
 
         b.reserve(sizeof(uint8_t) + sizeof(uint32_t));
-        payload->iov[payload->iovCnt++] = {b.End(), sizeof(uint8_t) + sizeof(uint32_t)};
+        payload->iov[payload->iovCnt++] = {b.end(), sizeof(uint8_t) + sizeof(uint32_t)};
         b.Serialize(uint8_t(TankAPIMsgType::Produce)); 	// req.msgtype
         b.Serialize<uint32_t>(reqSize);        		// req.size
 
@@ -697,7 +697,7 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
                         payload->iov[payload->iovCnt++] = {(void *)b2.At(o), r.len};
         }
 
-        auto ctx = (uint8_t *)malloc(produceCtx.length());
+        auto ctx = (uint8_t *)malloc(produceCtx.size());
 
         if (unlikely(!ctx))
 	{
@@ -710,11 +710,11 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
 	// the payload in pendingProduceReqs
 	payload->flags = 1u << uint8_t(outgoing_payload::Flags::ReqMaybeRetried);
 	Drequire(payload->tracked_by_reqs_tracker());
-        memcpy(ctx, produceCtx.data(), produceCtx.length());
+        memcpy(ctx, produceCtx.data(), produceCtx.size());
 
         bs->reqs_tracker.pendingProduce.insert(reqId);
         bs->outgoing_content.push_back(payload);
-        pendingProduceReqs.Add(reqId, {clientReqId, payload, nowMS, ctx, produceCtx.length()});
+        pendingProduceReqs.Add(reqId, {clientReqId, payload, nowMS, ctx, produceCtx.size()});
         track_inflight_req(reqId, nowMS, TankAPIMsgType::Produce);
 
         if (trace)
@@ -777,6 +777,7 @@ bool TankClient::try_transmit(broker *const bs)
                                 bs->set_reachability(broker::Reachability::MaybeReachable);
                                 // fall-through
                         }
+			[[fallthrough]];
 
                 case broker::Reachability::MaybeReachable:
                 case broker::Reachability::Reachable:
@@ -851,8 +852,8 @@ uint32_t TankClient::create_topic(const strwlen8_t topic, const uint16_t totPart
         const auto reqId = ids_tracker.leader_reqs.next++;
 
         b.Serialize(uint8_t(TankAPIMsgType::CreateTopic));
-	const auto lenOffset = b.length();
-	b.MakeSpace(sizeof(uint32_t));
+	const auto lenOffset = b.size();
+	b.RoomFor(sizeof(uint32_t));
 
         b.Serialize<uint32_t>(reqId);
         b.Serialize(topic.len);
@@ -861,7 +862,7 @@ uint32_t TankClient::create_topic(const strwlen8_t topic, const uint16_t totPart
 	b.SerializeVarUInt32(config.len);
 	b.Serialize(config.p, config.len);
 
-        payload->iov[0] = {(void *)b.data(), b.length()};
+        payload->iov[0] = {(void *)b.data(), b.size()};
         payload->iovCnt = 1;
 
         bs->reqs_tracker.pendingCtrl.insert(reqId);
@@ -873,7 +874,7 @@ uint32_t TankClient::create_topic(const strwlen8_t topic, const uint16_t totPart
         pendingCtrlReqs.Add(reqId, {clientReqId, payload, nowMS});
         track_inflight_req(reqId, nowMS, TankAPIMsgType::CreateTopic);
 
-	*(uint32_t *)b.At(lenOffset) = b.length() - lenOffset - sizeof(uint32_t);
+	*(uint32_t *)b.At(lenOffset) = b.size() - lenOffset - sizeof(uint32_t);
 
         if (!try_transmit(bs))
                 return 0;
@@ -890,14 +891,14 @@ uint32_t TankClient::discover_partitions(const strwlen8_t topic)
         const auto reqId = ids_tracker.leader_reqs.next++;
 
         b.Serialize(uint8_t(TankAPIMsgType::DiscoverPartitions));
-	const auto lenOffset = b.length();
-	b.MakeSpace(sizeof(uint32_t));
+	const auto lenOffset = b.size();
+	b.RoomFor(sizeof(uint32_t));
 
         b.Serialize<uint32_t>(reqId);
         b.Serialize(topic.len);
         b.Serialize(topic.p, topic.len);
 
-        payload->iov[0] = {(void *)b.data(), b.length()};
+        payload->iov[0] = {(void *)b.data(), b.size()};
         payload->iovCnt = 1;
 
         bs->reqs_tracker.pendingCtrl.insert(reqId);
@@ -908,7 +909,7 @@ uint32_t TankClient::discover_partitions(const strwlen8_t topic)
         pendingCtrlReqs.Add(reqId, {clientReqId, payload, nowMS});
         track_inflight_req(reqId, nowMS, TankAPIMsgType::DiscoverPartitions);
 
-	*(uint32_t *)b.At(lenOffset) = b.length() - lenOffset - sizeof(uint32_t);
+	*(uint32_t *)b.At(lenOffset) = b.size() - lenOffset - sizeof(uint32_t);
 
         if (!try_transmit(bs))
                 return 0;
@@ -927,8 +928,8 @@ bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::e
         const auto reqId = ids_tracker.leader_reqs.next++;
 
         b.Serialize(uint8_t(TankAPIMsgType::Consume)); // request msg.type
-        const auto reqSizeOffset = b.length();
-        b.MakeSpace(sizeof(uint32_t)); // request length
+        const auto reqSizeOffset = b.size();
+        b.RoomFor(sizeof(uint32_t)); // request length
 
         b.Serialize<uint16_t>(1);     // client version
         b.Serialize<uint32_t>(reqId); // request ID
@@ -937,8 +938,8 @@ bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::e
         b.Serialize(uint64_t(maxWait));
         b.Serialize(uint32_t(minSize)); // min bytes
 
-        const auto topicsCntOffset = b.length();
-        b.MakeSpace(sizeof(uint8_t));
+        const auto topicsCntOffset = b.size();
+        b.RoomFor(sizeof(uint8_t));
 
         for (size_t i{0}; i != total;)
         {
@@ -950,8 +951,8 @@ bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::e
                 b.Serialize(topic.p, topic.len);
 
                 const auto before = absSeqNumsCnt;
-                const auto totalPartitionsOffset = b.length();
-                b.MakeSpace(sizeof(uint8_t));
+                const auto totalPartitionsOffset = b.size();
+                b.RoomFor(sizeof(uint8_t));
 
                 do
                 {
@@ -982,9 +983,9 @@ bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::e
         memcpy(seqsNumsData, absSeqNums, sizeof(uint64_t) * absSeqNumsCnt);
 
         // patch request length
-        *(uint32_t *)b.At(reqSizeOffset) = b.length() - reqSizeOffset - sizeof(uint32_t);
+        *(uint32_t *)b.At(reqSizeOffset) = b.size() - reqSizeOffset - sizeof(uint32_t);
 
-        payload->iov[payload->iovCnt++] = {(void *)b.data(), b.length()};
+        payload->iov[payload->iovCnt++] = {(void *)b.data(), b.size()};
 
         bs->reqs_tracker.pendingConsume.insert(reqId);
         payload->flags = (1u << uint8_t(outgoing_payload::Flags::ReqIsIdempotent)) | (1u << uint8_t(outgoing_payload::Flags::ReqMaybeRetried));
@@ -1161,7 +1162,14 @@ bool TankClient::shutdown(connection *const c, const uint32_t ref, const bool fa
         close(c->fd);
 
         if (auto b = std::exchange(c->inB, nullptr))
+	{
+		// FIXME: XXX: TODO: https://github.com/phaistos-networks/TANK/issues/46
+		// If you consume messages, and while you are producing them, you try to produce or otherwise use the API that will
+		// result in interfacing with a Tank node (while you are using or iterating those consumed messages), and when attempting to interface you
+		// end up shutting down the connection, then the consumed messages will be invalid because
+		// the connection buffer that's holding the messages would be deleted by shutdown(){ put_buffer(); }
                 put_buffer(b);
+	}
 
         if (c->state.flags & (1u << uint8_t(connection::State::Flags::ConnectionAttempt)))
                 deregister_connection_attempt(c);
@@ -1741,7 +1749,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                         }
 
                                                         if (trace)
-                                                                SLog("Decompressed ", size_repr(bundleEnd - p), " => ", size_repr(rawData->length()), "\n");
+                                                                SLog("Decompressed ", size_repr(bundleEnd - p), " => ", size_repr(rawData->size()), "\n");
 
                                                         break;
 
@@ -1750,7 +1758,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                         exit(1);
                                         }
 
-                                        msgSetContent.Set(reinterpret_cast<const uint8_t *>(rawData->data()), rawData->length());
+                                        msgSetContent.Set(reinterpret_cast<const uint8_t *>(rawData->data()), rawData->size());
                                         usedBufs.push_back(rawData);
                                 }
                                 else
@@ -1878,7 +1886,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                 }
                                         }
                                         else
-                                                key.Unset();
+                                                key.reset();
 
                                         if (!Compression::UnpackUInt32Check(p, endOfMsgSet))
                                         {
@@ -1957,11 +1965,11 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 if (i == topicsCnt - 1 && k == partitionsCnt - 1)
                                 {
                                         // optimization
-                                        consumedPartitionContent.push_back({clientReqId, topicName, partitionId, {consumptionList.values(), cnt}, true, {next, lastPartialMsgMinFetchSize}});
+                                        consumedPartitionContent.push_back({clientReqId, topicName, partitionId, {consumptionList.data(), cnt}, true, {next, lastPartialMsgMinFetchSize}});
                                 }
                                 else
                                 {
-                                        auto p = resultsAllocator.CopyOf(consumptionList.values(), cnt);
+                                        auto p = resultsAllocator.CopyOf(consumptionList.data(), cnt);
 
                                         consumedPartitionContent.push_back({clientReqId, topicName, partitionId, {p, cnt}, true, {next, lastPartialMsgMinFetchSize}});
                                         consumptionList.clear();
@@ -2023,7 +2031,7 @@ bool TankClient::try_recv(connection *const c)
                         throw Switch::system_error("ioctl() failed:", strerror(errno));
 
                 b->reserve(n);
-                r = read(fd, b->End(), b->Capacity());
+                r = read(fd, b->end(), b->capacity());
 
                 if (trace)
                         SLog("Read ", r, "\n");
@@ -2047,7 +2055,7 @@ bool TankClient::try_recv(connection *const c)
                 }
                 else
                 {
-                        const auto *p = (uint8_t *)b->AtOffset();
+                        const auto *p = (uint8_t *)b->data_at_offset();
 
                         if (c->state.flags & (1u << uint8_t(connection::State::Flags::ConnectionAttempt)))
                         {
@@ -2066,7 +2074,7 @@ bool TankClient::try_recv(connection *const c)
 
                         b->AdvanceLength(r);
 
-                        for (const auto *e = (uint8_t *)b->End(); p != e;)
+                        for (const auto *e = (uint8_t *)b->end(); p != e;)
                         {
                                 if (p + sizeof(uint8_t) + sizeof(uint32_t) > e)
                                 {
@@ -2090,7 +2098,7 @@ bool TankClient::try_recv(connection *const c)
                                         b->reserve(len);
 
                                         p = (uint8_t *)b->At(o);
-                                        e = (uint8_t *)b->End();
+                                        e = (uint8_t *)b->end();
 
                                         c->state.flags |= 1u << uint8_t(connection::State::Flags::ConsideredReqHeader);
                                 }
@@ -2104,7 +2112,7 @@ bool TankClient::try_recv(connection *const c)
                                         // because we already reserve()d FIONREAD result earlier and this could also
                                         // cause problems with references in e.g consumedPartitionContent that derefs buffer's data
                                         if (trace)
-                                                SLog("Need more content (len = ", len, ") for msg(", msg, "), now have = ", b->length(), "\n");
+                                                SLog("Need more content (len = ", len, ") for msg(", msg, "), now have = ", b->size(), "\n");
 
                                         return true;
                                 }
@@ -2130,9 +2138,9 @@ bool TankClient::try_recv(connection *const c)
                                                 put_buffer(b);
                                                 c->inB = nullptr;
                                         }
-                                        else if (b->Offset() > 1 * 1024 * 1024)
+                                        else if (b->offset() > 1 * 1024 * 1024)
                                         {
-                                                b->DeleteChunk(0, b->Offset());
+                                                b->DeleteChunk(0, b->offset());
                                                 b->SetOffset(uint64_t(0));
                                         }
                                 }
@@ -2346,9 +2354,9 @@ void TankClient::poll(uint32_t timeoutMS)
                                 put_buffer(b);
                                 c->inB = nullptr;
                         }
-                        else if (b->Offset() > 1 * 1024 * 1024)
+                        else if (b->offset() > 1 * 1024 * 1024)
                         {
-                                b->DeleteChunk(0, b->Offset());
+                                b->DeleteChunk(0, b->offset());
                                 b->SetOffset(uint64_t(0));
                         }
                 }
@@ -2360,7 +2368,7 @@ void TankClient::poll(uint32_t timeoutMS)
         // TODO: https://github.com/phaistos-networks/TANK/issues/6
 	if (const auto n = usedBufs.size())
 	{
-		put_buffers(usedBufs.values(), n);
+		put_buffers(usedBufs.data(), n);
 		usedBufs.clear();
 	}
 
@@ -2368,7 +2376,10 @@ void TankClient::poll(uint32_t timeoutMS)
 
         // Reset prior to reschedule_any() not after we have called it
         // because it may push to capturedFaults[] so we don't want to clear it after we called it
-        resultsAllocator.Reuse();
+	if (trace)
+		SLog("POLLING, resetting consumedPartitionContent.size = ", consumedPartitionContent.size(), "\n");
+
+        resultsAllocator.reuse();
         consumedPartitionContent.clear();
         capturedFaults.clear();
         produceAcks.clear();
@@ -2536,7 +2547,7 @@ uint32_t TankClient::produce_with_base(const std::pair<topic_partition, std::pai
                 return a.leader < b.leader;
         });
 
-        auto *const all = out.values();
+        auto *const all = out.data();
         const auto cnt = out.size();
         const auto clientReqId = ids_tracker.client.next++;
 
@@ -2590,7 +2601,7 @@ uint32_t TankClient::produce(const std::pair<topic_partition, std::vector<msg>> 
                 return a.leader < b.leader;
         });
 
-        auto *const all = out.values();
+        auto *const all = out.data();
         const auto cnt = out.size();
         const auto clientReqId = ids_tracker.client.next++;
 
@@ -2687,7 +2698,7 @@ uint32_t TankClient::consume(const std::vector<
         });
 
         const auto n = out.size();
-        auto *const all = out.values();
+        auto *const all = out.data();
         const auto clientReqId = ids_tracker.client.next++;
 
 	update_time_cache();

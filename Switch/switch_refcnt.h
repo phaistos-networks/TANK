@@ -225,17 +225,23 @@ namespace Switch
                 }
         };
 
-	template<typename T>
-	static inline auto make_sharedref(T *v)
-	{
-		return shared_refptr<T>(std::move(v), true);
-	}
+        template <typename T, typename... Args>
+        static inline auto make_sharedref(Args &&... args)
+        {
+                return shared_refptr<T>(new T(std::forward<Args>(args)...), true);
+        }
 
-	template<typename T>
-	static inline auto make_sharedref_retained(T *v)
-	{
-		return shared_refptr<T>(v);
-	}
+        template <typename T>
+        static inline auto make_sharedref_for(T *const ptr)
+        {
+                return shared_refptr<T>(ptr);
+        }
+
+        template <typename T>
+        static inline auto make_sharedref_with_ownership_transfer(T *const ptr)
+        {
+                return shared_refptr<T>(ptr, true);
+        }
 };
 
 template <typename T>

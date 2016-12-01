@@ -93,14 +93,42 @@ int main(int argc, char *argv[])
                                 break;
 
                         case 't':
+                        {
+				const strwlen32_t s(optarg);
+
                                 topic.clear();
-                                topic.append(optarg);
-                                if (topic.length() > 255)
+
+				if (const auto p = s.Search('/'))
+				{
+					const auto str = s.SuffixFrom(p + 1);
+
+					if (!str.IsDigits())
+					{
+						Print("Invalid partition [", str, "]\n");
+						return 1;
+					}
+
+                                        const auto v = str.AsInt32();
+
+                                        if (v < 0 || v > UINT16_MAX)
+                                        {
+                                                Print("Invalid partition [", str, "]\n");
+                                                return 1;
+                                        }
+
+                                        topic.append(s.PrefixUpto(p));
+					partition = v;
+				}
+				else
+					topic.append(s);
+
+				if (!IsBetweenRangeInclusive<uint32_t>(topic.size(), 1, 240))
                                 {
                                         Print("Inalid topic name '", topic, "'\n");
                                         return 1;
                                 }
-                                break;
+                        }
+                        break;
 
                         case 'p':
                         {
@@ -143,13 +171,13 @@ int main(int argc, char *argv[])
                 }
         }
 
-        if (!topic.length())
+        if (!topic.size())
         {
                 Print("Topic not specified. Use -t to specify topic\n");
                 return 1;
         }
 
-        if (!endpoint.length())
+        if (!endpoint.size())
         {
                 Print("Broker endpoint not specified. Use -b to specify endpoint\n");
                 return 1;
@@ -233,12 +261,17 @@ int main(int argc, char *argv[])
                 bool statsOnly{false}, asKV{false};
                 IOBuffer buf;
                 range64_t timeRange{0, UINT64_MAX};
+		bool drainAndExit{false};
 
                 optind = 0;
-                while ((r = getopt(argc, argv, "+SF:hBT:K")) != -1)
+                while ((r = getopt(argc, argv, "+SF:hBT:Kd")) != -1)
                 {
                         switch (r)
                         {
+				case 'd':
+					drainAndExit = true;
+					break;
+
 				case 'K':
 					asKV = true;
 					break;
@@ -301,6 +334,7 @@ int main(int argc, char *argv[])
                                         Print("Options include:\n");
                                         Print("-F display format: Specify a ',' separated list of message properties to be displayed. Properties include: \"seqnum\", \"key\", \"content\", \"ts\". By default, only the content is displayed\n");
                                         Print("-S: statistics only\n");
+					Print("-d: drain and exit. As soon as all available messages have been consumed, exit (i.e do not tail)\n");
                                         Print("-T: optionally, filter all consumes messages by specifying a time range in either (from,to) or (from) format, where the first allows to specify a start and an end date/time and the later a start time and no end time. Currently, only one date-time format is supported (YYYMMDDHH:MM:SS)\n");
                                         Print("\"from\" specifies the first message we are interested in.\n");
                                         Print("If from is \"beginning\" or \"start\","
@@ -338,6 +372,9 @@ int main(int argc, char *argv[])
                                 next = from.AsUint64();
                 }
 
+		size_t totalMsgs{0}, sumBytes{0};
+		const auto b = Timings::Microseconds::Tick();
+
                 for (;;)
                 {
                         if (!pendingResp)
@@ -345,7 +382,7 @@ int main(int argc, char *argv[])
                                 if (verbose)
                                         Print("Requesting from ", next, "\n");
 
-                                pendingResp = tankClient.consume({{topicPartition, {next, minFetchSize}}}, 8e3, 0);
+                                pendingResp = tankClient.consume({{topicPartition, {next, minFetchSize}}}, drainAndExit ? 0 : 8e3, 0);
 
                                 if (!pendingResp)
                                 {
@@ -377,9 +414,16 @@ int main(int argc, char *argv[])
 
                         for (const auto &it : tankClient.consumed())
                         {
+				if (drainAndExit && it.msgs.len == 0)
+					goto out;
+
                                 if (statsOnly)
                                 {
                                         Print(it.msgs.len, " messages\n");
+					totalMsgs+=it.msgs.len;
+
+					for (const auto m : it.msgs)
+						sumBytes+=m->content.len + m->key.len + sizeof(uint64_t);
                                 }
                                 else
                                 {
@@ -387,6 +431,7 @@ int main(int argc, char *argv[])
                                         for (const auto m : it.msgs)
                                                 sum += m->content.len;
                                         sum += it.msgs.len * 2;
+
 
                                         buf.clear();
                                         buf.reserve(sum);
@@ -424,6 +469,10 @@ int main(int argc, char *argv[])
                                 pendingResp = 0;
                         }
                 }
+
+                out:
+		if (statsOnly)
+			Print(dotnotation_repr(totalMsgs), " messages consumed in ", duration_repr(Timings::Microseconds::Since(b)), ", ", size_repr(sumBytes), " bytes consumed\n");
         }
         else if (cmd.Eq(_S("create_topic")))
         {
@@ -510,13 +559,18 @@ int main(int argc, char *argv[])
                 // XXX: arbitrary defaults
                 size_t bundleMsgsSetCntThreshold{128};
                 size_t bundleMsgsSetSizeThreshold{4 * 1024 * 1024};
+		size_t sleepTime{0};
 
                 // TODO: throttling options
                 optind = 0;
-                while ((r = getopt(argc, argv, "+hC:S:")) != -1)
+                while ((r = getopt(argc, argv, "+hC:S:z:")) != -1)
                 {
                         switch (r)
                         {
+				case 'z':
+					sleepTime = strwlen32_t(optarg).AsUint64();
+					break;
+
                                 case 'h':
                                         Print("mirror [options] endpoint\n");
                                         Print("Will mirror the selected topic's partitions to the broker identified by <endpoint>.\n");
@@ -1081,12 +1135,12 @@ int main(int argc, char *argv[])
                                 }
 
                                 if (!range)
-                                        range.Unset();
+                                        range.reset();
 
                                 return true;
                         };
 
-                        range.Unset();
+                        range.reset();
 
                         if (asSingleMsg)
                         {
@@ -1094,10 +1148,10 @@ int main(int argc, char *argv[])
 
                                 for (;;)
                                 {
-                                        if (content.Capacity() < 8192)
+                                        if (content.capacity() < 8192)
                                                 content.reserve(65536);
 
-                                        const auto r = read(fd, content.End(), content.Capacity());
+                                        const auto r = read(fd, content.end(), content.capacity());
 
                                         if (r == -1)
                                         {
@@ -1111,7 +1165,7 @@ int main(int argc, char *argv[])
                                 }
 
                                 if (verbose)
-                                        Print("Publishing message of size ", size_repr(content.length()), "\n");
+                                        Print("Publishing message of size ", size_repr(content.size()), "\n");
 
                                 msgs.push_back({content.AsS32(), Timings::Milliseconds::SysTime(), {}});
 
@@ -1130,7 +1184,7 @@ int main(int argc, char *argv[])
                         {
                                 for (;;)
                                 {
-                                        const auto capacity = bufSize - range.End();
+                                        const auto capacity = bufSize - range.stop();
                                         auto r = read(fd, buf + range.offset, capacity);
 
                                         if (r == -1)

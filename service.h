@@ -381,6 +381,7 @@ struct wait_ctx_partition
 struct wait_ctx
 {
         connection *c;
+	bool scheduledForDtor;
         uint32_t requestId;
         switch_dlist list, expList;
         uint64_t expiration; // in MS
@@ -555,7 +556,7 @@ struct outgoing_queue
                         range = o.range;
 
 			o.fdh = nullptr;
-			o.range.Unset();
+			o.range.reset();
                         return *this;
                 }
 
@@ -654,7 +655,7 @@ struct outgoing_queue
                 return (idx + (capacity - 1)) & (capacity - 1);
         }
 
-        [[gnu::always_inline]] inline uint32_t next(const uint32_t idx) const noexcept
+        inline uint32_t next(const uint32_t idx) const noexcept
         {
                 return (idx + 1) & (capacity - 1);
         }
@@ -679,22 +680,22 @@ struct outgoing_queue
                 return A[prev(backIdx)];
         }
 
-        reference at(const size_t idx) noexcept
+        inline reference at(const size_t idx) noexcept
         {
                 return A[(frontIdx + idx) & (capacity - 1)];
         }
 
-        reference_const at(const size_t idx) const noexcept
+        inline reference_const at(const size_t idx) const noexcept
         {
                 return A[(frontIdx + idx) & (capacity - 1)];
         }
 
-	[[gnu::always_inline]] inline void did_push() noexcept
+	inline void did_push() noexcept
         {
 		++size_;
         }
 
-	[[gnu::always_inline]] inline void did_pop() noexcept
+	inline void did_pop() noexcept
 	{
 		--size_;
 	}
@@ -727,29 +728,29 @@ struct outgoing_queue
 		did_push();
         }
 
-        void pop_back() noexcept
+        inline void pop_back() noexcept
         {
                 backIdx = prev(backIdx);
 		did_pop();
         }
 
-        void pop_front() noexcept
+        inline void pop_front() noexcept
         {
                 frontIdx = next(frontIdx);
 		did_pop();
         }
 
-        bool full() const noexcept
+        inline bool full() const noexcept
         {
                 return size_ == capacity;
         }
 
-        bool empty() const noexcept
+        inline bool empty() const noexcept
         {
                 return !size_;
         }
 
-        auto size() const noexcept
+        inline auto size() const noexcept
         {
                 return size_;
         }
@@ -775,11 +776,6 @@ struct outgoing_queue
 
         outgoing_queue()
         {
-        }
-
-        ~outgoing_queue()
-        {
-                require(empty());
         }
 };
 
@@ -832,7 +828,20 @@ class Service final
         Switch::vector<connection *> connsPool;
         Switch::vector<outgoing_queue *> outgoingQueuesPool;
         switch_dlist allConnections, waitExpList;
-        Switch::vector<wait_ctx *> expiredCtxList;
+	// In the past, it was possible, however improbably, that
+	// we 'd invoke destroy_wait_ctx() twice on the same context, or would otherwise
+	// use or re-use the same context while it was either invalid, or was reused
+	// and that would obviously cause problems.
+	// In ordet to eliminate that possibility, destroy_wait_ctx() now
+	// defers put_waitctx() until the next I/O loop iteration
+	// where it's safe to release and reuse that context
+	//
+	// We used to use a single expiredCtxList, but now using multiple just so that we 
+	// won't accidently clear/use one for multiple occasions. It was used in order to track
+	// down a hasenbug, though it turned out to be a silly application bug, not a Tank bug.
+	// It's nonethless great that we figured out this edge case(no evidence that this
+	// has ever happened) and we are dealing with it here.
+        Switch::vector<wait_ctx *> expiredCtxList, expiredCtxList2, expiredCtxList3, waitCtxDeferredGC;
         uint32_t nextDistinctPartitionId{0};
         int listenFd;
         EPoller poller;
@@ -892,7 +901,9 @@ class Service final
 		if (connsPool.size() > 16)
 			delete c;
 		else
+		{
 	                connsPool.push_back(c);
+		}
         }
 
         void register_topic(topic *const t)

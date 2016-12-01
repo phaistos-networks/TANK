@@ -19,9 +19,9 @@ namespace Compression
                         {
                                 size_t outLen = 0;
 
-                                dest->EnsureCapacity(snappy::MaxCompressedLength(dataLen + 2));
-                                snappy::RawCompress((char *)data, dataLen, dest->At(dest->length()), &outLen);
-                                dest->AdvanceLength(outLen);
+                                dest->reserve(snappy::MaxCompressedLength(dataLen + 2));
+                                snappy::RawCompress((char *)data, dataLen, dest->At(dest->size()), &outLen);
+                                dest->advance_size(outLen);
 
                                 return true;
                         }
@@ -44,13 +44,13 @@ namespace Compression
                                         return false;
                                 else
                                 {
-                                        dest->EnsureCapacity(outLen + 8);
+                                        dest->reserve(outLen + 8);
 
-                                        if (unlikely(!snappy::RawUncompress((char *)source, sourceLen, dest->At(dest->length()))))
+                                        if (unlikely(!snappy::RawUncompress((char *)source, sourceLen, dest->At(dest->size()))))
                                                 return false;
 					else
                                         {
-                                                dest->AdvanceLength(outLen);
+                                                dest->advance_size(outLen);
                                                 return true;
                                         }
                                 }
@@ -168,7 +168,7 @@ namespace Compression
 
 void IOBuffer::SerializeVarUInt32(const uint32_t n)
 {
-        EnsureCapacity(8);
+        reserve(8);
 
         uint8_t *e = (uint8_t *)(buffer + length_);
         length_ += Compression::PackUInt32(n, e) - e;

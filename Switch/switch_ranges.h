@@ -1,31 +1,32 @@
+// See also http://en.cppreference.com/w/cpp/algorithm/iota
 #pragma once
 
-// range is (Start():inclusive ... End():exclusive)
+// range is (start():inclusive ... stop():exclusive)
 // i.e [left, right)
 template<typename VT = uint32_t, typename LT = uint32_t>
-struct range_base
+struct range_base final
 {
 	struct iterator
 	{
 		VT i;
 
-		iterator(const VT index)
+		constexpr iterator(const VT index)
 			: i{index}
 		{
 
 		}
 
-		VT inline operator*() const
+		constexpr VT inline operator*() const
 		{
 			return i;
 		}
 
-		void operator++()
+		constexpr void operator++() noexcept
 		{
 			++i;
 		}
 
-		bool operator!=(const iterator &o) const
+		constexpr bool operator!=(const iterator &o) const noexcept
 		{
 			return i != o.i;
 		}
@@ -34,123 +35,105 @@ struct range_base
 	VT offset;
 	LT len;
 
-	iterator begin() const
+	constexpr iterator begin() const noexcept
 	{
 		return iterator(offset);
 	}
 
-	iterator end() const
+	constexpr iterator end() const noexcept
 	{
-		return iterator(End());
+		return iterator(stop());
 	}
 
-	static inline int byOffsetAsc(const range_base &r1, const range_base &r2)
-	{
-		if (const auto d = TrivialCmp(r1.Start(), r2.Start()))
-			return d;
-		else
-			return TrivialCmp(r1.len, r2.len);
-	}
-
-	range_base()
-		: offset(0), len(0)
+	constexpr range_base()
+		: offset{0}, len{0}
 	{
 
 	}
 
-	range_base(const range_base &o)
+	constexpr range_base(const range_base &o)
 		: offset(o.offset), len(o.len)
 	{
 
 	}
 
-	range_base(const VT _o, const LT _l)
+	constexpr range_base(const VT _o, const LT _l)
 		: offset(_o), len(_l)
 	{
 
 	}
 
 	//e.g range32_t{10,15}
-	range_base(const std::pair<VT, VT> p)
+	constexpr range_base(const std::pair<VT, VT> p)
 		: offset{p.first}, len{p.second - p.first}
 	{
 
 	}
 
-	range_base(const LT l)
+	constexpr range_base(const LT l)
 		: offset{0}, len{l}
 	{
 
 	}
 
-	[[gnu::always_inline]] inline constexpr operator bool() const
+	constexpr operator bool() const noexcept
 	{
 		return len;
 	}
 
-	[[gnu::always_inline]] inline bool SpansAll() const
+	constexpr bool SpansAll() const noexcept
 	{
-		return std::numeric_limits<VT>::min() == offset && std::numeric_limits<VT>::max() == End();
+		return std::numeric_limits<VT>::min() == offset && std::numeric_limits<VT>::max() == stop();
 	}
 
-	void SetSpansAll()
+	void SetSpansAll() noexcept
 	{
 		offset 	= std::numeric_limits<VT>::min();
 		len 	= std::numeric_limits<VT>::max() - offset;
 	}
 
-	inline void Set(const VT _o, const LT _l)
+	constexpr void Set(const VT _o, const LT _l) noexcept
 	{
 		offset 	= _o;
 		len 	= _l;
 	}
 	
-	void setStartEnd(const VT lo, const VT hi)
+	constexpr void setStartEnd(const VT lo, const VT hi) noexcept
 	{
 		offset = lo;
 		len = hi - lo;
 	}
 
-	range_base &operator=(const range_base &o)
+	constexpr auto &operator=(const range_base &o) noexcept
 	{
 		offset 	= o.offset;
 		len 	= o.len;
 		return *this;
 	}
 
-	void SetEnd(const VT e)
+	constexpr void SetEnd(const VT e) noexcept
 	{
 		len = e - offset;
 	}
 
 	// Matching SetEnd(); adjusts offset of a valid range
-	void reset_offset(const VT start)
+	constexpr void reset_offset(const VT start) noexcept
 	{
-		len = End() - start;
+		len = stop() - start;
 		offset = start;
 	}
 
-	[[gnu::always_inline]] inline VT constexpr Mid() const 	// (left + right) / 2
+	constexpr VT mid() const noexcept // (left + right) / 2
 	{
 		return offset + (len >> 1);
 	}
 
-	[[gnu::always_inline]] inline VT constexpr End() const
+	constexpr VT stop() const noexcept
 	{
 		return offset + len;
 	}
 
-	[[gnu::always_inline]] inline VT constexpr Left() const
-	{
-		return offset;
-	}
-
-	[[gnu::always_inline]] inline VT constexpr Right() const
-	{
-		return End();
-	}
-
-	[[gnu::always_inline]] inline VT constexpr Start() const
+	constexpr VT start() const noexcept
 	{
 		return offset;
 	}
@@ -158,75 +141,78 @@ struct range_base
 	// TODO: optimize
 	// Very handy for iterating a subset e.g
 	// for (auto i : range32(offset, perPage).ClippedTo(total) { .. }
-	range_base<VT, LT> ClippedTo(const VT lim) const
+	constexpr range_base<VT, LT> ClippedTo(const VT lim) const
 	{
 		range_base<VT, LT> res;
 
 		res.offset 	= Min(offset, lim);
-		res.len 	= Min(End(), lim) - res.offset;
+		res.len 	= Min(stop(), lim) - res.offset;
 
 		return res;
 	}
 
-	[[gnu::always_inline]] inline bool constexpr Contains(const VT o) const
+	constexpr bool Contains(const VT o) const noexcept
 	{
+		// https://twitter.com/EricLengyel/status/546120250450653184
+		// Single comparison impl. Works fine except shouldn't work for 64bit scalars
+
 		return sizeof(VT) == 8
-			? o >= offset && o < End()
+			? o >= offset && o < stop()
 			: uint32_t(o - offset) < len; 	// o in [offset, offset+len)
 	}
 
-        [[gnu::always_inline]] inline bool constexpr operator<(const range_base &o) const
+        constexpr bool operator<(const range_base &o) const noexcept
         {
                 return offset < o.offset || (offset == o.offset && len < o.len);
         }
         
-        [[gnu::always_inline]] inline bool constexpr operator<=(const range_base &o) const
+        constexpr bool operator<=(const range_base &o) const noexcept
         {
                 return offset < o.offset || (offset == o.offset && len <= o.len);
         }
         
-        [[gnu::always_inline]] inline bool operator>(const range_base &o) const
+        constexpr bool operator>(const range_base &o) const noexcept
         {       
                 return offset > o.offset || (offset == o.offset && len > o.len);
         }               
 
-        [[gnu::always_inline]] inline bool constexpr operator>=(const range_base &o) const
+        constexpr bool operator>=(const range_base &o) const noexcept
         {               
                 return offset > o.offset || (offset == o.offset && len >= o.len);
         }
 
 
 	template<typename T>
-	[[gnu::always_inline]] inline bool constexpr operator==(const T &o) const
+	constexpr bool operator==(const T &o) const noexcept
 	{
 		return offset == o.offset && len == o.len;
 	}
 
 	template<typename T>
-	[[gnu::always_inline]] inline bool constexpr operator!=(const T &o) const
+	constexpr bool operator!=(const T &o) const noexcept
 	{
 		return offset != o.offset || len != o.len;
 	}
 
-	range_base Intersection(const range_base &o) const
+	range_base Intersection(const range_base &o) const noexcept
 	{
 		// A range containing the indices that exist in both ranges
 
-		if (End() <= o.offset || o.End() <= offset)
+		if (stop() <= o.offset || o.stop() <= offset)
 			return range_base(0, 0);
 		else
 		{
 			const auto _o = Max(offset, o.offset);
 
-			return range_base(_o, Min(End(), o.End()) - _o);
+			return range_base(_o, Min(stop(), o.stop()) - _o);
 		}
 	}
 
-	void ClipOffsetTo(const VT o)
+	void ClipOffsetTo(const VT o) noexcept
 	{
 		if (offset < o)
 		{
-			if (o >= End())
+			if (o >= stop())
 			{
 				offset = o;
 				len 	= 0;
@@ -241,9 +227,9 @@ struct range_base
 		}
 	}
 
-	void ClipEndTo(const VT e)
+	void ClipEndTo(const VT e) noexcept
 	{
-		const auto end = End();
+		const auto end = stop();
 
 		if (e < end)
 		{
@@ -254,24 +240,31 @@ struct range_base
 		}
 	}
 
-	[[gnu::always_inline]] inline bool constexpr Overlaps(const range_base &o) const
+	constexpr bool Overlaps(const range_base &o) const noexcept
 	{
-		return !(End() <= o.offset || o.End() <= offset);
+		// range is (start() inclusive, stop() non inclusive)
+		// e.g [start, end)
+		//
+		// alternative formula: a0 <= b1 && b0 <= a1
+		// https://fgiesen.wordpress.com/2011/10/16/checking-for-interval-overlap/
+		return !(stop() <= o.offset || o.stop() <= offset);
 	}
 
-	[[gnu::always_inline]] inline bool constexpr Contains(const range_base &o) const
+	constexpr bool Contains(const range_base &o) const noexcept
 	{
-		return offset <= o.offset && End() >= o.End();
+		return offset <= o.offset && stop() >= o.stop();
 	}
 
-	range_base Union(const range_base &o) const
+	constexpr auto Union(const range_base &o) const noexcept
 	{
 		const auto _o = Min(offset, o.offset);
 
-		return range_base(_o, Max(End(), o.End()) - _o);
+		return range_base(_o, Max(stop(), o.stop()) - _o);
 	}
 
-	uint8_t DisjointUnion(const range_base &o, range_base *out) const
+	// http://en.wikipedia.org/wiki/Disjoint_union
+	// Make sure they overlap
+	uint8_t DisjointUnion(const range_base &o, range_base *out) const noexcept
 	{
 		const range_base *const b = out;
 
@@ -288,7 +281,7 @@ struct range_base
 			++out;
 		}
 
-		const auto thisEnd = End(), thatEnd = o.End();
+		const auto thisEnd = stop(), thatEnd = o.stop();
 
 		if (thisEnd < thatEnd)
 		{
@@ -307,14 +300,20 @@ struct range_base
 		return out - b;
 	}
 
-	void TrimLeft(const LT span)
+	void TrimLeft(const LT span) noexcept
 	{
 		offset+=span;
 		len-=span;
 	}
 		
 
-	void Unset()
+	[[deprecated("use reset() please")]] void Unset()
+	{
+		offset = 0;
+		len = 0;
+	}
+
+	constexpr void reset() noexcept
 	{
 		offset = 0;
 		len = 0;
@@ -322,8 +321,9 @@ struct range_base
 };
 
 
+// e.g InBetweenRange(tm.tm_hour, 1, 5)
 template<typename VT>
-static inline bool IsBetweenRange(const VT v, const VT s, const VT e)
+static constexpr bool IsBetweenRange(const VT v, const VT s, const VT e) noexcept
 {
 	return sizeof(VT) == 8
 		? v >= s && v < e
@@ -331,18 +331,12 @@ static inline bool IsBetweenRange(const VT v, const VT s, const VT e)
 };
 
 template<typename VT>
-static inline bool IsBetweenRangeInclusive(const VT v, const VT s, const VT e)
+static constexpr bool IsBetweenRangeInclusive(const VT v, const VT s, const VT e) noexcept
 {
 	return sizeof(VT) == 8
 		? v >= s && v <= e
 		: uint32_t(v - s) <= (e - s); 	// o in [offset, offset+len]
 };
-
-template<typename VT = uint32_t, typename LT = uint32_t>
-static inline uint32_t HashFor(const range_base<VT, LT> &r)
-{
-	return SwitchHash(&r, sizeof(r));
-}
 
 
 using range8_t = range_base<uint8_t, uint8_t>;
@@ -351,16 +345,23 @@ using range32_t = range_base<uint32_t, uint32_t>;
 using range64_t = range_base<uint64_t, uint64_t>;
 using rangestr_t = range_base<const char *, uint32_t>; // Please ust strwlen instead
 
+// great for iteration e.g
+// {
+// 	struct foo values[128];
+// 	uint8_t cnt=5;
+//
+// 	for (const auto v : Switch::make_range(values, cnt)) { .. }
+// }
 template<typename VT, typename LT>
-static inline auto MakeRange(const VT s, const LT l) -> range_base<VT, LT>
+static constexpr auto MakeRange(const VT s, const LT l) noexcept -> range_base<VT, LT> 
 {
 	return {s, l};
 }
 
 namespace Switch
 {
-	template<typename VT, typename LT>
-	static inline auto make_range(const VT s, const LT l)
+	template<typename VT, typename LT> 
+	static constexpr auto make_range(const VT s, const LT l) noexcept
 	{
 		return range_base<VT, LT>(s, l);
 	}
