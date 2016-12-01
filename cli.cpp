@@ -1375,18 +1375,24 @@ int main(int argc, char *argv[])
                                 }
                         }
                 }
-                else if (type.Eq(_S("p2t")))
+                else if (type.Eq(_S("p2b")))
                 {
                         // Measure latency when publishing from publisher to broker and from broker to consume
                         // Submit messages to the broker and wait until you get them back
-                        size_t size{128}, cnt{1};
+                        size_t size{128}, cnt{1}, batchSize{1};
+			bool compressionDisabled{false};
 
                         optind = 0;
-                        while ((r = getopt(argc, argv, "+hc:s:R")) != -1)
+                        while ((r = getopt(argc, argv, "+hc:s:RB:")) != -1)
                         {
                                 switch (r)
                                 {
+					case 'B':
+						batchSize = strwlen32_t(optarg).AsUint32();
+						break;
+
                                         case 'R':
+                                                compressionDisabled = true;
                                                 tankClient.set_compression_strategy(TankClient::CompressionStrategy::CompressNever);
                                                 break;
 
@@ -1401,9 +1407,10 @@ int main(int argc, char *argv[])
                                         case 'h':
                                                 Print("Performs a produce to tank latency test. It will produce messages while also 'tailing' the selected topic and will measure how long it takes for the messages to reach the broker, stored, and acknowledged to the client\n");
                                                 Print("Options include:\n");
-                                                Print("-s message contrent length: by default 11bytes\n");
-                                                Print("-c total messages to publish: by default 1 message\n");
+                                                Print("-s message contrent length (default 11 bytes)\n");
+                                                Print("-c total messages to publish (default 1 message)\n");
                                                 Print("-R: do not compress bundle\n");
+						Print("-B: batch size(default 1)\n");
                                                 return 0;
 
                                         default:
@@ -1415,7 +1422,10 @@ int main(int argc, char *argv[])
 
                         auto *p = (char *)malloc(size + 16);
 
-                        memset(p, 0, size);
+			for (uint32_t i{0}; i != size; ++i)
+				p[i] = i & 127;
+
+			Print("Will publish ", dotnotation_repr(cnt), " messages, in batches of ", dotnotation_repr(batchSize), " messages, each message content is ", size_repr(size), compressionDisabled ? " (compression disabled)" : "", "\n");
 
                         const strwlen32_t content(p, size);
                         std::vector<TankClient::msg> msgs;
@@ -1423,8 +1433,16 @@ int main(int argc, char *argv[])
                         Defer({ free(p); });
 
                         msgs.reserve(cnt);
-                        for (uint32_t i{0}; i != cnt; ++i)
-                                msgs.push_back({content, 0, {}});
+                        for (uint32_t i{0}; i < cnt; )
+			{
+				const auto n = i + batchSize;
+
+				while (i != n && i < cnt)
+				{
+	                                msgs.push_back({content, 0, {}});
+					++i;
+				}
+			}
 
                         const auto start{Timings::Microseconds::Tick()};
 
