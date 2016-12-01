@@ -5057,7 +5057,7 @@ int Service::start(int argc, char **argv)
 
                         case 'h':
                                 Print("-p path: Specifies the base path where all topic exist. Used in standalone mode\n");
-                                Print("-b endpoint: Specifies that the service will run in standalone mode, listening for connections to that address\n");
+                                Print("-l endpoint: Specifies that the service will run in standalone mode, listening for connections to that address\n");
                                 Print("-v : displays Tank version and exits\n");
                                 Print("-h : this help message\n");
                                 return 0;
