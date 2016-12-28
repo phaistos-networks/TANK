@@ -1551,7 +1551,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                         const auto requestedSeqNum = reqSeqNums[reqOffsetIdx++];
 
                         if (trace)
-                                SLog("logBaseSeqNum = ", logBaseSeqNum, ", highWaterMark = ", highWaterMark, ", len = ", len, ", requestedSeqNum(", requestedSeqNum, ") for ", reqOffsetIdx - 1, ", for partition ", partitionId, ", errorOrFlags = ", errorOrFlags, "\n");
+                                SLog("logBaseSeqNum = ", logBaseSeqNum, ", highWaterMark = ", highWaterMark, ", len = ", len, "(bytes streamed from the commit log; may be partial), requestedSeqNum(", requestedSeqNum, ") for ", reqOffsetIdx - 1, ", for partition ", partitionId, ", errorOrFlags = ", errorOrFlags, "\n");
 
                         if (errorOrFlags == 0x1)
                         {
@@ -1732,7 +1732,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         }
 
                                         if (trace)
-                                                SLog("compressed, need to decompress messages set ", bundleEnd - p, " (", size_repr(bundleEnd - p), ")\n");
+                                                SLog("Compressed, need to decompress messages set ", bundleEnd - p, " (", size_repr(bundleEnd - p), ")\n");
 
                                         auto rawData = get_buffer();
 
@@ -1750,7 +1750,6 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                                         if (trace)
                                                                 SLog("Decompressed ", size_repr(bundleEnd - p), " => ", size_repr(rawData->size()), "\n");
-
                                                         break;
 
                                                 default:
@@ -1763,6 +1762,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 }
                                 else
                                         msgSetContent.Set(p, Min<size_t>(chunkEnd - p, bundleEnd - p));
+
+
 
                                 p = bundleEnd;
 
@@ -1856,6 +1857,9 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                         if (msgFlags & uint8_t(TankFlags::BundleMsgFlags::HaveKey))
                                         {
+						if (trace)
+							SLog("Message have key\n");
+
                                                 if (p + sizeof(uint8_t) > endOfMsgSet || (p + (*p) + sizeof(uint8_t) > endOfMsgSet))
                                                 {
                                                         lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - bundlesBase);
@@ -1892,8 +1896,9 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         {
                                                 lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - bundlesBase);
 
+
                                                 if (trace)
-                                                        SLog("Boundaries\n");
+                                                        SLog("Boundaries ", lastPartialMsgMinFetchSize, " ", boundaryCheckTarget - bundlesBase, " (expected to parse u32 in ", endOfMsgSet - p, " bytes)\n");
 
                                                 goto nextPartition;
                                         }
@@ -1958,7 +1963,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                         // we couldn't parse a single message from any bundle for this (topic, partition)  - i.e consumptionsList.empty() == true
                         const auto next = consumptionList.size()
                                               ? requestedSeqNum == UINT64_MAX ? consumptionList.back().seqNum + 1 : Max(requestedSeqNum, consumptionList.back().seqNum + 1)
-                                              : requestedSeqNum;
+                                              : requestedSeqNum == UINT64_MAX ? highWaterMark + 1 : requestedSeqNum;
 
                         if (const uint32_t cnt = consumptionList.size())
                         {

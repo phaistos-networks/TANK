@@ -262,12 +262,17 @@ int main(int argc, char *argv[])
                 IOBuffer buf;
                 range64_t timeRange{0, UINT64_MAX};
 		bool drainAndExit{false};
+		uint64_t endSeqNum{UINT64_MAX};
 
                 optind = 0;
-                while ((r = getopt(argc, argv, "+SF:hBT:Kd")) != -1)
+                while ((r = getopt(argc, argv, "+SF:hBT:KdE:")) != -1)
                 {
                         switch (r)
                         {
+				case 'E':
+					endSeqNum = strwlen32_t(optarg).AsUint64();
+					break;
+
 				case 'd':
 					drainAndExit = true;
 					break;
@@ -334,6 +339,7 @@ int main(int argc, char *argv[])
                                         Print("Options include:\n");
                                         Print("-F display format: Specify a ',' separated list of message properties to be displayed. Properties include: \"seqnum\", \"key\", \"content\", \"ts\". By default, only the content is displayed\n");
                                         Print("-S: statistics only\n");
+					Print("-E seqNum: Stop at sequence number specified\n");
 					Print("-d: drain and exit. As soon as all available messages have been consumed, exit (i.e do not tail)\n");
                                         Print("-T: optionally, filter all consumes messages by specifying a time range in either (from,to) or (from) format, where the first allows to specify a start and an end date/time and the later a start time and no end time. Currently, only one date-time format is supported (YYYMMDDHH:MM:SS)\n");
                                         Print("\"from\" specifies the first message we are interested in.\n");
@@ -428,6 +434,7 @@ int main(int argc, char *argv[])
                                 else
                                 {
                                         size_t sum{0};
+
                                         for (const auto m : it.msgs)
                                                 sum += m->content.len;
                                         sum += it.msgs.len * 2;
@@ -437,12 +444,15 @@ int main(int argc, char *argv[])
                                         buf.reserve(sum);
                                         for (const auto m : it.msgs)
                                         {
+						if (m->seqNum > endSeqNum)
+							break;
                                                 if (timeRange.Contains(m->ts))
                                                 {
 							if (asKV)
 								buf.append(m->seqNum, " [", m->key, "] = [", m->content, "]");
 							else
                                                         	buf.append(m->content);
+
                                                         buf.append('\n');
                                                 }
                                         }
@@ -467,6 +477,10 @@ int main(int argc, char *argv[])
                                 minFetchSize = Max<size_t>(it.next.minFetchSize, defaultMinFetchSize);
                                 next = it.next.seqNum;
                                 pendingResp = 0;
+
+				if (next > endSeqNum)
+					exit(0);
+					
                         }
                 }
 
@@ -1293,10 +1307,10 @@ int main(int argc, char *argv[])
                 {
                         // Measure latency when publishing from publisher to broker and from broker to consume
                         // Submit messages to the broker and wait until you get them back
-                        size_t size{128}, cnt{1};
+                        size_t size{128}, cnt{1}, batchSize{1};
 
                         optind = 0;
-                        while ((r = getopt(argc, argv, "+hc:s:R")) != -1)
+                        while ((r = getopt(argc, argv, "+hc:s:RB:")) != -1)
                         {
                                 switch (r)
                                 {
@@ -1312,12 +1326,18 @@ int main(int argc, char *argv[])
                                                 size = strwlen32_t(optarg).AsUint32();
                                                 break;
 
+					case 'B':
+						batchSize = strwlen32_t(optarg).AsUint32();
+						break;
+
+
                                         case 'h':
                                                 Print("Performs a produce to consumer via Tank latency test. It will produce messages while also 'tailing' the selected topic and will measure how long it takes for the messages to reach the broker, stored, forwarded to the client and received\n");
                                                 Print("Options include:\n");
-                                                Print("-s message content length: by default 11bytes\n");
-                                                Print("-c total messages to publish: by default 1 message\n");
+                                                Print("-s message contrent length (default 11 bytes)\n");
+                                                Print("-c total messages to publish (default 1 message)\n");
                                                 Print("-R: do not compress bundle\n");
+						Print("-B: batch size(default 1)\n");
                                                 return 0;
 
                                         default:
@@ -1327,9 +1347,14 @@ int main(int argc, char *argv[])
                         argc -= optind;
                         argv += optind;
 
+
                         auto *p = (char *)malloc(size + 16);
 
-                        memset(p, 0, size);
+                        Defer({ free(p); });
+
+			// A mostly random collection of bytes for each message
+			for (uint32_t i{0}; i != size; ++i)
+				p[i] = (i + (i&3)) & 127;
 
                         const strwlen32_t content(p, size);
                         std::vector<TankClient::msg> msgs;
@@ -1344,8 +1369,16 @@ int main(int argc, char *argv[])
 
                         msgs.reserve(cnt);
 
-                        for (uint32_t i{0}; i != cnt; ++i)
-                                msgs.push_back({content, 0, {}});
+                        for (uint32_t i{0}; i < cnt; )
+			{
+				const auto n = i + batchSize;
+
+				while (i != n && i < cnt)
+				{
+	                                msgs.push_back({content, 0, {}});
+					++i;
+				}
+			}
 
                         const auto start{Timings::Microseconds::Tick()};
 
@@ -1377,8 +1410,7 @@ int main(int argc, char *argv[])
                 }
                 else if (type.Eq(_S("p2b")))
                 {
-                        // Measure latency when publishing from publisher to broker and from broker to consume
-                        // Submit messages to the broker and wait until you get them back
+                        // Measure latency when publishing from publisher to brokerr
                         size_t size{128}, cnt{1}, batchSize{1};
 			bool compressionDisabled{false};
 
@@ -1422,15 +1454,17 @@ int main(int argc, char *argv[])
 
                         auto *p = (char *)malloc(size + 16);
 
+                        Defer({ free(p); });
+
+			// A mostly random collection of bytes for each message
 			for (uint32_t i{0}; i != size; ++i)
-				p[i] = i & 127;
+				p[i] = (i + (i&3)) & 127;
 
 			Print("Will publish ", dotnotation_repr(cnt), " messages, in batches of ", dotnotation_repr(batchSize), " messages, each message content is ", size_repr(size), compressionDisabled ? " (compression disabled)" : "", "\n");
 
                         const strwlen32_t content(p, size);
                         std::vector<TankClient::msg> msgs;
 
-                        Defer({ free(p); });
 
                         msgs.reserve(cnt);
                         for (uint32_t i{0}; i < cnt; )
@@ -1466,7 +1500,7 @@ int main(int argc, char *argv[])
 
                                 if (tankClient.produce_acks().size())
                                 {
-                                        Print("Go ACK after publishing ", dotnotation_repr(cnt), " message(s) of size ", size_repr(content.len), " (", size_repr(cnt * content.len), "), took ", duration_repr(Timings::Microseconds::Since(start)), "\n");
+                                        Print("Got ACK after publishing ", dotnotation_repr(cnt), " message(s) of size ", size_repr(content.len), " (", size_repr(cnt * content.len), "), took ", duration_repr(Timings::Microseconds::Since(start)), "\n");
                                         return 0;
                                 }
                         }

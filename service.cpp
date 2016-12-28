@@ -5200,7 +5200,7 @@ int Service::start(int argc, char **argv)
 
                         for (const auto &it : collectedTopics)
                         {
-                                futures.push_back(std::async([&collectLock, &basePath_ = basePath_, this, &pendingPartitions ](const strwlen8_t name) {
+                                futures.push_back(std::async(std::launch(std::launch::async), [&collectLock, &basePath_ = basePath_, this, &pendingPartitions ](const strwlen8_t name) {
                                         char path[PATH_MAX];
                                         struct stat64 st;
                                         const auto len = Snprint(path, sizeof(path), basePath_, "/", name, "/");
@@ -5279,7 +5279,7 @@ int Service::start(int argc, char **argv)
 
                                         for (uint16_t i{0}; i != it.second; ++i)
                                         {
-                                                futures.push_back(std::async([&list, &collectLock, &basePath_ = basePath_, this ](topic * t, const uint16_t partition) {
+                                                futures.push_back(std::async(std::launch(std::launch::async), [&list, &collectLock, &basePath_ = basePath_, this ](topic * t, const uint16_t partition) {
                                                         char path[PATH_MAX];
 
                                                         Snprint(path, sizeof(path), basePath_.data(), "/", t->name_, "/", partition, "/");

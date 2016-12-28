@@ -111,7 +111,7 @@ namespace Compression
                 {
                         if (unlikely(p >= e))
                                 break;
-                        else if (*p < 127)
+                        else if (*p < 128)
                                 return i + 1;
                         else
                                 ++p;
