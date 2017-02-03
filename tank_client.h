@@ -217,7 +217,9 @@ class TankClient final
 
                 // We can't rely on msgs.back().seqNum + 1 to compute the next sequence number
                 // to consume from, because if no message at all can be parsed because
-                // of the request fetch size, msgs will be empty()
+                // of the request fetch size, msgs will be empty().
+		// Furthermore, this separation allows us to support (especially in future revisions)
+		// different semantics
                 struct
                 {
                         // to get more messages
@@ -262,6 +264,21 @@ class TankClient final
                                 uint64_t highWaterMark;
                         };
                 } ctx;
+
+
+		// handy utility function if type == Type::BoundaryCheck
+		// adjusts sequence number to be within [firstAvailSeqNum, highWaterMark + 1]
+		uint64_t adjust_seqnum_by_boundaries(uint64_t seqNum) const 
+		{
+			require(type == Type::BoundaryCheck);
+
+			if (seqNum < ctx.firstAvailSeqNum)
+				seqNum = ctx.firstAvailSeqNum;
+			else if (seqNum > ctx.highWaterMark)
+				seqNum = ctx.highWaterMark + 1;
+
+			return seqNum;
+		}
         };
 
       private:
@@ -388,7 +405,8 @@ class TankClient final
         Switch::vector<std::pair<connection *, IOBuffer *>> connsBufs;
         // TODO: https://github.com/phaistos-networks/TANK/issues/6
         Switch::vector<IOBuffer *> usedBufs;
-        simple_allocator resultsAllocator{4 * 1024 * 1024};
+        simple_allocator resultsAllocator{2 * 1024 * 1024};
+	Switch::vector<void *> resultsAllocations;
         Switch::vector<partition_content> consumedPartitionContent;
         Switch::vector<fault> capturedFaults;
         Switch::vector<produce_ack> produceAcks;

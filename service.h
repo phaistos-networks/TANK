@@ -97,7 +97,7 @@ struct ro_segment
 	// For RO segments, this used to be set to the creation time of the
 	// mutable segment that was then turned into a R/O segment.
 	//
-	// This howevet tuend out to be problematic, because retention logic woulc
+	// This however turned out to be problematic, because retention logic would
 	// consider that timestamp for retentions, instead of what makes more sense, the time when 
 	// the last message was appended to the mutable segment, before it was frozen as a RO segment.
 	// 
@@ -351,7 +351,7 @@ struct topic_partition_log
 
         lookup_res range_for(uint64_t absSeqNum, const uint32_t maxSize, uint64_t maxAbsSeqNum);
 
-        append_res append_bundle(const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt, const uint64_t, const uint64_t);
+        append_res append_bundle(const time_t, const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt, const uint64_t, const uint64_t);
 
         bool should_roll(const uint32_t) const;
 
@@ -457,7 +457,7 @@ struct topic_partition
 
         void consider_append_res(append_res &res, Switch::vector<wait_ctx *> &waitCtxWorkL);
 
-        append_res append_bundle_to_leader(const uint8_t *const bundle, const size_t bundleLen, const uint32_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL, const uint64_t, const uint64_t);
+        append_res append_bundle_to_leader(const time_t, const uint8_t *const bundle, const size_t bundleLen, const uint32_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL, const uint64_t, const uint64_t);
 
         lookup_res read_from_local(const bool fetchOnlyFromLeader, const bool fetchOnlyComittted, const uint64_t absSeqNum, const uint32_t fetchSize);
 };
@@ -847,6 +847,7 @@ class Service final
         EPoller poller;
         Switch::vector<topic_partition *> deferList;
 	range32_t patchList[1024];
+	time_t curTime;
 
       private:
         static void parse_partition_config(const char *, partition_config *);

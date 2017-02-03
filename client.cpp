@@ -92,7 +92,7 @@ TankClient::~TankClient()
                 while (auto p = bs->outgoing_content.front())
                 {
                         bs->outgoing_content.pop_front();
-			if (!p->tracked_by_reqs_tracker())
+                        if (!p->tracked_by_reqs_tracker())
                                 put_payload(p, __LINE__);
                 }
 
@@ -101,8 +101,8 @@ TankClient::~TankClient()
                         auto next = it->next;
                         auto payload = switch_list_entry(outgoing_payload, pendingRespList, it);
 
-			if (!payload->tracked_by_reqs_tracker())
-                        	put_payload(payload, __LINE__);
+                        if (!payload->tracked_by_reqs_tracker())
+                                put_payload(payload, __LINE__);
 
                         it = next;
                 }
@@ -112,7 +112,7 @@ TankClient::~TankClient()
                         const auto res = pendingConsumeReqs.detach(id);
                         auto info = res.value();
 
-			put_payload(info.reqPayload, __LINE__);
+                        put_payload(info.reqPayload, __LINE__);
                         free(info.seqNums);
                 }
 
@@ -121,17 +121,17 @@ TankClient::~TankClient()
                         const auto res = pendingProduceReqs.detach(id);
                         const auto info = res.value();
 
-			put_payload(info.reqPayload, __LINE__);
+                        put_payload(info.reqPayload, __LINE__);
                         free(info.ctx);
                 }
 
-		for (const auto id : bs->reqs_tracker.pendingCtrl)
-		{
-			const auto res = pendingCtrlReqs.detach(id);
-			const auto info = res.value();
+                for (const auto id : bs->reqs_tracker.pendingCtrl)
+                {
+                        const auto res = pendingCtrlReqs.detach(id);
+                        const auto info = res.value();
 
-			put_payload(info.reqPayload, __LINE__);
-		}
+                        put_payload(info.reqPayload, __LINE__);
+                }
 
                 delete bs;
         }
@@ -152,6 +152,9 @@ TankClient::~TankClient()
                 close(pipeFd[0]);
         if (pipeFd[1] != -1)
                 close(pipeFd[1]);
+
+        for (auto ptr : resultsAllocations)
+                ::free(ptr);
 }
 
 uint8_t TankClient::choose_compression_codec(const msg *const msgs, const size_t msgsCnt)
@@ -1603,6 +1606,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 const auto bundleLen = Compression::UnpackUInt32(p);
                                 const auto *const bundleEnd = p + bundleLen;
 
+
                                 // This is more particularly optimal, for if boundary checks fail, we 'll try to consume the whole thing later
                                 // and maybe all we 'd need is one 1K message or so, but for now if boundaries check fail, we 'll advise client to
                                 // set minSize to a value high enough that will consume the whole bundle at the very least
@@ -1701,7 +1705,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 {
                                         // Optimization: can skip this bundle altogether
                                         if (trace)
-                                                SLog("Skipping bundle:", requestedSeqNum, ">= ", msgSetEnd, "\n");
+                                                SLog("Skipping bundle:", requestedSeqNum, ">= ", msgSetEnd, ", ", chunkEnd - bundleEnd, "\n");
+
 
                                         p = bundleEnd;
 
@@ -1965,6 +1970,10 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                               ? requestedSeqNum == UINT64_MAX ? consumptionList.back().seqNum + 1 : Max(requestedSeqNum, consumptionList.back().seqNum + 1)
                                               : requestedSeqNum == UINT64_MAX ? highWaterMark + 1 : requestedSeqNum;
 
+			if (trace)
+				SLog("consumptionList.size = ", consumptionList.size(), ", requestedSeqNum = ", requestedSeqNum, ", highWaterMark = ", highWaterMark, "\n");
+
+
                         if (const uint32_t cnt = consumptionList.size())
                         {
                                 if (i == topicsCnt - 1 && k == partitionsCnt - 1)
@@ -1974,7 +1983,18 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 }
                                 else
                                 {
-                                        auto p = resultsAllocator.CopyOf(consumptionList.data(), cnt);
+					consumed_msg *p;
+                                        const size_t s = sizeof(consumed_msg) * consumptionList.size();
+
+					if (s >= 2 * 1024 * 1024)
+					{
+						// large allocation; can't/shouldn't satisfy from the allocator
+						p = (consumed_msg *)malloc(s);
+						memcpy(p, consumptionList.data(), s);
+						resultsAllocations.push_back(p);
+					}
+					else
+                                        	p = resultsAllocator.CopyOf(consumptionList.data(), cnt);
 
                                         consumedPartitionContent.push_back({clientReqId, topicName, partitionId, {p, cnt}, true, {next, lastPartialMsgMinFetchSize}});
                                         consumptionList.clear();
@@ -2384,6 +2404,9 @@ void TankClient::poll(uint32_t timeoutMS)
 	if (trace)
 		SLog("POLLING, resetting consumedPartitionContent.size = ", consumedPartitionContent.size(), "\n");
 
+	for (auto ptr : resultsAllocations)
+		::free(ptr);
+	resultsAllocations.clear();
         resultsAllocator.reuse();
         consumedPartitionContent.clear();
         capturedFaults.clear();

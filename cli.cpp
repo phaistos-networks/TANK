@@ -286,6 +286,7 @@ int main(int argc, char *argv[])
                                         const auto r = strwlen32_t(optarg).Divided(',');
 
                                         timeRange.offset = parse_timestamp(r.first);
+					//Print(Date::ts_repr(timeRange.offset / 1000), "\n");
                                         if (!timeRange.offset)
                                         {
                                                 Print("Failed to parse ", r.first, "\n");
@@ -420,8 +421,13 @@ int main(int argc, char *argv[])
 
                         for (const auto &it : tankClient.consumed())
                         {
-				if (drainAndExit && it.msgs.len == 0)
+				if (drainAndExit && it.msgs.len == 0 && minFetchSize <= it.next.minFetchSize)
+				{
+					// Drained if we got no message in the response, and if the size we specified
+					// is <= next.minFetchSize. This is important because we could get no messages
+					// because the message is so large the minFetchSize we provided for the request was too low
 					goto out;
+				}
 
                                 if (statsOnly)
                                 {
@@ -451,7 +457,11 @@ int main(int argc, char *argv[])
 							if (asKV)
 								buf.append(m->seqNum, " [", m->key, "] = [", m->content, "]");
 							else
+							{
+								if (displayFields & (1u << uint8_t(Fields::TS)))
+									buf.append(Date::ts_repr(Timings::Milliseconds::ToSeconds(m->ts)), ':');
                                                         	buf.append(m->content);
+							}
 
                                                         buf.append('\n');
                                                 }

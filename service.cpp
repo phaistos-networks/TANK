@@ -321,7 +321,7 @@ static bool adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
         bool firstBundleIsSparse{false};
 
         if (trace)
-                SLog(ansifmt::bold, ansifmt::color_brown, "About to adjust range fileOffset ", baseOffset, ", absBaseSeqNum(", baseSeqNum, "), absSeqNum(", absSeqNum, ")", ansifmt::reset, "\n");
+                SLog(ansifmt::bold, ansifmt::color_brown, "About to adjust range fileOffset ", baseOffset, ", absBaseSeqNum(", baseSeqNum, "), absSeqNum(", absSeqNum, "), fileOffsetCeiling = ", fileOffsetCeiling,  ansifmt::reset, "\n");
 
         while (o < fileOffsetCeiling)
         {
@@ -374,11 +374,11 @@ static bool adjust_range_start(lookup_res &res, const uint64_t absSeqNum)
                 if (absSeqNum >= nextBundleBaseSeqNum)
                 {
                         // Our target is in later bundle
-                        if (trace)
-                                SLog("Target in later bundle\n");
-
                         o += bundleLen + encodedBundleLenLen;
                         baseSeqNum = nextBundleBaseSeqNum;
+
+                        if (trace)
+                                SLog("Target in later bundle, advanced to = ", o, "\n");
                 }
                 else
                 {
@@ -1642,6 +1642,9 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
                 else
                         offsetCeil = f->fileSize;
 
+		if (trace)
+			SLog("offsetCeil = ", offsetCeil, ", fileSize = ", f->fileSize, "\n");
+
                 return {f->fdh, offsetCeil, f->baseSeqNum + res.record.relSeqNum, res.record.absPhysical, highWatermark};
         }
 
@@ -1827,12 +1830,12 @@ bool topic_partition_log::may_switch_index_wide(const uint64_t lastMsgSeqNum)
 }
 
 // if (firstMsgSeqNum != 0 && lastMsgSeqNum != 0), we have expicitly specified message sequence numbers for the bundle first/last message
-append_res topic_partition_log::append_bundle(const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt, const uint64_t firstMsgSeqNum, const uint64_t lastMsgSeqNum)
+append_res topic_partition_log::append_bundle(const time_t now, const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt, const uint64_t firstMsgSeqNum, const uint64_t lastMsgSeqNum)
 {
         const auto savedLastAssignedSeqNum = lastAssignedSeqNum;
         const auto absSeqNum = firstMsgSeqNum ?: lastAssignedSeqNum + 1;
-        const auto now = Timings::Seconds::SysTime();
 
+	Drequire(absSeqNum >= cur.baseSeqNum); 	// added 10.01.2k17
         Drequire(bundleMsgsCnt);
 
         if (lastMsgSeqNum)
@@ -2065,6 +2068,8 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                 // 1. we can always rebuild the index 2. we use the index to locate the closest bundle to the target sequence number
                 if (cur.sinceLastUpdate > config.indexInterval)
                 {
+			require(absSeqNum >= cur.baseSeqNum); // sanity check
+
                         const uint32_t out[] = {uint32_t(absSeqNum - cur.baseSeqNum), cur.fileSize};
 
                         cur.index.skipList.push_back({out[0], out[1]});
@@ -2080,6 +2085,11 @@ append_res topic_partition_log::append_bundle(const void *bundle, const size_t b
                                 return {nullptr, {}, {}};
                         }
 
+			if (0 == cur.fileSize)
+			{
+				// Make sure we get that first record synced
+				fdatasync(cur.index.fd); 
+			}
                         cur.sinceLastUpdate = 0;
                 }
 
@@ -2200,7 +2210,7 @@ void topic_partition::consider_append_res(append_res &res, Switch::vector<wait_c
         }
 }
 
-append_res topic_partition::append_bundle_to_leader(const uint8_t *const bundle, const size_t bundleLen, const uint32_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL, const uint64_t firstMsgSeqNum, const uint64_t lastMsgSeqNum)
+append_res topic_partition::append_bundle_to_leader(const time_t curTime, const uint8_t *const bundle, const size_t bundleLen, const uint32_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL, const uint64_t firstMsgSeqNum, const uint64_t lastMsgSeqNum)
 {
         // TODO: route to leader
         try
@@ -2233,7 +2243,7 @@ append_res topic_partition::append_bundle_to_leader(const uint8_t *const bundle,
                         return {nullptr, {0, UINT32_MAX}, {}};
                 }
 
-                auto res = log_->append_bundle(bundle, bundleLen, bundleMsgsCnt, firstMsgSeqNum, lastMsgSeqNum);
+                auto res = log_->append_bundle(curTime, bundle, bundleLen, bundleMsgsCnt, firstMsgSeqNum, lastMsgSeqNum);
 
                 if (trace)
                         SLog("Appended to ", ptr_repr(this), " ", res.fdh ? res.fdh->use_count() : 0, "\n");
@@ -2560,6 +2570,7 @@ void Service::rebuild_index(int logFd, int indexFd)
 
 void Service::verify_index(int fd, const bool wideEntries)
 {
+	static constexpr bool trace{false};
         const auto fileSize = lseek64(fd, 0, SEEK_END);
 
         if (!fileSize)
@@ -2572,7 +2583,11 @@ void Service::verify_index(int fd, const bool wideEntries)
         if (fileData == MAP_FAILED)
                 throw Switch::system_error("Unable to mmap():", strerror(errno));
 
-        Defer({ munmap(fileData, fileSize); });
+        Defer(
+            {
+                    madvise(fileData, fileSize, MADV_DONTNEED);
+                    munmap(fileData, fileSize);
+            });
         madvise(fileData, fileSize, MADV_SEQUENTIAL);
 
         if (wideEntries)
@@ -2584,6 +2599,9 @@ void Service::verify_index(int fd, const bool wideEntries)
                         *const e = p + (fileSize / sizeof(uint32_t)), *const b = p;
              p != e; p += 2)
         {
+		if (trace)
+			SLog("Entry(", *p, ", ", p[1], ")\n");
+
                 if (p != b)
                 {
                         if (unlikely(p[0] <= p[-2]))
@@ -2619,15 +2637,19 @@ uint32_t Service::verify_log(int fd)
         auto *const fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, fd, 0);
         strwlen8_t key;
         strwlen32_t msgContent;
-        uint32_t relSeqNum{0};
         IOBuffer cb;
         range_base<const uint8_t *, size_t> msgSetContent;
-        uint64_t lastMsgSeqNum;
+	uint64_t msgSeqNum{1}, firstMsgSeqNum, lastMsgSeqNum;
+	static constexpr bool trace{false};
 
         if (fileData == MAP_FAILED)
-                throw Switch::system_error("Unable to mmap():", strerror(errno));
+		throw Switch::system_error("Unable to mmap():", strerror(errno));
 
-        Defer({ munmap(fileData, fileSize); });
+        Defer(
+            {
+                    madvise(fileData, fileSize, MADV_DONTNEED);
+                    munmap(fileData, fileSize);
+            });
         madvise(fileData, fileSize, MADV_SEQUENTIAL);
 
         for (const auto *p = (uint8_t *)fileData, *const e = p + fileSize, *const base = p; p != e;)
@@ -2647,6 +2669,9 @@ uint32_t Service::verify_log(int fd)
                 if (!msgsSetSize)
                         msgsSetSize = Compression::UnpackUInt32(p);
 
+		if (trace)
+			SLog("Bundle, flags = ", bundleFlags, ", codec = ", codec, ", sparseBundleBitSet = ", sparseBundleBitSet, ", msgsSetSize = ", msgsSetSize, "\n");
+
                 if (sparseBundleBitSet)
                 {
                         const auto firstMsgSeqNum = *(uint64_t *)p;
@@ -2662,6 +2687,9 @@ uint32_t Service::verify_log(int fd)
                                 lastMsgSeqNum = firstMsgSeqNum;
                         }
 
+			if (trace)
+				SLog("sparse bundle - firstMsgSeqNum = ", firstMsgSeqNum, ", lastMsgSeqNum = ", lastMsgSeqNum, "\n");
+
                         expect(firstMsgSeqNum && lastMsgSeqNum >= firstMsgSeqNum);
                 }
 
@@ -2670,7 +2698,7 @@ uint32_t Service::verify_log(int fd)
                 expect(codec == 0 || codec == 1);
 
                 if (0)
-                        Print(relSeqNum, " => OFFSET ", bundleBase - base, "\n");
+                        Print(msgSeqNum, " => OFFSET ", bundleBase - base, "\n");
 
                 if (codec)
                 {
@@ -2682,11 +2710,10 @@ uint32_t Service::verify_log(int fd)
                 else
                         msgSetContent.Set(p, nextBundle - p);
 
-                uint64_t msgTs{0};
+                [[maybe_unused]] uint64_t msgTs{0};
                 uint32_t msgIdx{0};
 
-                (void)msgTs;
-                for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.len; p != e; ++msgIdx)
+                for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.len; p != e; ++msgIdx, ++msgSeqNum)
                 {
                         // Next message set message
                         const auto flags = *p++;
@@ -2694,17 +2721,17 @@ uint32_t Service::verify_log(int fd)
                         if (sparseBundleBitSet)
                         {
                                 if (msgIdx == 0 || msgIdx == msgsSetSize - 1)
-                                {
-                                        //
-                                }
+					msgSeqNum = firstMsgSeqNum;
+				else if (msgIdx == msgsSetSize - 1)
+					msgSeqNum = lastMsgSeqNum;
                                 else if (flags & uint8_t(TankFlags::BundleMsgFlags::SeqNumPrevPlusOne))
                                 {
-                                        //
+					// incremented in for()
                                 }
                                 else
                                 {
                                         // delta from prev - 1
-                                        Compression::UnpackUInt32(p);
+                                        msgSeqNum += Compression::UnpackUInt32(p);
                                 }
                         }
 
@@ -2726,18 +2753,16 @@ uint32_t Service::verify_log(int fd)
 
                         msgContent.Set((char *)p, msgLen);
                         p += msgLen;
-                }
 
-                if (sparseBundleBitSet)
-                        relSeqNum = lastMsgSeqNum;
-                else
-                        relSeqNum += msgsSetSize;
+			if (trace)
+				Print("MSG:", msgSeqNum, ", size = ", msgLen, "\n");
+                }
 
                 p = nextBundle;
                 expect(p <= e);
         }
 
-        return relSeqNum;
+        return msgSeqNum;
 }
 
 Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint16_t idx, const char *const bp, const partition_config &partitionConf)
@@ -3130,7 +3155,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
 
                                 if (trace)
                                 {
-                                        SLog("From lastRecorded.absPhysical = ", o, ", cur.baseSeqNum = ", l->cur.baseSeqNum, "\n");
+                                        SLog("From lastRecorded.relSeqNum = ", l->cur.index.ondisk.lastRecorded.relSeqNum , ", lastRecorded.absPhysical = ", o, ", cur.baseSeqNum = ", l->cur.baseSeqNum, "\n");
                                         SLog("span = ", span, ", start from ", next, "\n");
                                 }
 
@@ -3230,6 +3255,8 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         l->cur.nameEncodesTS = curLogCreateTS;
                         l->cur.flush_state.pendingFlushMsgs = 0;
                         l->cur.flush_state.nextFlushTS = config.flushIntervalSecs ? now + config.flushIntervalSecs : UINT32_MAX;
+
+			Drequire(l->lastAssignedSeqNum >= l->cur.baseSeqNum); // Added 10.01.2k17
 
                         if (trace)
                                 SLog("createdTS(", l->cur.createdTS, ") nameEncodesTS(", l->cur.nameEncodesTS, ")\n");
@@ -4147,8 +4174,8 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                         // 1. Always use sparse bundles when compacting
                         // 2. use TankClient::produce_with_base() for mirroring
                         // 3. Expect that everything will work out otherwise if you are just building Tank apps.
-                        const auto b = Timings::Microseconds::Tick();
-                        const auto res = partition->append_bundle_to_leader(bundle, bundleLen, msgSetSize, expiredCtxList3, firstMsgSeqNum, lastMsgSeqNum);
+                        [[maybe_unused]] const uint64_t b = trace ? Timings::Microseconds::Tick() : 0;
+                        const auto res = partition->append_bundle_to_leader(curTime, bundle, bundleLen, msgSetSize, expiredCtxList3, firstMsgSeqNum, lastMsgSeqNum);
 
                         if (unlikely(!res.fdh))
                         {
@@ -4172,9 +4199,6 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                         if (trace)
                                 SLog("Took ", duration_repr(Timings::Microseconds::Since(b)), " for ", msgSetSize, " msgs in bundle message set: ", expiredCtxList3.size(), " ", res.fdh ? res.fdh->use_count() : 0, "\n");
 
-#ifdef LEAN_SWITCH
-                        (void)b;
-#endif
 
                         while (expiredCtxList3.size())
                         {
@@ -5016,7 +5040,7 @@ int Service::start(int argc, char **argv)
 
                                 if (fd == -1)
                                 {
-                                        Print("Failed to access ", fullPath, ": ", strerror(errno), "\n");
+                                        RFLog("Failed to access ", fullPath, ": ", strerror(errno), "\n");
                                         return 1;
                                 }
 
@@ -5132,6 +5156,7 @@ int Service::start(int argc, char **argv)
                         std::vector<std::future<void>> futures;
                         std::mutex collectLock;
                         Switch::vector<std::pair<std::pair<strwlen8_t, uint16_t>, uint64_t>> cleanupCheckpoints;
+			char fullPath[PATH_MAX];
 
                         if (trace)
                                 before = Timings::Microseconds::Tick();
@@ -5144,7 +5169,7 @@ int Service::start(int argc, char **argv)
 
                                         if (fd == -1)
                                         {
-                                                Print("Failed to access ", name, ":", strerror(errno), "\n");
+                                                RFLog("Failed to access ", name, ":", strerror(errno), "\n");
                                                 return 1;
                                         }
 
@@ -5161,7 +5186,7 @@ int Service::start(int argc, char **argv)
                                         close(fd);
                                         if (fileData == MAP_FAILED)
                                         {
-                                                Print("mmap() failed:", strerror(errno), "\n");
+                                                RFLog("mmap() failed:", strerror(errno), "\n");
                                                 return 1;
                                         }
 
@@ -5192,7 +5217,24 @@ int Service::start(int argc, char **argv)
                                         }
                                 }
                                 else if (*name.p != '.')
-                                        collectedTopics.push_back({a.CopyOf(name.p, name.len), name.len});
+				{
+                                        struct stat64 st;
+
+					basePath_.ToCString(fullPath, sizeof(fullPath));
+					fullPath[basePath_.size()] = '/';
+					name.ToCString(fullPath + basePath_.size() + 1);
+
+					if (stat64(fullPath, &st) == -1)
+                                                throw Switch::system_error("Failed to stat(", fullPath, "): ", strerror(errno));
+					else if (!S_ISDIR(st.st_mode))
+					{
+						// Just ignore whatever isn't a directory
+					}
+					else
+					{
+                                        	collectedTopics.push_back({a.CopyOf(name.p, name.len), name.len});
+					}
+				}
                         }
 
                         if (trace)
@@ -5558,6 +5600,8 @@ int Service::start(int argc, char **argv)
                         nextCleanupTrackerPersist = nowMS + Timings::Seconds::ToMillis(4);
                 }
 
+		curTime = time(nullptr);
+
                 for (const auto *it = poller.Events(), *const e = it + r; it != e; ++it)
                 {
                         auto *const c = (connection *)it->data.ptr;
@@ -5571,9 +5615,22 @@ int Service::start(int argc, char **argv)
 
                                 if (newFd == -1)
                                 {
-                                        if (errno != EINTR && errno != EAGAIN)
+					if (errno == EMFILE || errno == ENFILE)
+					{
+						// TODO: Ideally, we 'd poller.DelFd(listenFd);
+						// set listening = false; and if a connection's closed, check
+						// if (listening == false)  { poller.AddFd(listenFd, POLLIN, &listenFd); listening  = true; }
+						// so that we won't waste any cycles attempting to accept4() only to fail because of this here reason
+						// This would probably be useful in case someone puprosely tried to harm the service, or some badly written client(s)
+						// are acting up.
+						//
+						// For now, just do nothing
+						// Reported @by @rkrambovitis
+						continue;
+					}
+                                        else if (errno != EINTR && errno != EAGAIN)
                                         {
-                                                Print("accept4(): ", strerror(errno), "\n");
+                                                RFLog("accept4(): ", strerror(errno), "\n");
                                                 return 1;
                                         }
                                 }
@@ -5634,7 +5691,7 @@ int Service::start(int argc, char **argv)
 
                                 if (unlikely(ioctl(fd, FIONREAD, &n) == -1))
                                 {
-                                        Print("ioctl():", strerror(errno), "\n");
+                                        RFLog("ioctl():", strerror(errno), "\n");
                                         return 1;
                                 }
                                 b->reserve(n);
@@ -5659,7 +5716,7 @@ int Service::start(int argc, char **argv)
                                 }
                                 else
                                 {
-                                        b->AdvanceLength(r);
+                                        b->advance_size(r);
                                         c->state.lastInputTS = Timings::Milliseconds::Tick();
                                 }
 
@@ -5788,7 +5845,7 @@ int Service::start(int argc, char **argv)
         }
 
         Print("TANK terminated\n");
-        return true;
+        return 0;
 }
 
 topic *Service::topic_by_name(const strwlen8_t name) const

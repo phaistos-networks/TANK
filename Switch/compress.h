@@ -105,7 +105,7 @@ namespace Compression
 #undef AS_FLIPPED_V
         }
 
-        inline uint8_t UnpackUInt32Check(const uint8_t *p, const uint8_t *const e)
+        inline uint8_t UnpackUInt32Check(const uint8_t *p, const uint8_t *const e) noexcept
         {
                 for (uint8_t i{0}; i != 5; ++i)
                 {
@@ -120,7 +120,7 @@ namespace Compression
                 return 0;
         }
 
-        inline uint32_t UnpackUInt32(const uint8_t *&buf)
+        inline uint32_t UnpackUInt32(const uint8_t *&buf) noexcept
         {
 #define FLIPPED(v) ((v) & ~128)
                 if (buf[0] > 127)
