@@ -1835,7 +1835,12 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
         const auto savedLastAssignedSeqNum = lastAssignedSeqNum;
         const auto absSeqNum = firstMsgSeqNum ?: lastAssignedSeqNum + 1;
 
-	Drequire(absSeqNum >= cur.baseSeqNum); 	// added 10.01.2k17
+	if (unlikely(absSeqNum < cur.baseSeqNum && cur.baseSeqNum != UINT64_MAX))
+	{
+		// This is odd
+		throw Switch::data_error("Unexpected absSeqNum(", absSeqNum, ") < cur.baseSeqNum(", cur.baseSeqNum, ") for ", partition->owner->name(), "/", partition->idx);
+	}
+
         Drequire(bundleMsgsCnt);
 
         if (lastMsgSeqNum)
