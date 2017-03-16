@@ -2236,6 +2236,9 @@ bool TankClient::try_send(connection *const c)
 
                         if (r == -1)
                         {
+				if (trace)
+					SLog("error:", strerror(errno), "\n");
+
                                 if (errno == EINTR)
                                         continue;
                                 else if (errno == EAGAIN)
@@ -2251,7 +2254,11 @@ bool TankClient::try_send(connection *const c)
                                         return true;
                                 }
                                 else
+				{
+					// TODO: if this e.g EINVAL or some other error we should probably propagate it
+					// up to the application as a fault
                                         return shutdown(c, __LINE__, true);
+				}
                         }
 
                         c->state.lastOutputTS = nowMS;
@@ -2564,11 +2571,12 @@ uint32_t TankClient::produce_with_base(const std::pair<topic_partition, std::pai
 		const auto &it = list[i];
                 const auto ref = it.first;
                 const auto topic = ref.first;
+		const auto leader = leader_for(topic, ref.second);
 
                 if (trace)
                         SLog("For (", topic, ", ", ref.second, "): ", it.second.second.size(), "\n");
 
-                out.push_back(produce_ctx{{leader_for(topic, ref.second)}, topic, ref.second, it.second.first, it.second.second.data(), it.second.second.size()});
+                out.push_back(produce_ctx{{leader}, topic, ref.second, it.second.first, it.second.second.data(), it.second.second.size()});
         }
 
         std::sort(out.begin(), out.end(), [](const auto &a, const auto &b) {
@@ -2618,11 +2626,16 @@ uint32_t TankClient::produce(const std::pair<topic_partition, std::vector<msg>> 
 		const auto &it = list[i];
                 const auto ref = it.first;
                 const auto topic = ref.first;
+		const auto leader = leader_for(topic, ref.second);
 
                 if (trace)
+		{
                         SLog("For (", topic, ", ", ref.second, "): ", it.second.size(), "\n");
+			SLog("leader for topic/partition:", leader, "\n");
+		}
 
-                out.push_back(produce_ctx{{leader_for(topic, ref.second)}, topic, ref.second, 0, it.second.data(), it.second.size()});
+
+                out.push_back(produce_ctx{{leader}, topic, ref.second, 0, it.second.data(), it.second.size()});
         }
 
         std::sort(out.begin(), out.end(), [](const auto &a, const auto &b) {
@@ -2647,6 +2660,9 @@ uint32_t TankClient::produce(const std::pair<topic_partition, std::vector<msg>> 
                         return a.topic < b.topic;
                 });
 
+		if (trace)
+			SLog("PRODUCING TO [", leader, "]\n");
+
                 if (!produce_to_leader(clientReqId, leader, all + base, i - base))
                         return 0;
         }
@@ -2667,18 +2683,34 @@ void TankClient::set_topic_leader(const strwlen8_t topic, const strwlen32_t endp
 
 Switch::endpoint TankClient::leader_for(const strwlen8_t topic, const uint16_t partition)
 {
+	if (trace)
+		SLog("Requesting leader for [", topic, "] ", partition, "\n");
+
 #ifndef LEAN_SWITCH
         if (const auto *const p = leadersMap.FindPointer(topic))
+	{
+		if (trace)
+			SLog("Returning:", *p, "\n");
+
                 return *p;
+	}
 #else
         const auto it = leadersMap.find(topic);
 
         if (it != leadersMap.end())
+	{
+		if (trace)
+			SLog("Returning ", it->second, "\n");
+
                 return it->second;
+	}
 #endif
 
         if (!defaultLeader)
                 throw Switch::data_error("Default leader not specified: use set_default_leader() to specify it");
+	
+	if (trace)
+		SLog("Returning default leader:", defaultLeader, "\n");
 
         return defaultLeader;
 }

@@ -1,5 +1,5 @@
 HOST:=$(shell hostname)
-SWITCH_DEP:=
+#SWITCH_DEP:=
 
 ifeq ($(HOST), origin)
 # When building on our dev.system

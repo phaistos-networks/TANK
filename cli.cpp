@@ -1199,7 +1199,7 @@ int main(int argc, char *argv[])
                                 if (!reqId)
                                 {
                                         Print("Failed to schedule messages to broker\n");
-                                        return false;
+                                        return 1;
                                 }
                                 else
                                         pendingResps.insert(reqId);
@@ -1222,12 +1222,12 @@ int main(int argc, char *argv[])
                                         {
                                                 range.len += r;
                                                 if (!consider_input(false))
-                                                        return false;
+                                                        return 1;
                                         }
                                 }
 
                                 if (!consider_input(true))
-                                        return false;
+                                        return 1;
                         }
 
                         while (tankClient.should_poll())
@@ -1261,7 +1261,7 @@ int main(int argc, char *argv[])
                                 if (msgs.size() == bundleSize)
                                 {
                                         if (!publish_msgs())
-                                                return false;
+                                                return 1;
                                         msgs.clear();
                                 }
                         }
@@ -1269,7 +1269,7 @@ int main(int argc, char *argv[])
                         if (msgs.size())
                         {
                                 if (!publish_msgs())
-                                        return false;
+                                        return 1;
 
                                 msgs.clear();
                         }
@@ -1277,7 +1277,7 @@ int main(int argc, char *argv[])
                         while (tankClient.should_poll())
                         {
                                 if (!poll())
-                                        return false;
+                                        return 1;
                         }
                 }
         }
@@ -1408,7 +1408,7 @@ int main(int argc, char *argv[])
                                 for (const auto &it : tankClient.faults())
                                 {
                                         consider_fault(it);
-                                        return false;
+                                        return 1;
                                 }
 
                                 if (tankClient.consumed().size())
@@ -1505,7 +1505,7 @@ int main(int argc, char *argv[])
                                 for (const auto &it : tankClient.faults())
                                 {
                                         consider_fault(it);
-                                        return false;
+                                        return 1;
                                 }
 
                                 if (tankClient.produce_acks().size())
