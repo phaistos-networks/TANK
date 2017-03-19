@@ -2506,6 +2506,31 @@ void Service::rebuild_index(int logFd, int indexFd)
                 const auto bundleLen = Compression::UnpackUInt32(p);
                 const auto nextBundle = p + bundleLen;
 
+		if (unlikely(nextBundle > e))
+                {
+                        if (getenv("TANK_FORCE_SALVAGE_CURSEGMENT"))
+                        {
+                                if (ftruncate(indexFd, 0) == -1)
+                                {
+                                        Print("Failed to truncate the index:", strerror(errno), "\n");
+                                        exit(1);
+                                }
+                                else
+                                {
+                                        Print("Please restart tank\n");
+                                        exit(0);
+                                }
+                        }
+                        else
+                        {
+                                Print("Likely corrupt segment(ran out of disk space?).\n");
+                                Print("Set ", ansifmt::bold, "TANK_FORCE_SALVAGE_CURSEGMENT=1", ansifmt::reset, " and restart Tank so that\n");
+                                Print("it will _delete_ the current segment index, and then you will need to restart again for Tank to get a chance to salvage the segment data\n");
+                                Print("Will not index any further\n");
+                                exit(1);
+                        }
+                }
+
                 expect(p < e);
 
                 const auto bundleFlags = *p++;
@@ -3047,7 +3072,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         for (const auto &it : roLogs)
                         {
                                 if (trace)
-                                        SLog("Initializing [", it.firstAvailableSeqNum, ",", it.lastAvailSeqNum, "]\n");
+                                        SLog("Initializing [firstAvailableSeqNum=", it.firstAvailableSeqNum, ",lastAvailSeqNum=", it.lastAvailSeqNum, ", base = ", b, "]\n");
 
                                 l->roSegments->push_back(new ro_segment(it.firstAvailableSeqNum, it.lastAvailSeqNum, b, it.creationTS, wideEntyRoLogIndices.count(it.firstAvailableSeqNum)));
                         }
@@ -3172,6 +3197,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                 Drequire(fd != -1);
 
                                 const auto res = pread64(fd, data, span, o);
+				const uint8_t *lastCheckpoint{data};
 
                                 if (trace)
                                         SLog("Attempting to read ", span, " bytes at ", o, ": ", res, "\n");
@@ -3181,10 +3207,42 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
 
                                 for (const auto *p = data, *const e = p + span; p != e;)
                                 {
+					const auto *saved{p};
                                         const auto bundleLen = Compression::UnpackUInt32(p);
                                         const auto *const bundleEnd = p + bundleLen;
 
+					if (unlikely(bundleLen == 0 || bundleEnd > e))
+					{
+                                                const auto ckpt = (lastCheckpoint - data) + o;
+
+                                                Print("Likely corrupt segment(ran out of disk space?).\n");
+						if (getenv("TANK_FORCE_SALVAGE_CURSEGMENT"))
+						{
+							if (ftruncate(l->cur.fdh->fd, ckpt) == -1)
+							{
+								Print("Failed to truncate:", strerror(errno), "\n");
+								exit(1);
+							}
+							else if (l->cur.index.fd != -1 && ftruncate(l->cur.index.fd, 0) == -1)
+							{
+								Print("Failed to truncate:", strerror(errno), "\n");
+								exit(1);
+							}
+							else
+								Print("Salvaged segment. Please restart Tank\n");
+						}
+						else
+                                                {
+                                                        Print("Set TANK_FORCE_SALVAGE_CURSEGMENT=1 and restart Tank so that it will _delete_ the current segment index and truncate the current segment file so that it will salvage whatever's possible\n");
+                                                        Print("Can save up to ", size_repr(ckpt), ", will lose ", size_repr(s - ckpt), "\n");
+                                                        Print("Aborting\n");
+                                                }
+                                                exit(1);
+					}
+
+
                                         Drequire(bundleLen);
+					lastCheckpoint = saved;
 
                                         const auto bundleFlags = *p++;
                                         const bool sparseBundleBitSet = bundleFlags & (1u << 6);
@@ -3291,7 +3349,6 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
         {
                 if (trace)
                         SLog("Exception:", e.what(), "\n");
-
                 throw;
         }
 }

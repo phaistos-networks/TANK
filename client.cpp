@@ -50,6 +50,31 @@ bool TankClient::should_poll() const noexcept
         return connectionAttempts.size() || pendingConsumeReqs.size() || pendingProduceReqs.size() || pendingCtrlReqs.size();
 }
 
+void TankClient::wait_scheduled(const uint32_t reqID)
+{
+	expect(reqID);
+
+	while (should_poll())
+	{
+		poll(1e3);
+
+		if (unlikely(faults().size()))
+			throw Switch::data_error("Fault while waiting responses");
+
+		for (const auto &it : produce_acks())
+		{
+			if (it.clientReqId == reqID)
+				return;
+		}
+
+		for (const auto &it : consumed())
+		{
+			if (it.clientReqId == reqID)
+				return;
+		}
+	}
+}
+
 TankClient::TankClient(const strwlen32_t defaultLeader)
 {
         switch_dlist_init(&connections);
@@ -2201,6 +2226,9 @@ bool TankClient::try_send(connection *const c)
 
         bs->outgoing_content.validate();
 
+	if (trace)
+		SLog("Trying to send\n");
+
         for (;;)
         {
                 struct iovec iov[128], *out = iov, *const outEnd = out + sizeof_array(iov);
@@ -2249,7 +2277,7 @@ bool TankClient::try_send(connection *const c)
                                                 poller.SetDataAndEvents(fd, c, POLLIN | POLLOUT);
 
                                                 if (trace)
-                                                        SLog("UNSETTING NeedOutAvail\n");
+                                                        SLog("SETTING NeedOutAvail\n");
                                         }
                                         return true;
                                 }
@@ -2842,4 +2870,15 @@ void TankClient::put_buffers(IOBuffer **const list, const size_t n)
 
         while (i != n)
                 delete list[i++];
+}
+
+void TankClient::set_default_leader(const Switch::endpoint e)
+{
+        if (!e)
+                throw Switch::data_error("Unable to parse default leader endpoint");
+	
+	if (trace)
+		SLog("Default leader set to ", e, "\n");
+
+        defaultLeader = e;
 }

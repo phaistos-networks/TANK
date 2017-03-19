@@ -667,13 +667,7 @@ class TankClient final
 		rcvBufSize = v;
 	}
 
-        void set_default_leader(const Switch::endpoint e)
-        {
-                if (!e)
-                        throw Switch::data_error("Unable to parse default leader endpoint");
-
-                defaultLeader = e;
-        }
+        void set_default_leader(const Switch::endpoint e);
 
 	void set_allow_streaming_consume_responses(const bool v)
 	{
@@ -690,6 +684,12 @@ class TankClient final
         void interrupt_poll();
 
         bool should_poll() const noexcept;
+
+	// A handy utility method
+	// Will check that reqID is valid, and then will wait until it gets an ack. for this request
+	// or any fault - and if it fails, it will throw an exception..
+	// This is mostly useful for produce responses
+	void wait_scheduled(const uint32_t reqID);
 };
 
 #ifdef LEAN_SWITCH
