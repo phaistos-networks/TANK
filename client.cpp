@@ -865,17 +865,15 @@ bool TankClient::try_transmit(broker *const bs)
                         }
 
                         if (!(c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))))
-                        {
-                                c->state.flags |= 1u << uint8_t(connection::State::Flags::NeedOutAvail);
-                                poller.SetDataAndEvents(c->fd, c, POLLIN | POLLOUT);
+			{
+				if (trace)
+					SLog("Not polling for out avail, can send now\n");
 
-                                if (trace)
-                                        SLog("UNSETTING NeedOutAvail\n");
-
-                                return true;
-                        }
-                        else
                                 return try_send(c);
+			}
+			else if (trace)
+				SLog("Waiting for out availability, cannot send right now\n");
+			return true;
                 }
 
                 case broker::Reachability::Blocked:
@@ -1018,7 +1016,7 @@ bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::e
                         b.Serialize<uint32_t>(it->fetchSize);
 
                         if (trace)
-                                SLog("Requesting partition = ", it->partitionId, ", seq = ", it->absSeqNum, ", minFetchSize = ", it->fetchSize, "\n");
+                                SLog(ansifmt::bold, "Requesting partition = ", it->partitionId, ", seq = ", it->absSeqNum, ", minFetchSize = ", it->fetchSize, ansifmt::reset, "\n");
 
                         absSeqNums[absSeqNumsCnt++] = it->absSeqNum;
                 } while (++i != total && (it = from + i)->topic == topic);
@@ -1028,7 +1026,7 @@ bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::e
         *(uint8_t *)b.At(topicsCntOffset) = topicsCnt;
 
         if (trace)
-                SLog("Will consume from ", topicsCnt, " from leder ", leader, "\n");
+                SLog("Will consume from ", topicsCnt, " from leader ", leader, "\n");
 
         // We need to track pending requests
         // will GC them periodically
@@ -1509,8 +1507,6 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
         c->state.flags |= (1u << uint8_t(connection::State::Flags::LockedInputBuffer));
 
-        if (trace)
-                SLog("Processing consume response for ", reqId, ", of length ", len, "\n");
 
         p += sizeof(uint32_t);
         const auto topicsCnt = *p++;
@@ -1531,6 +1527,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
         bs->reqs_tracker.pendingConsume.erase(reqId);
         forget_inflight_req(reqId, TankAPIMsgType::Consume);
 
+        if (trace)
+                SLog(ansifmt::color_green, "Processing consume response for ", reqId, ", of length ", len, ", topicsCnt = ", topicsCnt, ", clientReqId = ", clientReqId, ansifmt::reset, "\n");
 
         for (uint32_t i{0}; i != topicsCnt; ++i)
         {

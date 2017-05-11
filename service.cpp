@@ -4733,7 +4733,9 @@ bool Service::try_send(connection *const c)
                 SLog("Attempting to send ", q->size(), "\n");
 
         const auto end = q->backIdx;
+	[[maybe_unused]] size_t transmitted{0};
 
+#define TRANSMIT_THRESHOLD (3 * 1023 * 1024)
         for (auto idx = q->frontIdx; idx != end; idx = q->next(idx))
         {
                 auto &it = q->A[idx];
@@ -4858,13 +4860,14 @@ bool Service::try_send(connection *const c)
                         // We 'd just use the SF_NODISKIO flag and the SF_READAHEAD macro, and check for EBUSY
                         // and optionally use readahead() and try again later(we could also mmap() the log and use mincore() to determine if
                         // all pages are cached)
-                        for (size_t transmitted{0};;)
+                        for (;;)
                         {
                                 auto &range = it.file_range.range;
                                 const uint64_t before = trace ? Timings::Microseconds::Tick() : 0;
                                 // This is probably a good idea; break this down into multiple requests; syscall overhead should be low. Give readahead() a chance to page-in data
                                 // in order to reduce the likelihood of blocking here waiting for that
                                 const auto outLen = std::min<size_t>(range.len, 512 * 1024);
+
 
 #ifdef HAVE_SENDFILE64
                                 off64_t offset = range.offset;
@@ -4940,8 +4943,9 @@ bool Service::try_send(connection *const c)
                                                 return true;
                                         }
 
+#ifdef TRANSMIT_THRESHOLD
                                         transmitted += r;
-                                        if (unlikely(transmitted > 4 * 1024 * 1024))
+                                        if (unlikely(transmitted > 3 * 1024 * 1024))
                                         {
                                                 // Be fair to all other connections
 						// We tansferred too much data already
@@ -4953,6 +4957,8 @@ bool Service::try_send(connection *const c)
                                                 poll_outavail(c);
                                                 return true;
                                         }
+#endif
+
                                 }
                         }
                 }
