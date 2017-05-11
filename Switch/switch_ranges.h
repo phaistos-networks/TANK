@@ -76,6 +76,15 @@ struct range_base final
 
 	}
 
+	constexpr auto size() const noexcept
+	{
+		return len;
+	}
+
+	constexpr auto empty() const noexcept
+	{
+		return 0 == len;
+	}
 	constexpr operator bool() const noexcept
 	{
 		return len;

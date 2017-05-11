@@ -45,6 +45,17 @@ inline bool switch_slist_any(const switch_slist *const l)
 struct switch_dlist
 {
 	struct switch_dlist *prev, *next;
+
+	constexpr void reset() noexcept
+	{
+		next = this;
+		prev = this;
+	}
+
+	constexpr bool empty() const noexcept
+	{
+		return next == this;
+	}
 };
 
 static inline void switch_dlist_init(switch_dlist *const l)

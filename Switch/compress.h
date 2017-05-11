@@ -1,6 +1,6 @@
 #pragma once
-#include "switch.h"
 #include "ext_snappy/snappy.h"
+#include "switch.h"
 
 namespace Compression
 {
@@ -8,7 +8,7 @@ namespace Compression
         enum class Algo : int8_t
         {
                 UNKNOWN = -1,
-		SNAPPY
+                SNAPPY
         };
 
         inline bool Compress(const Algo algorithm, const void *data, const uint32_t dataLen, Buffer *dest)
@@ -48,7 +48,7 @@ namespace Compression
 
                                         if (unlikely(!snappy::RawUncompress((char *)source, sourceLen, dest->At(dest->size()))))
                                                 return false;
-					else
+                                        else
                                         {
                                                 dest->advance_size(outLen);
                                                 return true;
@@ -164,6 +164,16 @@ namespace Compression
                         return *buf++;
 #undef FLIPPED
         }
+
+        inline auto encode_varuint32(const uint32_t n, uint8_t *out)
+        {
+                return PackUInt32(n, out);
+        }
+
+        inline uint32_t decode_varuint32(const uint8_t *&buf)
+        {
+                return UnpackUInt32(buf);
+        }
 }
 
 void IOBuffer::SerializeVarUInt32(const uint32_t n)
@@ -181,4 +191,9 @@ uint32_t IOBuffer::UnserializeVarUInt32(void)
 
         position += e - b;
         return r;
+}
+
+void IOBuffer::encode_varuint32(const uint32_t n)
+{
+        SerializeVarUInt32(n);
 }

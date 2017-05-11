@@ -7,6 +7,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include "switch_compiler_aux.h"
 
 class Buffer
 {
@@ -1553,6 +1554,18 @@ class IOBuffer
         inline uint32_t UnserializePackedUInt32WithLenPrefix();
         inline void SerializeVarUInt32(const uint32_t n);
         inline uint32_t UnserializeVarUInt32();
+	inline void encode_varuint32(const uint32_t n);
+
+        inline void encode_varbyte32(const uint32_t n)
+        {
+		WillInsert(5);
+
+		auto ptr = buffer + length_;
+		const auto b{ptr};
+
+                varbyte_put32(ptr, n);
+		length_ += ptr - b;
+        }
 
         // we are no longer using PushBinary(). clang will optimize away memcpy() for size (1,2,4,8)
         // to e.g *(uin64_t *)ptr = v
@@ -1619,6 +1632,11 @@ class IOBuffer
         }
 
         [[gnu::always_inline]] inline void Serialize(const void *const p, const uint32_t size)
+        {
+                memcpy(RoomFor(size), p, size);
+        }
+
+	[[gnu::always_inline]] void serialize(const void *p, const uint32_t size)
         {
                 memcpy(RoomFor(size), p, size);
         }

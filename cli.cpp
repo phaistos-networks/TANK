@@ -252,7 +252,8 @@ int main(int argc, char *argv[])
                         SeqNum = 0,
                         Key,
                         Content,
-                        TS
+                        TS,
+			Size
                 };
                 uint8_t displayFields{1u << uint8_t(Fields::Content)};
                 static constexpr size_t defaultMinFetchSize{128 * 1024 * 1024};
@@ -326,6 +327,8 @@ int main(int argc, char *argv[])
                                                         displayFields |= 1u << uint8_t(Fields::Content);
                                                 else if (it.Eq(_S("ts")))
                                                         displayFields |= 1u << uint8_t(Fields::TS);
+                                                else if (it.Eq(_S("size")))
+                                                        displayFields |= 1u << uint8_t(Fields::Size);
                                                 else
                                                 {
                                                         Print("Unknown field '", it, "'\n");
@@ -432,10 +435,21 @@ int main(int argc, char *argv[])
                                 if (statsOnly)
                                 {
                                         Print(it.msgs.len, " messages\n");
-					totalMsgs+=it.msgs.len;
+                                        totalMsgs += it.msgs.len;
 
-					for (const auto m : it.msgs)
-						sumBytes+=m->content.len + m->key.len + sizeof(uint64_t);
+                                        if (verbose)
+                                        {
+                                                for (const auto m : it.msgs)
+                                                {
+                                                        Print(m->seqNum, ": ", size_repr(m->content.size()), "\n");
+                                                        sumBytes += m->content.len + m->key.len + sizeof(uint64_t);
+                                                }
+                                        }
+                                        else
+                                        {
+                                                for (const auto m : it.msgs)
+                                                        sumBytes += m->content.len + m->key.len + sizeof(uint64_t);
+                                        }
                                 }
                                 else
                                 {
@@ -452,6 +466,7 @@ int main(int argc, char *argv[])
                                         {
 						if (m->seqNum > endSeqNum)
 							break;
+
                                                 if (timeRange.Contains(m->ts))
                                                 {
 							if (asKV)
@@ -480,6 +495,7 @@ int main(int argc, char *argv[])
                                                         }
                                                         else
                                                                 s.StripPrefix(r);
+
                                                 } while (s);
                                         }
                                 }

@@ -1,4 +1,5 @@
 #pragma once
+#include "switch.h"
 
 struct size_repr
 {

@@ -89,6 +89,16 @@ TankClient::TankClient(const strwlen32_t defaultLeader)
 
 TankClient::~TankClient()
 {
+        reset();
+
+        if (pipeFd[0] != -1)
+                close(pipeFd[0]);
+        if (pipeFd[1] != -1)
+                close(pipeFd[1]);
+}
+
+void TankClient::reset()
+{
         while (switch_dlist_any(&connections))
         {
                 auto c = switch_list_entry(connection, list, connections.next);
@@ -105,6 +115,7 @@ TankClient::~TankClient()
                 switch_dlist_del(&c->list);
                 delete c;
         }
+	connections.reset();
 
         for (auto &it : bsMap)
         {
@@ -131,6 +142,8 @@ TankClient::~TankClient()
 
                         it = next;
                 }
+
+                bs->retainedPayloadsList.reset();
 
                 for (const auto id : bs->reqs_tracker.pendingConsume)
                 {
@@ -160,6 +173,7 @@ TankClient::~TankClient()
 
                 delete bs;
         }
+	bsMap.clear();
 
         while (connectionsPool.size())
                 delete connectionsPool.Pop();
@@ -173,13 +187,25 @@ TankClient::~TankClient()
         while (buffersPool.size())
                 delete buffersPool.Pop();
 
-        if (pipeFd[0] != -1)
-                close(pipeFd[0]);
-        if (pipeFd[1] != -1)
-                close(pipeFd[1]);
-
         for (auto ptr : resultsAllocations)
                 ::free(ptr);
+	
+	resultsAllocations.clear();
+	resultsAllocator.reuse();
+	consumedPartitionContent.clear();
+	capturedFaults.clear();
+	produceAcks.clear();
+	discoverPartitionsResults.clear();
+	createdTopicsResults.clear();
+	consumptionList.clear();
+	consumeOut.clear();
+	produceOut.clear();
+	connectionAttempts.clear();
+	connsList.clear();
+	ranges.clear();
+	pendingConsumeReqs.clear();
+	pendingProduceReqs.clear();
+	pendingCtrlReqs.clear();
 }
 
 uint8_t TankClient::choose_compression_codec(const msg *const msgs, const size_t msgsCnt)
@@ -968,6 +994,9 @@ bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::e
 
         const auto topicsCntOffset = b.size();
         b.RoomFor(sizeof(uint8_t));
+
+	if (trace)
+		SLog("Scheduling consume from leader, maxWait = ", maxWait, ", minSize = ", minSize, ": ", reqId, " ", Date::ts_repr(time(nullptr)), "\n");
 
         for (size_t i{0}; i != total;)
         {
@@ -2437,7 +2466,7 @@ void TankClient::poll(uint32_t timeoutMS)
         // Reset prior to reschedule_any() not after we have called it
         // because it may push to capturedFaults[] so we don't want to clear it after we called it
 	if (trace)
-		SLog("POLLING, resetting consumedPartitionContent.size = ", consumedPartitionContent.size(), "\n");
+		SLog("POLLING, timeoutMS = ", timeoutMS, ", resetting consumedPartitionContent.size = ", consumedPartitionContent.size(), ": pendingConsumeReqs.size = ", pendingConsumeReqs.size(), "\n");
 
 	for (auto ptr : resultsAllocations)
 		::free(ptr);

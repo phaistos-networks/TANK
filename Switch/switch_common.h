@@ -1,11 +1,19 @@
 #pragma once
 #include "switch_numops.h"
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <limits>
 #include <memory>
 #include <utility>
-#include <cmath>
+#ifdef HAVE_ICU
+#include <unicode/normalizer2.h>
+#include <unicode/stringpiece.h>
+#include <unicode/uchar.h>
+#include <unicode/unistr.h>
+#include <unicode/ustring.h>
+#include <unicode/utf8.h>
+#endif
 
 // http://gcc.gnu.org/onlinedocs/gcc/Other-Builtins.html
 // returns true if this is a static const, most likely allocated in RODATA segment
@@ -85,15 +93,15 @@ struct strwithlen
                 return p == nullptr || ::IsConstant(p);
         }
 
-	inline constexpr auto size() const noexcept
-	{
-		return len;
-	}
+        inline constexpr auto size() const noexcept
+        {
+                return len;
+        }
 
-	inline constexpr auto data() const noexcept
-	{
-		return p;
-	}
+        inline constexpr auto data() const noexcept
+        {
+                return p;
+        }
 
         const CT *First(const CT c) const
         {
@@ -115,7 +123,6 @@ struct strwithlen
         {
                 return strwithlen(p + o, len - o);
         }
-
 
         LT CountOf(const CT c) const
         {
@@ -152,15 +159,15 @@ struct strwithlen
                 printf("%.*s\n", len, p);
         }
 
-	constexpr auto front() const
-	{
-		return *p;
-	}
+        constexpr auto front() const
+        {
+                return *p;
+        }
 
-	constexpr auto back() const
-	{
-		return p[len - 1];
-	}
+        constexpr auto back() const
+        {
+                return p[len - 1];
+        }
 
         inline const CT *Search(const CT c) const
         {
@@ -255,7 +262,7 @@ struct strwithlen
                 return Cmp(&o) > 0;
         }
 
-         [[gnu::always_inline]]  constexpr static uint32_t MaxLength() noexcept
+        [[gnu::always_inline]] constexpr static uint32_t MaxLength() noexcept
         {
                 constexpr uint64_t lens[] = {0, UINT8_MAX, UINT16_MAX, 0, UINT32_MAX, 0, 0, 0, UINT64_MAX};
                 return lens[sizeof(LT)];
@@ -270,19 +277,19 @@ struct strwithlen
         strwithlen(const CT *const s, const uint32_t l)
             : p{s}
         {
-		if (sizeof(LT) < sizeof(uint32_t) && unlikely(l > MaxLength()))
-			fail_len_check(l);
+                if (sizeof(LT) < sizeof(uint32_t) && unlikely(l > MaxLength()))
+                        fail_len_check(l);
 
                 len = l;
         }
 
-	enum class NoMaxLenCheck
-	{
+        enum class NoMaxLenCheck
+        {
 
-	};
+        };
 
-	// A special variant; if you *know* l<=MaxLength(), use this constuctor instead
-	// It's constexpr
+        // A special variant; if you *know* l<=MaxLength(), use this constuctor instead
+        // It's constexpr
         constexpr strwithlen(const CT *const s, const uint32_t l, const NoMaxLenCheck)
             : p{s}, len{LT(l)}
         {
@@ -364,12 +371,11 @@ struct strwithlen
                 return Intersects(*s);
         }
 
-	constexpr void reset() noexcept
-	{
-		p = nullptr;
-		len = 0;
-	}
-		
+        constexpr void reset() noexcept
+        {
+                p = nullptr;
+                len = 0;
+        }
 
         // Not using const LT l, so that compiler won't have to complain about missing casts
         constexpr void Set(const CT *const ptr, const uint32_t l)
@@ -388,6 +394,61 @@ struct strwithlen
         {
                 return printable_impl(p, len);
         }
+
+        struct utils
+        {
+#ifdef HAVE_ICU
+                static inline bool is_digit(const uint32_t v) noexcept
+                {
+                        return std::is_same<char, CT>::value ? isdigit(v) : u_isdigit(v);
+                }
+
+                static inline bool is_blank(const uint32_t v) noexcept
+                {
+                        return std::is_same<char, CT>::value ? isblank(v) : u_isblank(v);
+                }
+
+                static inline bool is_space(const uint32_t v) noexcept
+                {
+                        return std::is_same<char, CT>::value ? isspace(v) : u_isspace(v);
+                }
+
+                static inline unsigned to_lower(const uint32_t v) noexcept
+                {
+                        return std::is_same<char, CT>::value ? tolower(v) : u_tolower(v);
+                }
+
+                static inline unsigned to_upper(const uint32_t v) noexcept
+                {
+                        return std::is_same<char, CT>::value ? toupper(v) : u_toupper(v);
+                }
+#else
+                static inline bool is_digit(const uint32_t v) noexcept
+                {
+                        return isdigit(v);
+                }
+
+                static inline bool is_blank(const uint32_t v) noexcept
+                {
+                        return isblank(v);
+                }
+
+                static inline bool is_space(const uint32_t v) noexcept
+                {
+                        return isspace(v);
+                }
+
+                static inline unsigned to_lower(const uint32_t v) noexcept
+                {
+                        return tolower(v);
+                }
+
+                static inline unsigned to_upper(const uint32_t v) noexcept
+                {
+                        return toupper(v);
+                }
+#endif
+        };
 
         inline bool IsDigits() const
         {
@@ -786,8 +847,8 @@ struct strwithlen
 
         inline void SetLengthExpl(const LT l)
         {
-		if (sizeof(LT) < sizeof(uint32_t) && unlikely(l > MaxLength()))
-			fail_len_check(l);
+                if (sizeof(LT) < sizeof(uint32_t) && unlikely(l > MaxLength()))
+                        fail_len_check(l);
 
                 len = l;
         }
@@ -889,11 +950,11 @@ struct strwithlen
                 return *this;
         }
 
-	auto &strip_suffix(const LT v) noexcept
-	{
-		len-=v;
-		return *this;
-	}
+        auto &strip_suffix(const LT v) noexcept
+        {
+                len -= v;
+                return *this;
+        }
 
         LT CommonPrefixLen(const strwithlen o) const
         {
@@ -971,7 +1032,7 @@ struct strwithlen
                         return false;
         }
 
-	strwithlen digits_prefix() const noexcept
+        strwithlen digits_prefix() const noexcept
         {
                 const auto *it = p;
 
@@ -1023,14 +1084,11 @@ struct strwithlen
                 p = to;
         }
 
-	constexpr void advance_to(const CT *const to) noexcept
-	{
+        constexpr void advance_to(const CT *const to) noexcept
+        {
                 len -= to - p;
                 p = to;
-	}
-		
-
-
+        }
 
         constexpr void SetEnd(const CT *const e)
         {
@@ -1259,6 +1317,34 @@ struct strwithlen
                 return _segmentsF<F>(*this, l);
         }
 
+        auto &trim_leading_whitespace() noexcept
+        {
+                const auto b = p;
+
+                for (const auto e = p + len; p != e && utils::is_space(*p); ++p)
+                        continue;
+                len -= p - b;
+                return *this;
+        }
+
+        auto &trim_trailing_whitespace() noexcept
+        {
+                while (len && utils::is_space(p[len - 1]))
+                        --len;
+
+                return *this;
+        }
+
+        auto &trim_leading(const CT c)
+        {
+                while (len && *p == c)
+                {
+                        ++p;
+                        --len;
+                }
+                return *this;
+        }
+
         uint32_t SplitInto(const CT separator, strwithlen *const out, const size_t capacity) const
         {
                 if (!len)
@@ -1291,7 +1377,6 @@ typedef strwithlen<uint32_t> strwithlen32_t, strwlen32_t;
 typedef strwithlen<uint16_t> strwithlen16_t, strwlen16_t;
 typedef strwithlen<uint8_t> strwithlen8_t, strwlen8_t;
 
-
 inline auto operator"" _s8(const char *const s, const size_t len)
 {
         return strwlen8_t(s, len);
@@ -1311,13 +1396,6 @@ constexpr size_t operator"" _len(const char *const, const size_t len)
 {
         return len;
 }
-
-
-
-
-
-
-
 
 [[gnu::always_inline]] inline static auto S32(const char *const p, const uint32_t len)
 {

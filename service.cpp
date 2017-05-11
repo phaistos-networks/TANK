@@ -3442,6 +3442,11 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                 p += sizeof(uint32_t);
                                 auto partition = topic->partition(partitionId);
 
+				// TODO: we should probably limit this to say a few MBs at most
+				// so that clients won't be able to abuse/miuse tank
+				//
+				// We just need to make sure no single event is larger than whatever threshold we choose
+
                                 respHeader->Serialize(partitionId);
 
                                 if (!partition)
@@ -4853,11 +4858,13 @@ bool Service::try_send(connection *const c)
                         // We 'd just use the SF_NODISKIO flag and the SF_READAHEAD macro, and check for EBUSY
                         // and optionally use readahead() and try again later(we could also mmap() the log and use mincore() to determine if
                         // all pages are cached)
-                        for (;;)
+                        for (size_t transmitted{0};;)
                         {
                                 auto &range = it.file_range.range;
                                 const uint64_t before = trace ? Timings::Microseconds::Tick() : 0;
-                                const auto outLen = range.len;
+                                // This is probably a good idea; break this down into multiple requests; syscall overhead should be low. Give readahead() a chance to page-in data
+                                // in order to reduce the likelihood of blocking here waiting for that
+                                const auto outLen = std::min<size_t>(range.len, 512 * 1024);
 
 #ifdef HAVE_SENDFILE64
                                 off64_t offset = range.offset;
@@ -4901,10 +4908,10 @@ bool Service::try_send(connection *const c)
                                         range.len -= r;
                                         range.offset += r;
 
-					if (0 == range.len)
+                                        if (0 == range.len)
                                         {
-						if (trace)
-							SLog("Releasing ", ansifmt::bold, ansifmt::color_blue, ptr_repr(it.file_range.fdh), " ", it.file_range.fdh->use_count(), ansifmt::reset, "\n");
+                                                if (trace)
+                                                        SLog("Releasing ", ansifmt::bold, ansifmt::color_blue, ptr_repr(it.file_range.fdh), " ", it.file_range.fdh->use_count(), ansifmt::reset, "\n");
 
                                                 it.file_range.fdh->Release();
                                                 q->pop_front();
@@ -4929,6 +4936,20 @@ bool Service::try_send(connection *const c)
                                                         Switch::SetTCPCork(fd, 0);
                                                 }
 
+                                                poll_outavail(c);
+                                                return true;
+                                        }
+
+                                        transmitted += r;
+                                        if (unlikely(transmitted > 4 * 1024 * 1024))
+                                        {
+                                                // Be fair to all other connections
+						// We tansferred too much data already
+						//
+						// The only downside is the overhead epoll_ctl() call(see poll_outavail() impl.)
+						// and that if there are no other consumers/producers this is not going to produce any benefits.
+                                                if (haveCork)
+                                                        Switch::SetTCPCork(fd, 0);
                                                 poll_outavail(c);
                                                 return true;
                                         }
@@ -5880,7 +5901,7 @@ int Service::start(int argc, char **argv)
 			if (trace)
 				SLog("Considering waitExpList\n");
 
-                        nextExpWaitCtxCheck = nowMS + 512;
+                        nextExpWaitCtxCheck = nowMS + 200;
 
 			expiredCtxList2.clear();
                         for (auto it = waitExpList.prev; it != &waitExpList; it = it->prev)

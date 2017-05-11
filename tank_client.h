@@ -642,6 +642,8 @@ class TankClient final
 	[[gnu::warn_unused_result]] uint32_t create_topic(const strwlen8_t topic, const uint16_t numPartitions, const strwlen32_t configuration);
 
 
+	void reset();
+
         void set_client_id(const char *const p, const uint32_t len)
         {
                 clientId.Set(p, len);

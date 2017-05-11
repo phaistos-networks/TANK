@@ -40,6 +40,22 @@ struct simple_allocator
                 return bankCapacity_ & INT32_MAX;
         }
 
+	simple_allocator &operator=(simple_allocator &&o)
+	{
+		require(bankCapacity_ == o.bankCapacity_);
+
+                first_ = o.first_;
+                last_ = o.last_;
+                cur_ = o.cur_;
+
+                curBankUtilization_ = o.curBankUtilization_;
+
+                // we can't touch o again
+                o.first_ = o.last_ = o.cur_ = nullptr;
+                o.curBankUtilization_ = 0;
+		return *this;
+	}
+
         explicit simple_allocator(simple_allocator &&o)
             : bankCapacity_(o.bankCapacity_)
         {
