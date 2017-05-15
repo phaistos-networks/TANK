@@ -4623,7 +4623,7 @@ void Service::poll_outavail(connection *const c)
         if (!(c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))))
         {
                 if (trace)
-                        SLog("Introducing self\n");
+                        SLog("Polling out availability\n");
 
                 c->state.flags |= (1u << uint8_t(connection::State::Flags::NeedOutAvail));
                 poller.SetDataAndEvents(c->fd, c, POLLIN | POLLOUT);
@@ -4734,8 +4734,8 @@ bool Service::try_send(connection *const c)
 
         const auto end = q->backIdx;
 	[[maybe_unused]] size_t transmitted{0};
+        static constexpr size_t transmit_trheshold{24 * 1024 * 1024};
 
-#define TRANSMIT_THRESHOLD (3 * 1023 * 1024)
         for (auto idx = q->frontIdx; idx != end; idx = q->next(idx))
         {
                 auto &it = q->A[idx];
@@ -4860,14 +4860,18 @@ bool Service::try_send(connection *const c)
                         // We 'd just use the SF_NODISKIO flag and the SF_READAHEAD macro, and check for EBUSY
                         // and optionally use readahead() and try again later(we could also mmap() the log and use mincore() to determine if
                         // all pages are cached)
-                        for (;;)
+                        for (size_t maxSpan{128 * 1024}, sum{0};; maxSpan = 640 * 1024)
                         {
                                 auto &range = it.file_range.range;
-                                const uint64_t before = trace ? Timings::Microseconds::Tick() : 0;
+                                const uint64_t before = Timings::Microseconds::Tick();
                                 // This is probably a good idea; break this down into multiple requests; syscall overhead should be low. Give readahead() a chance to page-in data
                                 // in order to reduce the likelihood of blocking here waiting for that
-                                const auto outLen = std::min<size_t>(range.len, 512 * 1024);
-
+                                //
+                                // We are also now paying attention to how long we have spent in this function so that we can abort early if we have neglected
+                                // other connections for too long.
+                                //
+                                // https://github.com/phaistos-networks/TANK/issues/14#issuecomment-301000261
+                                const auto outLen = std::min<size_t>(range.len, maxSpan);
 
 #ifdef HAVE_SENDFILE64
                                 off64_t offset = range.offset;
@@ -4876,6 +4880,8 @@ bool Service::try_send(connection *const c)
                                 off_t offset = range.offset;
                                 const auto r = sendfile(fd, it.file_range.fdh->fd, &offset, outLen);
 #endif
+
+                                sum += Timings::Microseconds::Since(before);
 
                                 if (trace)
                                 {
@@ -4943,22 +4949,32 @@ bool Service::try_send(connection *const c)
                                                 return true;
                                         }
 
-#ifdef TRANSMIT_THRESHOLD
                                         transmitted += r;
-                                        if (unlikely(transmitted > 3 * 1024 * 1024))
+                                        if (sum > 3'000) // over 0.003s?
                                         {
-                                                // Be fair to all other connections
-						// We tansferred too much data already
-						//
-						// The only downside is the overhead epoll_ctl() call(see poll_outavail() impl.)
-						// and that if there are no other consumers/producers this is not going to produce any benefits.
+                                                // Spent too long here, looks like we are reading data not currently in the kernel VM cache
+                                                // so, give readhead() a fair chance to work for us, and return control to the loop so that other
+                                                // clients and their connections can be served.
+						// https://github.com/phaistos-networks/TANK/issues/14#issuecomment-301442619
+                                                if (trace)
+                                                        SLog("Bailing, transmitted ", transmitted, " but spent ", sum, " ", duration_repr(sum), "\n");
+                                                goto l2;
+                                        }
+
+                                        if (unlikely(transmitted > transmit_trheshold))
+                                        {
+                                        // Be fair to all other connections
+                                        // We tansferred too much data already
+                                        //
+                                        // The only downside is the overhead epoll_ctl() call(see poll_outavail() impl.)
+                                        // and that if there are no other consumers/producers this is not going to produce any benefits.
+                                        // https://github.com/phaistos-networks/TANK/issues/14#issuecomment-301000261
+                                        l2:
                                                 if (haveCork)
                                                         Switch::SetTCPCork(fd, 0);
                                                 poll_outavail(c);
                                                 return true;
                                         }
-#endif
-
                                 }
                         }
                 }

@@ -156,7 +156,7 @@ int main(int argc, char *argv[])
                         help:
                                 Print(app, " [common options] command [command options] [command arguments]\n");
                                 Print("Common options include:\n");
-                                Print("-b broker endpoint: The endpoint of the Tank broker\n");
+                                Print("-b broker endpoint: The endpoint of the Tank broker. If not specified, assumed localhost:11011\n");
                                 Print("-t topic: The selected topic\n");
                                 Print("-p partition: The selected partition\n");
                                 Print("-S bytes: set tank client's socket send buffer size\n");
@@ -177,18 +177,19 @@ int main(int argc, char *argv[])
                 return 1;
         }
 
-        if (!endpoint.size())
-        {
-                Print("Broker endpoint not specified. Use -b to specify endpoint\n");
-                return 1;
-        }
 
         argc -= optind;
         argv += optind;
 
         try
         {
-                tankClient.set_default_leader(endpoint.AsS32());
+		if (endpoint.size())
+	                tankClient.set_default_leader(endpoint.AsS32());
+		else
+		{
+			// By default, access local instance
+	                tankClient.set_default_leader(":11011"_s32);
+		}
         }
         catch (...)
         {
