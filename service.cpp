@@ -4950,7 +4950,7 @@ bool Service::try_send(connection *const c)
                                         }
 
                                         transmitted += r;
-                                        if (sum > 3'000) // over 0.003s?
+                                        if (sum > 2'000) // over 0.002s?
                                         {
                                                 // Spent too long here, looks like we are reading data not currently in the kernel VM cache
                                                 // so, give readhead() a fair chance to work for us, and return control to the loop so that other

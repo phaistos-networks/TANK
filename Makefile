@@ -18,7 +18,8 @@ else
 	LDFLAGS:=-ldl -ffunction-sections -lpthread -ldl -lz -LSwitch/ext_snappy/ -lsnappy
 	SWITCH_LIB:=
 	SWITCH_DEP:=switch
-	CXX:=clang++
+	# Docker complains about clang++ dep.
+	#CXX:=clang++
 endif
 
 all: service cli-tool

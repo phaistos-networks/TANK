@@ -2394,7 +2394,7 @@ int TankClient::init_connection_to(const Switch::endpoint e)
         }
 
         if (trace)
-                SLog("Connecting to ", e, "\n");
+                SLog("Connecting to ", e, " (client ", ptr_repr(this), ")\n");
 
         Switch::SetNoDelay(fd, 1);
 
