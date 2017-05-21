@@ -18,7 +18,7 @@ RUN cd /TANK \
 	&& mv tank tank-cli /usr/local/bin \
 	&& rm -rf /TANK
 
-RUN mkdir -p /data
+RUN mkdir -p /data/test/0
 WORKDIR /data
 
 CMD ["tank","-p",".","-l",":11011"]
