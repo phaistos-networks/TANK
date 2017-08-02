@@ -613,7 +613,11 @@ class TankClient final
 
         void poll(uint32_t timeoutMS);
 
-
+	// Maybe you want to use it after poll() has returned
+        bool any_responses() const noexcept
+        {
+                return consumed().size() || faults().size() || produce_acks().size() || discovered_partitions().size() || created_topics().size();
+        }
 
         [[gnu::warn_unused_result]] uint32_t produce(const std::vector<std::pair<topic_partition, std::vector<msg>>> &req);
 

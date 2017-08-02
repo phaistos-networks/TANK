@@ -169,7 +169,7 @@ namespace Switch
                                         return {0, 0};
                         }
                         else
-                                return {0, 0};
+                                return res;
                 }
 
                 if (r.second)

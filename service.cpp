@@ -806,13 +806,13 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                                 msgSeqNum = lastMsgSeqNum;
                                         else if (flags & uint8_t(TankFlags::BundleMsgFlags::SeqNumPrevPlusOne))
                                         {
-                                                // incremented in for()
+                                                // incremented in for() (in previous loop iteration)
                                                 if (trace)
                                                         SLog("SeqNumPrevPlusOne set\n");
                                         }
                                         else
                                         {
-                                                // we encode delta from last - 1, but we already ++msgSeqNum in for()
+                                                // we encode delta from last - 1, but we already ++msgSeqNum in for() (in previous iteration)
                                                 msgSeqNum += Compression::UnpackUInt32(p);
 
                                                 if (trace)
@@ -1267,7 +1267,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                 throw Switch::system_error("Failed to create new segment's index:", strerror(errno));
                         }
 
-                        fdatasync(logFd);
+                        fsync(logFd);
 
                         // We could have instead used (firstSegmentConsumedForThisNewSegment->baseSeqNum, curSegmentLastAvailSeqNum)
                         // instead of (baseSeqNum, all[i - 1].seqNum), which would have retained the filename for some segments cleaned up onto themselves
@@ -1965,7 +1965,7 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
                 cur.index.haveWideEntries = false;
 
                 cur.index.skipList.clear();
-                fdatasync(cur.index.fd);
+                fsync(cur.index.fd);
                 close(cur.index.fd);
 
                 if (cur.index.ondisk.data != nullptr && cur.index.ondisk.data != MAP_FAILED)
@@ -2093,7 +2093,7 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
 			if (0 == cur.fileSize)
 			{
 				// Make sure we get that first record synced
-				fdatasync(cur.index.fd); 
+				fsync(cur.index.fd); 
 			}
                         cur.sinceLastUpdate = 0;
                 }
@@ -2592,7 +2592,7 @@ void Service::rebuild_index(int logFd, int indexFd)
         if (ftruncate(indexFd, b.size()))
                 throw Switch::system_error("Failed to truncate index file:", strerror(errno));
 
-        fdatasync(indexFd);
+        fsync(indexFd);
 
         if (trace)
                 SLog("REBUILT INDEX\n");
@@ -5571,8 +5571,8 @@ int Service::start(int argc, char **argv)
 
                         for (auto &it : local)
                         {
-                                fdatasync(it.first);
-                                fdatasync(it.second);
+                                fsync(it.first);
+                                fsync(it.second);
                         }
 
                         local.clear();

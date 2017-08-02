@@ -257,8 +257,7 @@ int main(int argc, char *argv[])
 			Size
                 };
                 uint8_t displayFields{1u << uint8_t(Fields::Content)};
-                static constexpr size_t defaultMinFetchSize{128 * 1024 * 1024};
-                size_t minFetchSize{defaultMinFetchSize};
+                size_t defaultMinFetchSize{128 * 1024 * 1024};
                 uint32_t pendingResp{0};
                 bool statsOnly{false}, asKV{false};
                 IOBuffer buf;
@@ -267,7 +266,7 @@ int main(int argc, char *argv[])
 		uint64_t endSeqNum{UINT64_MAX};
 
                 optind = 0;
-                while ((r = getopt(argc, argv, "+SF:hBT:KdE:")) != -1)
+                while ((r = getopt(argc, argv, "+SF:hBT:KdE:s:")) != -1)
                 {
                         switch (r)
                         {
@@ -281,6 +280,15 @@ int main(int argc, char *argv[])
 
 				case 'K':
 					asKV = true;
+					break;
+
+				case 's':
+					defaultMinFetchSize = strwlen32_t(optarg).AsUint64();
+					if (!defaultMinFetchSize)
+					{
+						Print("Invalid fetch size value\n");
+						return 1;
+					}
 					break;
 
                                 case 'T':
@@ -385,6 +393,7 @@ int main(int argc, char *argv[])
 
 		size_t totalMsgs{0}, sumBytes{0};
 		const auto b = Timings::Microseconds::Tick();
+                auto  minFetchSize = defaultMinFetchSize;
 
                 for (;;)
                 {
@@ -472,12 +481,19 @@ int main(int argc, char *argv[])
                                                 {
 							if (asKV)
 								buf.append(m->seqNum, " [", m->key, "] = [", m->content, "]");
-							else
-							{
-								if (displayFields & (1u << uint8_t(Fields::TS)))
-									buf.append(Date::ts_repr(Timings::Milliseconds::ToSeconds(m->ts)), ':');
-                                                        	buf.append(m->content);
-							}
+                                                        else if (displayFields)
+                                                        {
+                                                                if (displayFields & (1u << uint8_t(Fields::TS)))
+                                                                        buf.append(Date::ts_repr(Timings::Milliseconds::ToSeconds(m->ts)), ':');
+                                                                if (displayFields & (1u << uint8_t(Fields::SeqNum)))
+                                                                        buf.append("seq=", m->seqNum, ':');
+                                                                if (displayFields & (1u << uint8_t(Fields::Size)))
+                                                                        buf.append("size=", m->content.size(), ':');
+                                                                if (displayFields & (1u << uint8_t(Fields::Content)))
+                                                                        buf.append(m->content);
+                                                        }
+                                                        else
+                                                                buf.append(m->content);
 
                                                         buf.append('\n');
                                                 }

@@ -450,6 +450,21 @@ struct strwithlen
 #endif
         };
 
+	bool all_of(const CT c) const noexcept
+	{
+		for (CT i{0}; i != len; ++i)
+		{
+			if (p[i] != c)
+				return false;
+		}
+		return true;
+	}
+
+	bool all_of_digits() const noexcept
+	{
+		return IsDigits();
+	}
+
         inline bool IsDigits() const
         {
                 const CT *it = p, *const e = it + len;
