@@ -191,9 +191,9 @@ int main(int argc, char *argv[])
 	                tankClient.set_default_leader(":11011"_s32);
 		}
         }
-        catch (...)
+        catch (const std::exception &e)
         {
-                Print("Invalid broker endpoint specified '", endpoint, "'\n");
+                Print("Invalid broker endpoint specified '", endpoint, "':", e.what(), "\n");
                 return 1;
         }
 

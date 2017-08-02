@@ -147,7 +147,9 @@ namespace Switch
 
                 const auto r = addr.Divided(':');
 
-		if (!r.first)
+                res.port = srvPort;
+
+                if (!r.first)
 			res.addr4 = ntohl(INADDR_ANY);
 		else if (r.first.len > 128)
                         return {0, 0};
@@ -168,8 +170,10 @@ namespace Switch
                                 else
                                         return {0, 0};
                         }
-                        else
+                        else if (succ)
                                 return res;
+			else
+				return {0, 0};
                 }
 
                 if (r.second)
