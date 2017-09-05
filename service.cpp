@@ -5523,7 +5523,7 @@ int Service::start(int argc, char **argv)
                 Print("No topics found in ", basePath_, ". You may want to create a few, like so:\n");
                 Print("mkdir -p ", basePath_, "/events/0 ", basePath_, "/orders/0 \n");
                 Print("This will create topics events and orders and define one partition with id 0 for each of them.\nRestart Tank after you have created a few topics/partitions\n");
-		Print(R"EOF(Or, you can use tank-cli's "create topic" command to create new topics instread)EOF", "\n");
+		Print(R"EOF(Or, you can use tank-cli's "create topic" command to create new topics instead)EOF", "\n");
         }
 
         listenFd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
