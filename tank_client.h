@@ -11,6 +11,7 @@
 #include <switch_mallocators.h>
 #include <switch_vector.h>
 #include <vector>
+#include <ext/flat_hash_map.h>
 
 // Tank, because its a large container of liquid or gas
 // and data flow (as in, liquid), and also, this is a Trinity character name
@@ -318,7 +319,7 @@ class TankClient final
                         uint16_t retries{0};
                 } block_ctx;
 
-                void set_reachability(const Reachability r);
+                void set_reachability(const Reachability r, const uint32_t);
 
                 // outgoing content will be associated with a leader state, not its connection
                 // and the connection will drain this outgoing_content
@@ -395,8 +396,8 @@ class TankClient final
         uint64_t nextInflightReqsTimeoutCheckTs{0};
         RetryStrategy retryStrategy{RetryStrategy::RetryAlways};
         CompressionStrategy compressionStrategy{CompressionStrategy::CompressIntelligently};
-        Switch::unordered_map<Switch::endpoint, broker *> bsMap;
-        Switch::unordered_map<strwlen8_t, Switch::endpoint> leadersMap;
+        ska::flat_hash_map<Switch::endpoint, broker *> bsMap;
+        ska::flat_hash_map<strwlen8_t, Switch::endpoint> leadersMap;
         Switch::endpoint defaultLeader{};
 	bool allowStreamingConsumeResponses{false};
 	int sndBufSize{128 * 1024}, rcvBufSize{1 * 1024 * 1024};
@@ -698,7 +699,6 @@ class TankClient final
 	void wait_scheduled(const uint32_t reqID);
 };
 
-#ifdef LEAN_SWITCH
 namespace std
 {
         template <>
@@ -719,7 +719,8 @@ namespace std
                 }
         };
 }
-#else
+
+#ifndef LEAN_SWITCH
 namespace Switch
 {
         template <>

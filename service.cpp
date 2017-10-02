@@ -133,6 +133,8 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
                 if (unlikely(data == MAP_FAILED))
                         throw Switch::system_error("Failed to access the index file. mmap() failed:", strerror(errno));
 
+		madvise(data, index.fileSize, MADV_DONTDUMP);
+
                 index.data = static_cast<const uint8_t *>(data);
 
                 if (likely(index.fileSize >= sizeof(uint32_t) + sizeof(uint32_t)))
@@ -699,6 +701,8 @@ static void compact_partition(topic_partition_log *const log, const char *const 
 
                 if (fileData == MAP_FAILED)
                         throw Switch::system_error("mmap() failed:", strerror(errno));
+		
+		madvise(fileData, fileSize, MADV_DONTDUMP);
 
                 vmas.push_back({fileData, fileSize});
 
@@ -1289,6 +1293,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         if (trace)
                                 SLog(newSegment->fileSize, " ", lseek64(newSegment->fdh->fd, 0, SEEK_END), "\n");
 
+
                         require(newSegment->index.fileSize == lseek64(fd, 0, SEEK_END));
                         require(newSegment->fileSize == lseek64(newSegment->fdh->fd, 0, SEEK_END));
 
@@ -1297,6 +1302,8 @@ static void compact_partition(topic_partition_log *const log, const char *const 
 
                         if (newSegment->index.data == MAP_FAILED)
                                 throw Switch::system_error("mmap() failed:", strerror(errno));
+
+			madvise((void *)newSegment->index.data, index.size(), MADV_DONTDUMP);
 
                         require(newSegment->fdh.use_count() == 1);
                         newSegments.push_back(newSegment.release());
@@ -1926,6 +1933,8 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
                                 if (unlikely(newROFile->index.data == MAP_FAILED))
                                         throw Switch::system_error("mmap() failed:", strerror(errno));
 
+				madvise((void *)newROFile->index.data, newROFile->index.fileSize, MADV_DONTDUMP);
+
                                 if (newROFile->index.fileSize >= sizeof(uint32_t) + sizeof(uint32_t))
                                 {
                                         const auto *const p = (uint32_t *)(newROFile->index.data + newROFile->index.fileSize - sizeof(uint32_t) - sizeof(uint32_t));
@@ -2035,6 +2044,8 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
 
                         if (cur.index.ondisk.data == MAP_FAILED)
                                 throw Switch::system_error("mmap() failed:", strerror(errno));
+
+			madvise((void *)cur.index.ondisk.data, cur.index.ondisk.span, MADV_DONTDUMP);
 
                         cur.index.skipList.clear();
                 }
@@ -2475,7 +2486,7 @@ void Service::parse_partition_config(const char *const path, partition_config *c
                 if (fileData == MAP_FAILED)
                         throw Switch::system_error("Failed to access topic/partition config file(", path, ") of size ", fileSize, ":", strerror(errno));
 
-                madvise(fileData, fileSize, MADV_SEQUENTIAL);
+                madvise(fileData, fileSize, MADV_SEQUENTIAL | MADV_DONTDUMP);
                 Defer({ munmap(fileData, fileSize); });
 
                 parse_partition_config(strwlen32_t((char *)fileData, fileSize), l);
@@ -2497,7 +2508,7 @@ void Service::rebuild_index(int logFd, int indexFd)
                 throw Switch::system_error("Unable to mmap():", strerror(errno));
 
         Defer({ munmap(fileData, fileSize); });
-        madvise(fileData, fileSize, MADV_SEQUENTIAL);
+        madvise(fileData, fileSize, MADV_SEQUENTIAL | MADV_DONTDUMP);
 
         Print("Rebuilding index of log of size ", size_repr(fileSize), " ..\n");
         for (const auto *p = reinterpret_cast<const uint8_t *>(fileData), *const e = p + fileSize, *const base = p, *next = p; p != e;)
@@ -2618,7 +2629,8 @@ void Service::verify_index(int fd, const bool wideEntries)
                     madvise(fileData, fileSize, MADV_DONTNEED);
                     munmap(fileData, fileSize);
             });
-        madvise(fileData, fileSize, MADV_SEQUENTIAL);
+
+        madvise(fileData, fileSize, MADV_SEQUENTIAL | MADV_DONTDUMP);
 
         if (wideEntries)
         {
@@ -2680,7 +2692,7 @@ uint32_t Service::verify_log(int fd)
                     madvise(fileData, fileSize, MADV_DONTNEED);
                     munmap(fileData, fileSize);
             });
-        madvise(fileData, fileSize, MADV_SEQUENTIAL);
+        madvise(fileData, fileSize, MADV_SEQUENTIAL | MADV_DONTDUMP);
 
         for (const auto *p = (uint8_t *)fileData, *const e = p + fileSize, *const base = p; p != e;)
         {
@@ -3127,6 +3139,8 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
 
                                 if (unlikely(l->cur.index.ondisk.data == MAP_FAILED))
                                         throw Switch::system_error("mmap() failed:", strerror(errno));
+
+                                madvise((void *)l->cur.index.ondisk.data, size, MADV_DONTDUMP);
 
                                 if (l->cur.index.haveWideEntries)
                                 {
@@ -5300,7 +5314,7 @@ int Service::start(int argc, char **argv)
                                                     munmap(fileData, fileSize);
                                             });
 
-                                        madvise(fileData, fileSize, MADV_SEQUENTIAL);
+                                        madvise(fileData, fileSize, MADV_SEQUENTIAL | MADV_DONTDUMP);
 
                                         strwlen8_t topicName;
 

@@ -4,30 +4,18 @@
 #include <text.h>
 #include <unistd.h>
 #include <date.h>
+#ifdef TRACE_REACHABILITY_OVERSEER
+#include <overseer_client.h>
+#endif
 
 static constexpr bool trace{false};
 
 TankClient::broker *TankClient::broker_state(const Switch::endpoint e)
 {
-#ifdef LEAN_SWITCH
-        auto it = bsMap.find(e);
-
-        if (it != bsMap.end())
-                return it->second;
-        else
-        {
-                auto state = new broker(e);
-
-                bsMap.insert({e, state});
-                return state;
-        }
-#else
-        broker **p;
-
-        if (bsMap.Add(e, nullptr, &p))
-                *p = new broker(e);
-        return *p;
-#endif
+	if (const auto res = bsMap.insert({e, nullptr}); res.second)
+		return (res.first->second = new broker(e));
+	else
+		return res.first->second;
 }
 
 void TankClient::bind_fd(connection *const c, int fd)
@@ -78,7 +66,7 @@ void TankClient::wait_scheduled(const uint32_t reqID)
 TankClient::TankClient(const strwlen32_t defaultLeader)
 {
         switch_dlist_init(&connections);
-        if (pipe2(pipeFd, O_CLOEXEC) == -1)
+        if (pipe2(pipeFd, O_CLOEXEC | O_NONBLOCK) == -1)
                 throw Switch::system_error("pipe() failed:", strerror(errno));
 
         poller.AddFd(pipeFd[0], POLLIN, &pipeFd[0]);
@@ -119,11 +107,7 @@ void TankClient::reset()
 
         for (auto &it : bsMap)
         {
-#ifdef LEAN_SWITCH
-                auto bs = it.second;
-#else
-                auto bs = it.value();
-#endif
+		auto bs = it.second;
 
                 while (auto p = bs->outgoing_content.front())
                 {
@@ -815,6 +799,12 @@ bool TankClient::try_transmit(broker *const bs)
                         if (trace)
                                 SLog("Unreachable\n");
 
+#ifdef TRACE_REACHABILITY_OVERSEER
+                        Overseer::Emit("tankclient.reachability.trace"_s8,
+                                       {{"reason"_s8, "unreachable"_s8}});
+#endif
+
+
                         if (nowMS < bs->block_ctx.until)
                         {
                                 if (trace)
@@ -828,7 +818,7 @@ bool TankClient::try_transmit(broker *const bs)
                                 if (trace)
                                         SLog("Will try again\n");
 
-                                bs->set_reachability(broker::Reachability::MaybeReachable);
+                                bs->set_reachability(broker::Reachability::MaybeReachable, __LINE__);
                                 // fall-through
                         }
 			[[fallthrough]];
@@ -848,6 +838,12 @@ bool TankClient::try_transmit(broker *const bs)
                                 if (fd == -1)
                                 {
                                         flush_broker(bs);
+
+#ifdef TRACE_REACHABILITY_OVERSEER
+                        Overseer::Emit("tankclient.reachability.trace"_s8,
+                                       {{"reason"_s8, "init_connection"_s8}});
+#endif
+
                                         return false;
                                 }
 
@@ -869,7 +865,17 @@ bool TankClient::try_transmit(broker *const bs)
 				if (trace)
 					SLog("Not polling for out avail, can send now\n");
 
-                                return try_send(c);
+                                const auto res =  try_send(c);
+
+#ifdef TRACE_REACHABILITY_OVERSEER
+				if (!res)
+				{
+					Overseer::Emit("tankclient.reachability.trace"_s8,
+							{{"reason"_s8, "try_send"_s8}});
+				}
+#endif
+
+				return res;
 			}
 			else if (trace)
 				SLog("Waiting for out availability, cannot send right now\n");
@@ -1145,7 +1151,7 @@ void TankClient::track_na_broker(broker *const bs)
         if (retryStrategy == RetryStrategy::RetryNever)
         {
 		// circuit breaker tripped immediately
-                bs->set_reachability(broker::Reachability::Unreachable);
+                bs->set_reachability(broker::Reachability::Unreachable, __LINE__);
                 bs->block_ctx.until = nowMS + Timings::Seconds::ToMillis(8);
                 return;
         }
@@ -1156,7 +1162,7 @@ void TankClient::track_na_broker(broker *const bs)
                 {
                         // Curcuit breaker tripped
 			// Give up - try again in 1 minute, and reject all new requests until then
-                        bs->set_reachability(broker::Reachability::Unreachable);
+                        bs->set_reachability(broker::Reachability::Unreachable, __LINE__);
                         bs->block_ctx.until = nowMS + Timings::Seconds::ToMillis(20);
 
                         if (trace)
@@ -1169,7 +1175,7 @@ void TankClient::track_na_broker(broker *const bs)
                         if (trace)
                                 SLog("From MaybeReachable to Blocked\n");
 
-                        bs->set_reachability(broker::Reachability::Blocked);
+                        bs->set_reachability(broker::Reachability::Blocked, __LINE__);
                 }
         }
 
@@ -1181,7 +1187,7 @@ void TankClient::track_na_broker(broker *const bs)
                 ctx->prevSleep = 600;
                 ctx->retries = 0;
                 ctx->naSince = nowMS;
-                bs->set_reachability(broker::Reachability::Blocked);
+                bs->set_reachability(broker::Reachability::Blocked, __LINE__);
         }
 
         ++(ctx->retries);
@@ -1301,7 +1307,7 @@ void TankClient::reschedule_any()
                         break;
 
                 // Try again, see if it works now
-                bs->set_reachability(broker::Reachability::MaybeReachable);
+                bs->set_reachability(broker::Reachability::MaybeReachable, __LINE__);
 
                 rescheduleQueue.pop();
 
@@ -2140,7 +2146,7 @@ bool TankClient::try_recv(connection *const c)
                                         SLog("Connection established\n");
 
                                 require(c->bs);
-                                c->bs->set_reachability(broker::Reachability::Reachable);
+                                c->bs->set_reachability(broker::Reachability::Reachable, __LINE__);
 				c->bs->block_ctx.retries = 0;
                                 c->state.flags &= ~(1u << uint8_t(connection::State::Flags::ConnectionAttempt));
                                 deregister_connection_attempt(c);
@@ -2733,7 +2739,7 @@ void TankClient::set_topic_leader(const strwlen8_t topic, const strwlen32_t endp
         if (!e)
                 throw Switch::data_error("Unable to parse leader endpoint");
 
-        leadersMap.Add(topic, e);
+        leadersMap.insert({topic, e});
 }
 
 Switch::endpoint TankClient::leader_for(const strwlen8_t topic, const uint16_t partition)
@@ -2741,25 +2747,13 @@ Switch::endpoint TankClient::leader_for(const strwlen8_t topic, const uint16_t p
 	if (trace)
 		SLog("Requesting leader for [", topic, "] ", partition, "\n");
 
-#ifndef LEAN_SWITCH
-        if (const auto *const p = leadersMap.FindPointer(topic))
-	{
-		if (trace)
-			SLog("Returning:", *p, "\n");
-
-                return *p;
-	}
-#else
-        const auto it = leadersMap.find(topic);
-
-        if (it != leadersMap.end())
+        if (const auto it = leadersMap.find(topic); it != leadersMap.end())
 	{
 		if (trace)
 			SLog("Returning ", it->second, "\n");
 
                 return it->second;
 	}
-#endif
 
         if (!defaultLeader)
                 throw Switch::data_error("Default leader not specified: use set_default_leader() to specify it");
@@ -2855,10 +2849,20 @@ void TankClient::interrupt_poll()
 	}
 }
 
-void TankClient::broker::set_reachability(const Reachability r)
+void TankClient::broker::set_reachability(const Reachability r, const uint32_t ref)
 {
         if (trace)
                 SLog(ansifmt::bold, ansifmt::color_green, "Reachability from ", uint8_t(reachability), " to ", uint8_t(r), ansifmt::reset, "\n");
+
+#ifdef TRACE_REACHABILITY_OVERSEER
+	if (r != reachability)
+        {
+                Overseer::Emit("tankclient.reachability.trace"_s8,
+                               {{"ref"_s8, ref},
+                                {"from"_s8, uint8_t(reachability)},
+                                {"to"_s8, uint8_t(r)}});
+        }
+#endif
 
         reachability = r;
 }
