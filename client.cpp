@@ -24,7 +24,7 @@ void TankClient::bind_fd(connection *const c, int fd)
 
         // we can't write() anything until we got POLLOUT after we connect()
         c->state.flags = (1u << uint8_t(connection::State::Flags::ConnectionAttempt)) | (1u << uint8_t(connection::State::Flags::NeedOutAvail));
-        poller.AddFd(fd, POLLIN | POLLOUT, c);
+        poller.insert(fd, POLLIN | POLLOUT, c);
         c->state.lastInputTS = Timings::Milliseconds::Tick();
         c->state.lastOutputTS = c->state.lastInputTS;
         connectionAttempts.push_back(c);
@@ -66,10 +66,11 @@ void TankClient::wait_scheduled(const uint32_t reqID)
 TankClient::TankClient(const strwlen32_t defaultLeader)
 {
         switch_dlist_init(&connections);
+
         if (pipe2(pipeFd, O_CLOEXEC | O_NONBLOCK) == -1)
                 throw Switch::system_error("pipe() failed:", strerror(errno));
 
-        poller.AddFd(pipeFd[0], POLLIN, &pipeFd[0]);
+        poller.insert(pipeFd[0], POLLIN, &pipeFd[0]);
 
 	if (defaultLeader)
 		set_default_leader(defaultLeader);
@@ -93,7 +94,7 @@ void TankClient::reset()
 
                 if (c->fd != -1)
                 {
-                        poller.DelFd(c->fd);
+                        poller.erase(c->fd);
                         close(c->fd);
                 }
 
@@ -1219,7 +1220,7 @@ bool TankClient::shutdown(connection *const c, const uint32_t ref, const bool fa
         bs->con = nullptr;
 
         switch_dlist_del_and_reset(&c->list);
-        poller.DelFd(c->fd);
+        poller.erase(c->fd);
         close(c->fd);
 
         if (auto b = std::exchange(c->inB, nullptr))
@@ -2307,7 +2308,7 @@ bool TankClient::try_send(connection *const c)
                                         if (!(c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))))
                                         {
                                                 c->state.flags |= 1u << uint8_t(connection::State::Flags::NeedOutAvail);
-                                                poller.SetDataAndEvents(fd, c, POLLIN | POLLOUT);
+                                                poller.set_data_events(fd, c, POLLIN | POLLOUT);
 
                                                 if (trace)
                                                         SLog("SETTING NeedOutAvail\n");
@@ -2372,7 +2373,7 @@ bool TankClient::try_send(connection *const c)
         if (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail)))
         {
                 c->state.flags &= ~(1u << uint8_t(connection::State::Flags::NeedOutAvail));
-                poller.SetDataAndEvents(c->fd, c, POLLIN);
+                poller.set_data_events(c->fd, c, POLLIN);
 
                 if (trace)
                         SLog("UNSETTING NeedOutAvail\n");
@@ -2498,7 +2499,7 @@ void TankClient::poll(uint32_t timeoutMS)
 
         polling.store(true, std::memory_order_relaxed);
 
-        const auto r = poller.Poll(timeoutMS);
+        const auto r = poller.poll(timeoutMS);
 
         polling.store(false, std::memory_order_relaxed);
 
@@ -2512,7 +2513,7 @@ void TankClient::poll(uint32_t timeoutMS)
 
 	update_time_cache();
 
-        for (const auto *it = poller.Events(), *const e = it + r; it != e; ++it)
+	for (const auto it : poller.new_events(r))
         {
                 const auto events = it->events;
                 auto *const c = (connection *)it->data.ptr;

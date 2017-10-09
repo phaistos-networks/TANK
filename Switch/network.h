@@ -246,6 +246,32 @@ class EPoller
                 _epoll_ctl(epollFd, EPOLL_CTL_ADD, fd, &e);
         }
 
+        inline void insert(int fd, const uint32_t events)
+        {
+                struct epoll_event e;
+
+                e.events = events;
+                e.data.fd = fd;
+
+                _epoll_ctl(epollFd, EPOLL_CTL_ADD, fd, &e);
+        }
+
+        inline void insert(int fd, const uint32_t events, void *uData)
+        {
+                struct epoll_event e;
+
+                e.events = events;
+                e.data.ptr = uData;
+
+                _epoll_ctl(epollFd, EPOLL_CTL_ADD, fd, &e);
+        }
+
+        inline void erase(int fd)
+        {
+                _epoll_ctl(epollFd, EPOLL_CTL_DEL, fd, nullptr);
+        }
+
+
         inline void DelFd(int fd)
         {
                 _epoll_ctl(epollFd, EPOLL_CTL_DEL, fd, nullptr);
@@ -261,14 +287,19 @@ class EPoller
                 _epoll_ctl(epollFd, EPOLL_CTL_MOD, fd, &e);
         }
 
-        inline void SetDataAndEvents(int fd, void *data, const uint32_t events)
-        {
+	void set_data_events(int fd, void *data, const uint32_t events)
+	{
                 struct epoll_event e;
 
                 e.events = events;
                 e.data.ptr = data;
 
                 _epoll_ctl(epollFd, EPOLL_CTL_MOD, fd, &e);
+	}
+		
+        [[gnu::always_inline]] int poll(const int timeoutInMSecs)
+        {
+                return epoll_wait(epollFd, returnedEvents, maxReturnedEvents, timeoutInMSecs);
         }
 
         [[gnu::always_inline]] int Poll(const int timeoutInMSecs)
@@ -276,9 +307,15 @@ class EPoller
                 return epoll_wait(epollFd, returnedEvents, maxReturnedEvents, timeoutInMSecs);
         }
 
+
         [[gnu::always_inline]] const struct epoll_event *Events(void) const
         {
                 return returnedEvents;
+        }
+
+        inline auto new_events(const std::size_t n) const
+        {
+                return range_base<epoll_event *, std::size_t>(returnedEvents, n);
         }
 };
 

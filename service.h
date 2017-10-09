@@ -10,6 +10,7 @@
 #include <sys/mman.h>
 #include <sys/sendfile.h>
 #include <thread.h>
+#include <ext/flat_hash_map.h>
 
 // The index is sparse, so we need to be able to locate the _last_ index entry for relative sequence number <= targetRelativeSeqNumber
 // so that we can either
@@ -248,7 +249,6 @@ static void PrintImpl(Buffer &out, const lookup_res &res)
 struct topic_partition;
 struct topic_partition_log
 {
-
         // The first available absolute sequence number across all segments
         uint64_t firstAvailableSeqNum;
 
@@ -405,6 +405,15 @@ struct topic_partition
         uint16_t localBrokerId; // for convenience
         partition_config config;
 
+	// for foreach_msg()
+        struct msg
+        {
+                uint64_t seqNum;
+                uint64_t ts;
+                strwlen8_t key;
+                strwlen32_t data;
+        };
+
         struct replica
             : public RefCounted<replica>
         {
@@ -429,30 +438,25 @@ struct topic_partition
         {
                 uint16_t brokerId;
                 uint64_t epoch;
-                Switch::shared_refptr<struct replica> replica;
+                Switch::shared_refptr<replica> replica;
         } leader;
 
         // this node may or may not be a replica for this partition
         std::unique_ptr<topic_partition_log> log_;
-
-#ifndef LEAN_SWITCH
-        Switch::unordered_map<uint16_t, replica *, ReleaseRefDestructor> replicasMap;
-#else
-        Switch::unordered_map<uint16_t, replica *> replicasMap;
-#endif
-
+        ska::flat_hash_map<uint16_t, Switch::shared_refptr<replica>> replicasMap;
         Switch::vector<replica *> insyncReplicas;
+        Switch::vector<wait_ctx *> waitingList;
 
         auto highwater_mark() const
         {
                 return log_->lastAssignedSeqNum;
         }
 
-        Switch::vector<wait_ctx *> waitingList;
-
         Switch::shared_refptr<replica> replicaByBrokerId(const uint16_t brokerId)
         {
-                return replicasMap[brokerId];
+                const auto it = replicasMap.find(brokerId);
+
+                return it != replicasMap.end() ? it->second.get() : nullptr;
         }
 
         void consider_append_res(append_res &res, Switch::vector<wait_ctx *> &waitCtxWorkL);
@@ -460,6 +464,11 @@ struct topic_partition
         append_res append_bundle_to_leader(const time_t, const uint8_t *const bundle, const size_t bundleLen, const uint32_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL, const uint64_t, const uint64_t);
 
         lookup_res read_from_local(const bool fetchOnlyFromLeader, const bool fetchOnlyComittted, const uint64_t absSeqNum, const uint32_t fetchSize);
+
+	// This is mostly useful for scanning internal topics, e.g on startup
+	// where you want to, for example, use it to checkpoint offsets and whatnot
+	// https://github.com/phaistos-networks/TANK/issues/40
+	bool foreach_msg(std::function<bool(msg &)> &) const;
 };
 
 struct topic
@@ -487,8 +496,11 @@ struct topic
 
                 if (partitions_)
                 {
-                        while (partitions_->size())
-                                partitions_->Pop()->Release();
+			while (partitions_->size())
+			{
+				partitions_->back()->Release();
+				partitions_->pop_back();
+			}
 
                         delete partitions_;
                 }
@@ -530,6 +542,15 @@ struct topic
         topic_partition *partition(const uint16_t idx)
         {
                 return idx < partitions_->size() ? partitions_->at(idx) : nullptr;
+        }
+
+	void foreach_msg(std::function<bool(topic_partition::msg &)> &l) const
+        {
+                for (auto p : *partitions_)
+                {
+                        if (!p->foreach_msg(l))
+                                return;
+                }
         }
 };
 
@@ -818,11 +839,7 @@ class Service final
 		Clustered
 	} opMode{OperationMode::Standalone};
         Switch::vector<wait_ctx *> waitCtxPool[255];
-#ifndef LEAN_SWITCH
-        Switch::unordered_map<strwlen8_t, topic *, ReleaseRefDestructor> topics;
-#else
-        Switch::unordered_map<strwlen8_t, topic *> topics;
-#endif
+        ska::flat_hash_map<strwlen8_t, Switch::shared_refptr<topic>> topics;
         uint16_t selfBrokerId{1};
         Switch::vector<IOBuffer *> bufs;
         Switch::vector<connection *> connsPool;
@@ -909,7 +926,7 @@ class Service final
 
         void register_topic(topic *const t)
         {
-                if (!topics.Add(t->name(), t))
+		if (!topics.insert({t->name(), t}).second)
                         throw Switch::exception("Topic ", t->name(), " already registered");
         }
 
@@ -928,23 +945,18 @@ class Service final
 
         const topic_partition *getPartition(const strwlen8_t topic, const uint16_t partitionIdx) const
         {
-#ifdef LEAN_SWITCH
-                const auto it = topics.find(topic);
-
-                if (it != topics.end())
+                if (const auto it = topics.find(topic); it != topics.end())
                         return it->second->partition(partitionIdx);
-#else
-                if (const auto t = topics[topic])
-                        return t->partition(partitionIdx);
-#endif
-
-                return nullptr;
+                else
+                        return nullptr;
         }
 
         topic_partition *getPartition(const strwlen8_t topic, const uint16_t partitionIdx)
         {
-                if (auto t = topics[topic])
-                        return t->partition(partitionIdx);
+                if (const auto it = topics.find(topic); it != topics.end())
+                        return it->second->partition(partitionIdx);
+                else
+                        return nullptr;
 
                 return nullptr;
         }
