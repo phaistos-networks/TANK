@@ -36,10 +36,26 @@ See below for the encoding:
 bundle
 {
 	flags:u8		       The bundle flags. Currently, 7 out of 8 bits are used. See below
-				       (7) 	: unused bit	(future:when set, means another flag:u8 is defined in the bunde header, for encryption/CRC etc)
+				       (7) 	: extra flags set in the header 			WAS: unused bit	(future:when set, means another flag:u8 is defined in the bunde header, for encryption/CRC etc)
 				       (6) 	: SPARSE bundle bit - see later
 				       (2, 6] 	: those 4 bits encode the total messages in message set, iff total number of messages in the message <= 15. If not, see below
 				       (0, 2] 	: compression codec. 0 for no compression, 1 for Snappy compression. Other codecs may be supported in the future
+
+	if (extra flags)
+	{
+		extra_flags:u8 		Extra flags. See bits below
+			(0) 	: rich producer info available
+	}
+
+	if (rich producer info bit set in extra flags)
+	{
+		partition_leader_eoch:u32 	set by the broker upon receipt by a produce request and is used to
+						  ensure no loss of data when there are leader changes /w log trancations. 
+		producer_id:u64 		broker assigned producer epoch, received by the 'InitProducerId'
+						  clients that wish to support idempotent message delivery and transactiuons must set this field
+		producer_epoch:u16  		broker assigned producer epoch received by the InitProducerId request. Clients that wish to support
+						  idenmpotent message delivery must set this field
+	}
 
 
 	if (total messages in message set > 15)

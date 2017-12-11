@@ -141,4 +141,49 @@ static inline T Max(const T a, const T b)
 #define IMPLEMENT_ME_NOEXIT() Print(ansifmt::bold, ansifmt::color_red, "WARNING: Implementation Missing", ansifmt::reset, " at ", __FILE__, ":", __LINE__, "\n")
 
 
+
+
+
+
+
+
+template <typename L>
+struct scope_guard
+{
+        L l_;
+        bool invoked_{false};
+
+        scope_guard(L &&l)
+            : l_(std::move(l))
+        {
+        }
+
+        ~scope_guard()
+        {
+                invoke();
+        }
+
+        void invoke()
+        {
+                if (!invoked_)
+                {
+                        l_();
+                        invoked_ = false;
+                }
+        }
+
+        void cancel()
+        {
+                invoked_ = true;
+        }
+};
+
+template <typename T>
+inline auto make_scope_guard(T &&l)
+{
+        return scope_guard<T>(std::forward<T>(l));
+}
+
+#define DEFER(...) auto TOKEN_PASTE2(__deferred, __COUNTER__) = make_scope_guard([&] { __VA_ARGS__ ;});
+
 #include "switch_exceptions.h"

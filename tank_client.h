@@ -56,7 +56,7 @@ class TankClient final
                 outgoing_payload *next;
                 switch_dlist pendingRespList;
                 IOBuffer *b, *b2;
-                struct iovec iov[64];
+                struct iovec iov[250];
                 uint8_t iovCnt;
                 uint8_t iovIdx;
 

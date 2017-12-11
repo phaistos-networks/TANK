@@ -1,9 +1,9 @@
 #include "tank_client.h"
+#include <date.h>
 #include <switch_algorithms.h>
 #include <sys/uio.h>
 #include <text.h>
 #include <unistd.h>
-#include <date.h>
 #ifdef TRACE_REACHABILITY_OVERSEER
 #include <overseer_client.h>
 #endif
@@ -12,10 +12,10 @@ static constexpr bool trace{false};
 
 TankClient::broker *TankClient::broker_state(const Switch::endpoint e)
 {
-	if (const auto res = bsMap.insert({e, nullptr}); res.second)
-		return (res.first->second = new broker(e));
-	else
-		return res.first->second;
+        if (const auto res = bsMap.insert({e, nullptr}); res.second)
+                return (res.first->second = new broker(e));
+        else
+                return res.first->second;
 }
 
 void TankClient::bind_fd(connection *const c, int fd)
@@ -32,35 +32,42 @@ void TankClient::bind_fd(connection *const c, int fd)
 
 bool TankClient::should_poll() const noexcept
 {
-	if (trace)
-	        SLog(connectionAttempts.size(), " ", pendingConsumeReqs.size(), " ", pendingProduceReqs.size(), " ", pendingCtrlReqs.size(), "\n");
+        if (trace)
+                SLog(connectionAttempts.size(), " ", pendingConsumeReqs.size(), " ", pendingProduceReqs.size(), " ", pendingCtrlReqs.size(), "\n");
 
         return connectionAttempts.size() || pendingConsumeReqs.size() || pendingProduceReqs.size() || pendingCtrlReqs.size();
 }
 
 void TankClient::wait_scheduled(const uint32_t reqID)
 {
-	expect(reqID);
+        expect(reqID);
 
-	while (should_poll())
-	{
-		poll(1e3);
+        while (should_poll())
+        {
+                poll(1e3);
 
-		if (unlikely(faults().size()))
-			throw Switch::data_error("Fault while waiting responses");
-
-		for (const auto &it : produce_acks())
+                if (unlikely(faults().size()))
 		{
-			if (it.clientReqId == reqID)
-				return;
+#if 1
+			for (const auto &it : faults())
+				SLog("Fault ", unsigned(it.type), "\n");
+#endif
+			
+                        throw Switch::data_error("Fault while waiting responses");
 		}
 
-		for (const auto &it : consumed())
-		{
-			if (it.clientReqId == reqID)
-				return;
-		}
-	}
+                for (const auto &it : produce_acks())
+                {
+                        if (it.clientReqId == reqID)
+                                return;
+                }
+
+                for (const auto &it : consumed())
+                {
+                        if (it.clientReqId == reqID)
+                                return;
+                }
+        }
 }
 
 TankClient::TankClient(const strwlen32_t defaultLeader)
@@ -72,8 +79,8 @@ TankClient::TankClient(const strwlen32_t defaultLeader)
 
         poller.insert(pipeFd[0], POLLIN, &pipeFd[0]);
 
-	if (defaultLeader)
-		set_default_leader(defaultLeader);
+        if (defaultLeader)
+                set_default_leader(defaultLeader);
 }
 
 TankClient::~TankClient()
@@ -104,11 +111,11 @@ void TankClient::reset()
                 switch_dlist_del(&c->list);
                 delete c;
         }
-	connections.reset();
+        connections.reset();
 
         for (auto &it : bsMap)
         {
-		auto bs = it.second;
+                auto bs = it.second;
 
                 while (auto p = bs->outgoing_content.front())
                 {
@@ -158,7 +165,7 @@ void TankClient::reset()
 
                 delete bs;
         }
-	bsMap.clear();
+        bsMap.clear();
 
         while (connectionsPool.size())
                 delete connectionsPool.Pop();
@@ -174,23 +181,23 @@ void TankClient::reset()
 
         for (auto ptr : resultsAllocations)
                 ::free(ptr);
-	
-	resultsAllocations.clear();
-	resultsAllocator.reuse();
-	consumedPartitionContent.clear();
-	capturedFaults.clear();
-	produceAcks.clear();
-	discoverPartitionsResults.clear();
-	createdTopicsResults.clear();
-	consumptionList.clear();
-	consumeOut.clear();
-	produceOut.clear();
-	connectionAttempts.clear();
-	connsList.clear();
-	ranges.clear();
-	pendingConsumeReqs.clear();
-	pendingProduceReqs.clear();
-	pendingCtrlReqs.clear();
+
+        resultsAllocations.clear();
+        resultsAllocator.reuse();
+        consumedPartitionContent.clear();
+        capturedFaults.clear();
+        produceAcks.clear();
+        discoverPartitionsResults.clear();
+        createdTopicsResults.clear();
+        consumptionList.clear();
+        consumeOut.clear();
+        produceOut.clear();
+        connectionAttempts.clear();
+        connsList.clear();
+        ranges.clear();
+        pendingConsumeReqs.clear();
+        pendingProduceReqs.clear();
+        pendingCtrlReqs.clear();
 }
 
 uint8_t TankClient::choose_compression_codec(const msg *const msgs, const size_t msgsCnt)
@@ -213,8 +220,6 @@ uint8_t TankClient::choose_compression_codec(const msg *const msgs, const size_t
         return 0;
 }
 
-
-
 bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const Switch::endpoint leader, const produce_ctx *const produce, const size_t cnt)
 {
         const uint64_t start = trace ? Timings::Microseconds::Tick() : 0;
@@ -226,7 +231,7 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
         uint8_t topicsCnt{0};
         const auto reqId = ids_tracker.leader_reqs.next++;
 
-	require(cnt); // can't publish an empty messages set
+        require(cnt); // can't publish an empty messages set
         require(payload->iovCnt == 0);
         ranges.clear();
         produceCtx.clear();
@@ -272,7 +277,7 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
                 ++topicsCnt;
                 do
                 {
-			const auto baseSeqNum = it->baseSeqNum;
+                        const auto baseSeqNum = it->baseSeqNum;
                         uint8_t bundleFlags{0};
 
                         ++partitionsCnt;
@@ -281,11 +286,11 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
                         const auto bundleOffset = b.size();
                         ranges.push_back({base, bundleOffset - base});
 
-			if (baseSeqNum)
-			{
-				// Set SPARSE bit
-				bundleFlags|=(1u << 6);
-			}
+                        if (baseSeqNum)
+                        {
+                                // Set SPARSE bit
+                                bundleFlags |= (1u << 6);
+                        }
 
                         // BEGIN:bundle header
                         if (compressionCodec)
@@ -294,7 +299,7 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
                                 bundleFlags |= compressionCodec;
                         }
 
-			expect(it->msgsCnt);
+                        expect(it->msgsCnt);
 
                         if (it->msgsCnt < 16)
                         {
@@ -308,26 +313,25 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
                         if (it->msgsCnt >= 16)
                                 b.SerializeVarUInt32(it->msgsCnt);
 
-			if (baseSeqNum)
-			{
-				b.Serialize<uint64_t>(baseSeqNum);	 //base seqnum
+                        if (baseSeqNum)
+                        {
+                                b.Serialize<uint64_t>(baseSeqNum); //base seqnum
 
-				if (it->msgsCnt != 1)
-				{
-					// last message seqNum delta/offset from baseSeqNum
-					// we encode msgsCnt - 2 because
-					// we want to encode (lastMsg - firstMsg) - 1
-					// so if baseSeqNum = 10 and msgsCnt = 2, the last would be 11, so we want to encode
-					// 11 - 10 - 1 = 0
-					//
-					// see tank_encoding.md
-					b.SerializeVarUInt32(it->msgsCnt - 2); 	
-				}
-			}
+                                if (it->msgsCnt != 1)
+                                {
+                                        // last message seqNum delta/offset from baseSeqNum
+                                        // we encode msgsCnt - 2 because
+                                        // we want to encode (lastMsg - firstMsg) - 1
+                                        // so if baseSeqNum = 10 and msgsCnt = 2, the last would be 11, so we want to encode
+                                        // 11 - 10 - 1 = 0
+                                        //
+                                        // see tank_encoding.md
+                                        b.SerializeVarUInt32(it->msgsCnt - 2);
+                                }
+                        }
 
-			if (trace)
-				SLog("bundleFlags = ", bundleFlags, "\n");
-
+                        if (trace)
+                                SLog("bundleFlags = ", bundleFlags, "\n");
 
                         // END:bundle header; serialize messages set
 
@@ -345,11 +349,11 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
                         {
                                 const auto &m = it->msgs[i];
 
-				if (unlikely(!m.content.len))
-				{
-					put_payload(payload, __LINE__);
-					throw Switch::data_error("Unexpected message with no content");
-				}
+                                if (unlikely(!m.content.len))
+                                {
+                                        put_payload(payload, __LINE__);
+                                        throw Switch::data_error("Unexpected message with no content");
+                                }
 
                                 required += m.key.len;
                                 required += m.content.len;
@@ -362,39 +366,38 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
                         {
                                 const auto &m = it->msgs[i];
                                 uint8_t flags = m.key ? uint8_t(TankFlags::BundleMsgFlags::HaveKey) : 0;
-				bool encodeTS;
+                                bool encodeTS;
 
-				if (trace)
-					SLog("message ", i, " / ", it->msgsCnt, "\n");
+                                if (trace)
+                                        SLog("message ", i, " / ", it->msgsCnt, "\n");
 
-				if (baseSeqNum && i && i != it->msgsCnt - 1)
-				{
-					// messages sequence numbers are monotiically increasing in this sparse bundle
-					flags|=uint8_t(TankFlags::BundleMsgFlags::SeqNumPrevPlusOne);
-				}
+                                if (baseSeqNum && i && i != it->msgsCnt - 1)
+                                {
+                                        // messages sequence numbers are monotically increasing in this sparse bundle
+                                        flags |= uint8_t(TankFlags::BundleMsgFlags::SeqNumPrevPlusOne);
+                                }
 
                                 if (m.ts == lastTS && i)
                                 {
                                         // This message's timestamp == last message timestamp we serialized
                                         flags |= uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS);
                                         b.Serialize(flags);
-					encodeTS= false;
+                                        encodeTS = false;
 
-					if (trace)
-						SLog("Using last specified TS\n");
+                                        if (trace)
+                                                SLog("Using last specified TS\n");
                                 }
                                 else
                                 {
                                         lastTS = m.ts;
                                         b.Serialize(flags);
-					encodeTS= true;
+                                        encodeTS = true;
 
-					if (trace)
-						SLog("Specifying TS\n");
+                                        if (trace)
+                                                SLog("Specifying TS\n");
                                 }
 
-
-#if 0 	// no longer needed, we use the TankFlags::BundleMsgFlags::SeqNumPrevPlusOne
+#if 0 // no longer needed, we use the TankFlags::BundleMsgFlags::SeqNumPrevPlusOne
 				if (baseSeqNum)
                                 {
                                         // bundle sparse bit is set
@@ -409,23 +412,23 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
                                         }
                                 }
 #endif
-				
-				if (encodeTS)
-				{
-	                                b.Serialize<uint64_t>(m.ts);
-				}
+
+                                if (encodeTS)
+                                {
+                                        b.Serialize<uint64_t>(m.ts);
+                                }
 
                                 if (m.key)
                                 {
                                         b.Serialize(m.key.len);
                                         b.Serialize(m.key.p, m.key.len);
 
-					if (trace)
-						SLog("Specifying key\n");
+                                        if (trace)
+                                                SLog("Specifying key\n");
                                 }
 
-				if (trace)
-					SLog("msg.content.len = ", m.content.len, "\n");
+                                if (trace)
+                                        SLog("msg.content.len = ", m.content.len, "\n");
 
                                 b.SerializeVarUInt32(m.content.len);
                                 b.Serialize(m.content.p, m.content.len);
@@ -469,7 +472,7 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
                                 b.Serialize<uint64_t>(it->baseSeqNum);
 
                                 base = b.size();
-                                ranges.push_back({offset, b.size() - offset});         // (bundle length:varint + maybe startSeqNum:u64)
+                                ranges.push_back({offset, b.size() - offset});           // (bundle length:varint + maybe startSeqNum:u64)
                                 ranges.push_back({bundleOffset, bundleHeaderLength});    // bundle header
                                 ranges.push_back({o | (1u << 30), compressedMsgSetLen}); // compressed bundle messages set
                         }
@@ -490,8 +493,8 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
 
         b.reserve(sizeof(uint8_t) + sizeof(uint32_t));
         payload->iov[payload->iovCnt++] = {b.end(), sizeof(uint8_t) + sizeof(uint32_t)};
-        b.Serialize(uint8_t(TankAPIMsgType::ProduceWithBaseSeqNum)); 	// req.msgtype
-        b.Serialize<uint32_t>(reqSize);        				// req.size
+        b.Serialize(uint8_t(TankAPIMsgType::ProduceWithBaseSeqNum)); // req.msgtype
+        b.Serialize<uint32_t>(reqSize);                              // req.size
 
         for (const auto &r : ranges)
         {
@@ -506,16 +509,16 @@ bool TankClient::produce_to_leader_with_base(const uint32_t clientReqId, const S
         auto ctx = (uint8_t *)malloc(produceCtx.size());
 
         if (unlikely(!ctx))
-	{
-		put_payload(payload, __LINE__);
+        {
+                put_payload(payload, __LINE__);
                 throw Switch::system_error("out of memory");
-	}
+        }
 
-	// it is _not_ an idempotent request, but we 'll track it anyway in pendingProduceReqs, because if the broker tells us that is no longer the
-	// leader for the (topic, partition) and we need to connect to another broker and reschedule the payload to it, we can do so by looking up
-	// the payload in pendingProduceReqs
-	payload->flags = 1u << uint8_t(outgoing_payload::Flags::ReqMaybeRetried);
-	Drequire(payload->tracked_by_reqs_tracker());
+        // it is _not_ an idempotent request, but we 'll track it anyway in pendingProduceReqs, because if the broker tells us that is no longer the
+        // leader for the (topic, partition) and we need to connect to another broker and reschedule the payload to it, we can do so by looking up
+        // the payload in pendingProduceReqs
+        payload->flags = 1u << uint8_t(outgoing_payload::Flags::ReqMaybeRetried);
+        Drequire(payload->tracked_by_reqs_tracker());
         memcpy(ctx, produceCtx.data(), produceCtx.size());
 
         bs->reqs_tracker.pendingProduce.insert(reqId);
@@ -540,7 +543,7 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
         uint8_t topicsCnt{0};
         const auto reqId = ids_tracker.leader_reqs.next++;
 
-	require(cnt); // can't publish an empty messages set
+        require(cnt); // can't publish an empty messages set
         require(payload->iovCnt == 0);
         ranges.clear();
         produceCtx.clear();
@@ -601,7 +604,7 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
                                 bundleFlags |= compressionCodec;
                         }
 
-			expect(it->msgsCnt);
+                        expect(it->msgsCnt);
 
                         if (it->msgsCnt < 16)
                         {
@@ -700,9 +703,8 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
                                 const auto offset = b.size();
                                 b.SerializeVarUInt32(compressedMsgSetLen + bundleHeaderLength);
 
-
                                 base = b.size();
-                                ranges.push_back({offset, b.size() - offset});         // (bundle length:varint)
+                                ranges.push_back({offset, b.size() - offset});           // (bundle length:varint)
                                 ranges.push_back({bundleOffset, bundleHeaderLength});    // bundle header
                                 ranges.push_back({o | (1u << 30), compressedMsgSetLen}); // compressed bundle messages set
                         }
@@ -723,8 +725,8 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
 
         b.reserve(sizeof(uint8_t) + sizeof(uint32_t));
         payload->iov[payload->iovCnt++] = {b.end(), sizeof(uint8_t) + sizeof(uint32_t)};
-        b.Serialize(uint8_t(TankAPIMsgType::Produce)); 	// req.msgtype
-        b.Serialize<uint32_t>(reqSize);        		// req.size
+        b.Serialize(uint8_t(TankAPIMsgType::Produce)); // req.msgtype
+        b.Serialize<uint32_t>(reqSize);                // req.size
 
         for (const auto &r : ranges)
         {
@@ -739,16 +741,16 @@ bool TankClient::produce_to_leader(const uint32_t clientReqId, const Switch::end
         auto ctx = (uint8_t *)malloc(produceCtx.size());
 
         if (unlikely(!ctx))
-	{
-		put_payload(payload, __LINE__);
+        {
+                put_payload(payload, __LINE__);
                 throw Switch::system_error("out of memory");
-	}
+        }
 
-	// it is _not_ an idempotent request, but we 'll track it anyway in pendingProduceReqs, because if the broker tells us that is no longer the
-	// leader for the (topic, partition) and we need to connect to another broker and reschedule the payload to it, we can do so by looking up
-	// the payload in pendingProduceReqs
-	payload->flags = 1u << uint8_t(outgoing_payload::Flags::ReqMaybeRetried);
-	Drequire(payload->tracked_by_reqs_tracker());
+        // it is _not_ an idempotent request, but we 'll track it anyway in pendingProduceReqs, because if the broker tells us that is no longer the
+        // leader for the (topic, partition) and we need to connect to another broker and reschedule the payload to it, we can do so by looking up
+        // the payload in pendingProduceReqs
+        payload->flags = 1u << uint8_t(outgoing_payload::Flags::ReqMaybeRetried);
+        Drequire(payload->tracked_by_reqs_tracker());
         memcpy(ctx, produceCtx.data(), produceCtx.size());
 
         bs->reqs_tracker.pendingProduce.insert(reqId);
@@ -786,7 +788,6 @@ void TankClient::abort_inflight_req(connection *const c, const uint32_t reqId, c
         // TODO: https://github.com/phaistos-networks/TANK/issues/21
 }
 
-
 // TODO: if too many outgoing messages in bs->outgoing_content, and in Reachability::Blocked reachability,
 // we need to flush_broker(bs); return false;  so that we won't use too much memory queuing up too much data
 bool TankClient::try_transmit(broker *const bs)
@@ -805,7 +806,6 @@ bool TankClient::try_transmit(broker *const bs)
                                        {{"reason"_s8, "unreachable"_s8}});
 #endif
 
-
                         if (nowMS < bs->block_ctx.until)
                         {
                                 if (trace)
@@ -822,7 +822,7 @@ bool TankClient::try_transmit(broker *const bs)
                                 bs->set_reachability(broker::Reachability::MaybeReachable, __LINE__);
                                 // fall-through
                         }
-			[[fallthrough]];
+                        [[fallthrough]];
 
                 case broker::Reachability::MaybeReachable:
                 case broker::Reachability::Reachable:
@@ -841,8 +841,8 @@ bool TankClient::try_transmit(broker *const bs)
                                         flush_broker(bs);
 
 #ifdef TRACE_REACHABILITY_OVERSEER
-                        Overseer::Emit("tankclient.reachability.trace"_s8,
-                                       {{"reason"_s8, "init_connection"_s8}});
+                                        Overseer::Emit("tankclient.reachability.trace"_s8,
+                                                       {{"reason"_s8, "init_connection"_s8}});
 #endif
 
                                         return false;
@@ -862,25 +862,25 @@ bool TankClient::try_transmit(broker *const bs)
                         }
 
                         if (!(c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))))
-			{
-				if (trace)
-					SLog("Not polling for out avail, can send now\n");
+                        {
+                                if (trace)
+                                        SLog("Not polling for out avail, can send now\n");
 
-                                const auto res =  try_send(c);
+                                const auto res = try_send(c);
 
 #ifdef TRACE_REACHABILITY_OVERSEER
-				if (!res)
-				{
-					Overseer::Emit("tankclient.reachability.trace"_s8,
-							{{"reason"_s8, "try_send"_s8}});
-				}
+                                if (!res)
+                                {
+                                        Overseer::Emit("tankclient.reachability.trace"_s8,
+                                                       {{"reason"_s8, "try_send"_s8}});
+                                }
 #endif
 
-				return res;
-			}
-			else if (trace)
-				SLog("Waiting for out availability, cannot send right now\n");
-			return true;
+                                return res;
+                        }
+                        else if (trace)
+                                SLog("Waiting for out availability, cannot send right now\n");
+                        return true;
                 }
 
                 case broker::Reachability::Blocked:
@@ -911,21 +911,21 @@ uint32_t TankClient::create_topic(const strwlen8_t topic, const uint16_t totPart
         const auto reqId = ids_tracker.leader_reqs.next++;
 
         b.Serialize(uint8_t(TankAPIMsgType::CreateTopic));
-	const auto lenOffset = b.size();
-	b.RoomFor(sizeof(uint32_t));
+        const auto lenOffset = b.size();
+        b.RoomFor(sizeof(uint32_t));
 
         b.Serialize<uint32_t>(reqId);
         b.Serialize(topic.len);
         b.Serialize(topic.p, topic.len);
-	b.Serialize<uint16_t>(totPartitions);
-	b.SerializeVarUInt32(config.len);
-	b.Serialize(config.p, config.len);
+        b.Serialize<uint16_t>(totPartitions);
+        b.SerializeVarUInt32(config.len);
+        b.Serialize(config.p, config.len);
 
         payload->iov[0] = {(void *)b.data(), b.size()};
         payload->iovCnt = 1;
 
         bs->reqs_tracker.pendingCtrl.insert(reqId);
-	// this is not an actually an idempotent request, but the broker will check if it topic is defined already so we 'll just an error, so we 'll treat it as such
+        // this is not an actually an idempotent request, but the broker will check if it topic is defined already so we 'll just an error, so we 'll treat it as such
         payload->flags = (1u << uint8_t(outgoing_payload::Flags::ReqIsIdempotent)) | (1u << uint8_t(outgoing_payload::Flags::ReqMaybeRetried));
         Drequire(payload->tracked_by_reqs_tracker());
         bs->outgoing_content.push_back(payload);
@@ -933,7 +933,7 @@ uint32_t TankClient::create_topic(const strwlen8_t topic, const uint16_t totPart
         pendingCtrlReqs.Add(reqId, {clientReqId, payload, nowMS});
         track_inflight_req(reqId, nowMS, TankAPIMsgType::CreateTopic);
 
-	*(uint32_t *)b.At(lenOffset) = b.size() - lenOffset - sizeof(uint32_t);
+        *(uint32_t *)b.At(lenOffset) = b.size() - lenOffset - sizeof(uint32_t);
 
         if (!try_transmit(bs))
                 return 0;
@@ -950,8 +950,8 @@ uint32_t TankClient::discover_partitions(const strwlen8_t topic)
         const auto reqId = ids_tracker.leader_reqs.next++;
 
         b.Serialize(uint8_t(TankAPIMsgType::DiscoverPartitions));
-	const auto lenOffset = b.size();
-	b.RoomFor(sizeof(uint32_t));
+        const auto lenOffset = b.size();
+        b.RoomFor(sizeof(uint32_t));
 
         b.Serialize<uint32_t>(reqId);
         b.Serialize(topic.len);
@@ -968,7 +968,7 @@ uint32_t TankClient::discover_partitions(const strwlen8_t topic)
         pendingCtrlReqs.Add(reqId, {clientReqId, payload, nowMS});
         track_inflight_req(reqId, nowMS, TankAPIMsgType::DiscoverPartitions);
 
-	*(uint32_t *)b.At(lenOffset) = b.size() - lenOffset - sizeof(uint32_t);
+        *(uint32_t *)b.At(lenOffset) = b.size() - lenOffset - sizeof(uint32_t);
 
         if (!try_transmit(bs))
                 return 0;
@@ -1000,8 +1000,8 @@ bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::e
         const auto topicsCntOffset = b.size();
         b.RoomFor(sizeof(uint8_t));
 
-	if (trace)
-		SLog("Scheduling consume from leader, maxWait = ", maxWait, ", minSize = ", minSize, ": ", reqId, " ", Date::ts_repr(time(nullptr)), "\n");
+        if (trace)
+                SLog("Scheduling consume from leader, maxWait = ", maxWait, ", minSize = ", minSize, ": ", reqId, " ", Date::ts_repr(time(nullptr)), "\n");
 
         for (size_t i{0}; i != total;)
         {
@@ -1051,12 +1051,12 @@ bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::e
 
         bs->reqs_tracker.pendingConsume.insert(reqId);
         payload->flags = (1u << uint8_t(outgoing_payload::Flags::ReqIsIdempotent)) | (1u << uint8_t(outgoing_payload::Flags::ReqMaybeRetried));
-	Drequire(payload->tracked_by_reqs_tracker());
+        Drequire(payload->tracked_by_reqs_tracker());
         bs->outgoing_content.push_back(payload);
 
-	// See comments about tracking payload in pendingProduceReqs.
-	// If the broker tells us that it is no longer the leader for this (topic, partition) we should be
-	// able to reschedule to that new leader.
+        // See comments about tracking payload in pendingProduceReqs.
+        // If the broker tells us that it is no longer the leader for this (topic, partition) we should be
+        // able to reschedule to that new leader.
         pendingConsumeReqs.Add(reqId, {clientReqId, payload, nowMS, seqsNumsData, absSeqNumsCnt});
         track_inflight_req(reqId, nowMS, TankAPIMsgType::Consume);
 
@@ -1075,8 +1075,8 @@ void TankClient::flush_broker(broker *const bs)
         {
                 auto next = it->next;
 
-		if (!it->tracked_by_reqs_tracker())
-                	put_payload(it, __LINE__);
+                if (!it->tracked_by_reqs_tracker())
+                        put_payload(it, __LINE__);
 
                 it = next;
         }
@@ -1087,8 +1087,8 @@ void TankClient::flush_broker(broker *const bs)
                 auto next = it->next;
                 auto payload = switch_list_entry(outgoing_payload, pendingRespList, it);
 
-		if (!payload->tracked_by_reqs_tracker())
-                	put_payload(payload, __LINE__);
+                if (!payload->tracked_by_reqs_tracker())
+                        put_payload(payload, __LINE__);
 
                 it = next;
         }
@@ -1100,24 +1100,24 @@ void TankClient::flush_broker(broker *const bs)
                 const auto res = pendingConsumeReqs.detach(id);
                 auto info = res.value();
 
-		put_payload(info.reqPayload, __LINE__);
+                put_payload(info.reqPayload, __LINE__);
                 free(info.seqNums);
 
                 capturedFaults.push_back({info.clientReqId, fault::Type::Network, fault::Req::Consume, {}, 0});
         }
         bs->reqs_tracker.pendingConsume.clear();
 
-	for (const auto id : bs->reqs_tracker.pendingCtrl)
-	{
-		forget_inflight_req(id, TankAPIMsgType::DiscoverPartitions);	 // XXX: proper type?
+        for (const auto id : bs->reqs_tracker.pendingCtrl)
+        {
+                forget_inflight_req(id, TankAPIMsgType::DiscoverPartitions); // XXX: proper type?
 
-		const auto res = pendingCtrlReqs.detach(id);
-		auto info = res.value();
+                const auto res = pendingCtrlReqs.detach(id);
+                auto info = res.value();
 
-		put_payload(info.reqPayload, __LINE__);
+                put_payload(info.reqPayload, __LINE__);
                 capturedFaults.push_back({info.clientReqId, fault::Type::Network, fault::Req::Ctrl, {}, 0});
-	}
-	bs->reqs_tracker.pendingCtrl.clear();
+        }
+        bs->reqs_tracker.pendingCtrl.clear();
 
         for (const auto id : bs->reqs_tracker.pendingProduce)
         {
@@ -1126,7 +1126,7 @@ void TankClient::flush_broker(broker *const bs)
                 const auto res = pendingProduceReqs.detach(id);
                 const auto info = res.value();
 
-		put_payload(info.reqPayload, __LINE__);
+                put_payload(info.reqPayload, __LINE__);
                 free(info.ctx);
 
                 capturedFaults.push_back({info.clientReqId, fault::Type::Network, fault::Req::Produce, {}, 0});
@@ -1151,7 +1151,7 @@ void TankClient::track_na_broker(broker *const bs)
 
         if (retryStrategy == RetryStrategy::RetryNever)
         {
-		// circuit breaker tripped immediately
+                // circuit breaker tripped immediately
                 bs->set_reachability(broker::Reachability::Unreachable, __LINE__);
                 bs->block_ctx.until = nowMS + Timings::Seconds::ToMillis(8);
                 return;
@@ -1162,7 +1162,7 @@ void TankClient::track_na_broker(broker *const bs)
                 if (ctx->retries >= 7)
                 {
                         // Curcuit breaker tripped
-			// Give up - try again in 1 minute, and reject all new requests until then
+                        // Give up - try again in 1 minute, and reject all new requests until then
                         bs->set_reachability(broker::Reachability::Unreachable, __LINE__);
                         bs->block_ctx.until = nowMS + Timings::Seconds::ToMillis(20);
 
@@ -1182,8 +1182,8 @@ void TankClient::track_na_broker(broker *const bs)
 
         if (bs->reachability != broker::Reachability::Blocked)
         {
-		if (trace)
-			SLog("Now set to blocked\n");
+                if (trace)
+                        SLog("Now set to blocked\n");
 
                 ctx->prevSleep = 600;
                 ctx->retries = 0;
@@ -1224,14 +1224,14 @@ bool TankClient::shutdown(connection *const c, const uint32_t ref, const bool fa
         close(c->fd);
 
         if (auto b = std::exchange(c->inB, nullptr))
-	{
-		// FIXME: XXX: TODO: https://github.com/phaistos-networks/TANK/issues/46
-		// If you consume messages, and while you are producing them, you try to produce or otherwise use the API that will
-		// result in interfacing with a Tank node (while you are using or iterating those consumed messages), and when attempting to interface you
-		// end up shutting down the connection, then the consumed messages will be invalid because
-		// the connection buffer that's holding the messages would be deleted by shutdown(){ put_buffer(); }
+        {
+                // FIXME: XXX: TODO: https://github.com/phaistos-networks/TANK/issues/46
+                // If you consume messages, and while you are producing them, you try to produce or otherwise use the API that will
+                // result in interfacing with a Tank node (while you are using or iterating those consumed messages), and when attempting to interface you
+                // end up shutting down the connection, then the consumed messages will be invalid because
+                // the connection buffer that's holding the messages would be deleted by shutdown(){ put_buffer(); }
                 put_buffer(b);
-	}
+        }
 
         if (c->state.flags & (1u << uint8_t(connection::State::Flags::ConnectionAttempt)))
                 deregister_connection_attempt(c);
@@ -1262,7 +1262,7 @@ void TankClient::ack_payload(broker *const bs, outgoing_payload *const p)
         if (trace)
                 SLog(ansifmt::color_magenta, "ACKnowledgeing payload for broker", ansifmt::reset, "\n");
 
-	Drequire(p);
+        Drequire(p);
         Drequire(p->tracked_by_reqs_tracker());
 
         // In case it's here (almost always only when we retain_for_resp(), for payloads of idempotent requests)
@@ -1333,9 +1333,9 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
         const auto reqInfo = res.value();
         const auto clientReqId = reqInfo.clientReqId;
 
-	// TODO:
-	// if broker reports that it is no longer the leader for (topic, broker), we need to retain
-	// reqInfo.payload and reqInfo.ctx, and retry with that node instead
+        // TODO:
+        // if broker reports that it is no longer the leader for (topic, broker), we need to retain
+        // reqInfo.payload and reqInfo.ctx, and retry with that node instead
         ack_payload(bs, reqInfo.reqPayload);
         Defer({ free(reqInfo.ctx); });
 
@@ -1343,7 +1343,6 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
 
         bs->reqs_tracker.pendingProduce.erase(reqId);
         forget_inflight_req(reqId, TankAPIMsgType::Produce);
-
 
         for (const auto *ctx = reqInfo.ctx, *const ctxEnd = ctx + reqInfo.ctxLen; p != e;)
         {
@@ -1381,7 +1380,6 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                                 if (trace)
                                         SLog("for partition ", partitionId, ", err = ", err, ", partitionsCnt = ", partitionsCnt, "\n");
 
-
                                 if (err == 1)
                                 {
                                         if (trace)
@@ -1391,20 +1389,18 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                                 }
                                 else if (err)
                                 {
-					if (err == 2)
-					{
-						// Invald sequence numbers
-	                                        capturedFaults.push_back({clientReqId, fault::Type::InvalidReq, fault::Req::Produce, topicName, partitionId});
-					}
-					else
-	                                        capturedFaults.push_back({clientReqId, fault::Type::SystemFail, fault::Req::Produce, topicName, partitionId});
+                                        if (err == 2)
+                                        {
+                                                // Invald sequence numbers
+                                                capturedFaults.push_back({clientReqId, fault::Type::InvalidReq, fault::Req::Produce, topicName, partitionId});
+                                        }
+                                        else
+                                                capturedFaults.push_back({clientReqId, fault::Type::SystemFail, fault::Req::Produce, topicName, partitionId});
                                 }
                                 else
                                 {
                                         produceAcks.push_back({clientReqId, topicName, partitionId});
                                 }
-
-
 
                                 if (--partitionsCnt == 0)
                                         break;
@@ -1488,7 +1484,7 @@ bool TankClient::process_discover_partitions(connection *const c, const uint8_t 
         else
         {
                 // because we need to access the (firstAvail, lastAssigned) pairs here, which requires
-		// dereferencing the input buffer of the connection, we are going to lock it
+                // dereferencing the input buffer of the connection, we are going to lock it
                 c->state.flags |= (1u << uint8_t(connection::State::Flags::LockedInputBuffer));
 
                 p += sizeof(uint16_t);
@@ -1514,7 +1510,6 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
         c->state.flags |= (1u << uint8_t(connection::State::Flags::LockedInputBuffer));
 
-
         p += sizeof(uint32_t);
         const auto topicsCnt = *p++;
         const auto res = pendingConsumeReqs.detach(reqId);
@@ -1523,11 +1518,11 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
         const auto *const reqSeqNums = reqInfo.seqNums;
         uint8_t reqOffsetIdx{0};
         strwlen8_t key;
-	uint64_t firstMsgSeqNum, lastMsgSeqNum, logBaseSeqNum,  msgSetEnd;
+        uint64_t firstMsgSeqNum, lastMsgSeqNum, logBaseSeqNum, msgSetEnd;
 
-	// TODO:
-	// if broker reports that it is no longer the leader for (topic, broker), we need to retain
-	// reqInfo.payload and reqInfo.ctx, and retry with that node instead
+        // TODO:
+        // if broker reports that it is no longer the leader for (topic, broker), we need to retain
+        // reqInfo.payload and reqInfo.ctx, and retry with that node instead
         ack_payload(bs, reqInfo.reqPayload);
         Defer({ free(reqInfo.seqNums); });
 
@@ -1563,7 +1558,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                         const auto partitionId = *(uint16_t *)p;
                         p += sizeof(uint16_t);
                         const auto errorOrFlags = *p++;
-			size_t totalSeenBundles{0};
+                        size_t totalSeenBundles{0};
 
                         if (errorOrFlags == 0xff)
                         {
@@ -1573,27 +1568,27 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 capturedFaults.push_back({clientReqId, fault::Type::UnknownPartition, fault::Req::Consume, topicName, partitionId});
                                 continue;
                         }
-			else if (errorOrFlags == 0xfe)
-			{
-				// Not provided here, because the first bundle streamed has the SPARSE bit set
-				// which means it holds the sequence number itself, and we 'd like to avoid
-				// specifying this here and in the bundle header
-				//
-				// I understand all those variosu encoding semantics are complicating the parsing process, but
-				// we this is one of those case where doing that in favor of tighter encoding and better performance is worth it
-				// (you only need to build the client/broker once, but you 'll reap the benefits forever)
-				if (trace)
-					SLog("Base seq.num of first msg in the bundle ", ansifmt::bold, "_not provided here_", ansifmt::reset, "; bundle's sparse bit is set - will get it from there\n");
-				logBaseSeqNum = 0;
-			}
-			else
+                        else if (errorOrFlags == 0xfe)
+                        {
+                                // Not provided here, because the first bundle streamed has the SPARSE bit set
+                                // which means it holds the sequence number itself, and we 'd like to avoid
+                                // specifying this here and in the bundle header
+                                //
+                                // I understand all those variosu encoding semantics are complicating the parsing process, but
+                                // we this is one of those case where doing that in favor of tighter encoding and better performance is worth it
+                                // (you only need to build the client/broker once, but you 'll reap the benefits forever)
+                                if (trace)
+                                        SLog("Base seq.num of first msg in the bundle ", ansifmt::bold, "_not provided here_", ansifmt::reset, "; bundle's sparse bit is set - will get it from there\n");
+                                logBaseSeqNum = 0;
+                        }
+                        else
                         {
                                 // base absolute sequence number of the first message in the first bundle in the chunk streamed
                                 logBaseSeqNum = *(uint64_t *)p;
                                 p += sizeof(uint64_t);
 
-				if (trace)
-					SLog("Base seq.num of first msg in the bundle provided as ", logBaseSeqNum, "\n");
+                                if (trace)
+                                        SLog("Base seq.num of first msg in the bundle provided as ", logBaseSeqNum, "\n");
                         }
 
                         // last committed sequence number for this (topic, partition).
@@ -1630,8 +1625,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                         }
                         else if (errorOrFlags && errorOrFlags < 0xfe)
                         {
-				if (trace)
-					SLog("Have FAULT: ", errorOrFlags, "\n");
+                                if (trace)
+                                        SLog("Have FAULT: ", errorOrFlags, "\n");
 
                                 capturedFaults.push_back({clientReqId, fault::Type::Access, fault::Req::Consume, topicName, partitionId});
                                 continue;
@@ -1659,12 +1654,11 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         break;
                                 }
 
-				if (trace)
-					SLog("NEW bundle at ", p - bundlesBase, "(" ,consumptionList.size(), ") ", ++totalSeenBundles, "\n");
+                                if (trace)
+                                        SLog("NEW bundle at ", p - bundlesBase, "(", consumptionList.size(), ") ", ++totalSeenBundles, "\n");
 
                                 const auto bundleLen = Compression::UnpackUInt32(p);
                                 const auto *const bundleEnd = p + bundleLen;
-
 
                                 // This is more particularly optimal, for if boundary checks fail, we 'll try to consume the whole thing later
                                 // and maybe all we 'd need is one 1K message or so, but for now if boundaries check fail, we 'll advise client to
@@ -1681,18 +1675,17 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         break;
                                 }
 
-
                                 // BEGIN: bundle header
                                 const auto bundleFlags = *p++;
                                 const uint8_t codec = bundleFlags & 3;
-				const bool sparseBundleBitSet = bundleFlags & (1u << 6);
+                                const bool sparseBundleBitSet = bundleFlags & (1u << 6);
                                 range_base<const uint8_t *, size_t> msgSetContent;
                                 uint32_t msgsSetSize = (bundleFlags >> 2) & 0xf;
 
                                 if (!msgsSetSize)
                                 {
-					if (trace)
-						SLog("msgSetEnd not packed into flags\n");
+                                        if (trace)
+                                                SLog("msgSetEnd not packed into flags\n");
 
                                         if (unlikely(!Compression::UnpackUInt32Check(p, chunkEnd)))
                                         {
@@ -1707,13 +1700,13 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         }
                                 }
 
-				if (sparseBundleBitSet)
+                                if (sparseBundleBitSet)
                                 {
                                         // See tank_encoding.md
-					if (trace)
-						SLog("sparseBundleBitSet is set\n");
+                                        if (trace)
+                                                SLog("sparseBundleBitSet is set\n");
 
-					if (p + sizeof(uint64_t) >= chunkEnd)
+                                        if (p + sizeof(uint64_t) >= chunkEnd)
                                         {
                                                 if (trace)
                                                         SLog("boundaries\n");
@@ -1726,46 +1719,41 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                         if (msgsSetSize != 1)
                                         {
-						if (unlikely(!Compression::UnpackUInt32Check(p, chunkEnd)))
-						{
-							if (trace)
-								SLog("boundaries\n");
+                                                if (unlikely(!Compression::UnpackUInt32Check(p, chunkEnd)))
+                                                {
+                                                        if (trace)
+                                                                SLog("boundaries\n");
 
-							break;
-						}
+                                                        break;
+                                                }
 
                                                 lastMsgSeqNum = firstMsgSeqNum + Compression::UnpackUInt32(p) + 1;
                                         }
-					else
-					{
-						lastMsgSeqNum = firstMsgSeqNum;
-					}
+                                        else
+                                        {
+                                                lastMsgSeqNum = firstMsgSeqNum;
+                                        }
 
+                                        logBaseSeqNum = firstMsgSeqNum;
+                                        msgSetEnd = lastMsgSeqNum + 1;
 
-					logBaseSeqNum = firstMsgSeqNum;
-					msgSetEnd = lastMsgSeqNum + 1;
-
-					if (trace)
-						SLog("firstMsgSeqNum = ", firstMsgSeqNum, ", lastMsgSeqNum = ", lastMsgSeqNum, "\n");
+                                        if (trace)
+                                                SLog("firstMsgSeqNum = ", firstMsgSeqNum, ", lastMsgSeqNum = ", lastMsgSeqNum, "\n");
                                 }
-				else
-				{
-					msgSetEnd = logBaseSeqNum + msgsSetSize;
-				}
+                                else
+                                {
+                                        msgSetEnd = logBaseSeqNum + msgsSetSize;
+                                }
                                 // END: bundle header
-
-
 
                                 if (trace)
                                         SLog("bundleFlags = ", bundleFlags, ", codec = ", codec, ", msgsSetSize = ", msgsSetSize, ", bundleLen = ", bundleLen, "\n");
-
 
                                 if (requestedSeqNum < UINT64_MAX && requestedSeqNum >= msgSetEnd)
                                 {
                                         // Optimization: can skip this bundle altogether
                                         if (trace)
                                                 SLog("Skipping bundle:", requestedSeqNum, ">= ", msgSetEnd, ", ", chunkEnd - bundleEnd, "\n");
-
 
                                         p = bundleEnd;
 
@@ -1778,7 +1766,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                         SLog("Past the chunk, lastPartialMsgMinFetchSize now = ", lastPartialMsgMinFetchSize, " (requestedSeqNum = ", requestedSeqNum, ")\n");
                                         }
 
-					logBaseSeqNum = msgSetEnd;
+                                        logBaseSeqNum = msgSetEnd;
                                         continue;
                                 }
 
@@ -1827,13 +1815,11 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 else
                                         msgSetContent.Set(p, Min<size_t>(chunkEnd - p, bundleEnd - p));
 
-
-
                                 p = bundleEnd;
 
                                 uint64_t ts{0};
-				const auto _saved = consumptionList.size();
-				uint32_t msgIdx{0};
+                                const auto _saved = consumptionList.size();
+                                uint32_t msgIdx{0};
 
                                 // Parse the bundle's message set
                                 // if this a compressed messages set, the boundary checks are not necessary
@@ -1851,25 +1837,25 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                         const auto msgFlags = *p++; // msg.flags
 
-					if (sparseBundleBitSet)
+                                        if (sparseBundleBitSet)
                                         {
-						if (msgFlags & uint8_t(TankFlags::BundleMsgFlags::SeqNumPrevPlusOne))
-						{
-							// prev + 1
-							// no need to advance logBaseSeqNum, was advanced in for()
-						}
-						else if (msgIdx == 0)
-						{
-							logBaseSeqNum = firstMsgSeqNum;
-						}
+                                                if (msgFlags & uint8_t(TankFlags::BundleMsgFlags::SeqNumPrevPlusOne))
+                                                {
+                                                        // prev + 1
+                                                        // no need to advance logBaseSeqNum, was advanced in for()
+                                                }
+                                                else if (msgIdx == 0)
+                                                {
+                                                        logBaseSeqNum = firstMsgSeqNum;
+                                                }
                                                 else if (msgIdx == msgsSetSize - 1)
                                                 {
-							logBaseSeqNum = lastMsgSeqNum;
-						}
-						else
+                                                        logBaseSeqNum = lastMsgSeqNum;
+                                                }
+                                                else
                                                 {
-							if (unlikely(!Compression::UnpackUInt32Check(p, endOfMsgSet)))
-							{
+                                                        if (unlikely(!Compression::UnpackUInt32Check(p, endOfMsgSet)))
+                                                        {
                                                                 lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - bundlesBase);
 
                                                                 if (trace)
@@ -1879,26 +1865,25 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                                         const auto delta = Compression::UnpackUInt32(p);
 
-							if (trace)
-								SLog("Delta ", delta, "\n");
+                                                        if (trace)
+                                                                SLog("Delta ", delta, "\n");
 
                                                         logBaseSeqNum += delta;
                                                 }
                                         }
 
-					const auto msgAbsSeqNum = logBaseSeqNum;
+                                        const auto msgAbsSeqNum = logBaseSeqNum;
 
                                         if (trace)
                                                 SLog("Message ", msgIdx, ", msgFlags = ", msgFlags, " for seq.num = ", msgAbsSeqNum, "\n");
-
 
                                         if (msgFlags & uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS))
                                         {
                                                 // Using the timestamp of the last message that had a specified timestamp in this bundle
                                                 // This is very useful; if all messages in a bundle have the same timestamp, then
                                                 // we only need to encode the timestamp once
-						if (trace)
-							SLog("Using last specified TS\n");
+                                                if (trace)
+                                                        SLog("Using last specified TS\n");
                                         }
                                         else
                                         {
@@ -1915,14 +1900,14 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                 ts = *(uint64_t *)p; // msg.timestamp
                                                 p += sizeof(uint64_t);
 
-						if (trace)
-							SLog("Specifying ts = ", ts, "\n");
+                                                if (trace)
+                                                        SLog("Specifying ts = ", ts, "\n");
                                         }
 
                                         if (msgFlags & uint8_t(TankFlags::BundleMsgFlags::HaveKey))
                                         {
-						if (trace)
-							SLog("Message have key\n");
+                                                if (trace)
+                                                        SLog("Message have key\n");
 
                                                 if (p + sizeof(uint8_t) > endOfMsgSet || (p + (*p) + sizeof(uint8_t) > endOfMsgSet))
                                                 {
@@ -1931,7 +1916,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                         if (trace)
                                                                 SLog("Boundaries\n");
 
-							goto nextPartition;
+                                                        goto nextPartition;
                                                 }
                                                 else
                                                 {
@@ -1960,7 +1945,6 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         {
                                                 lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - bundlesBase);
 
-
                                                 if (trace)
                                                         SLog("Boundaries ", lastPartialMsgMinFetchSize, " ", boundaryCheckTarget - bundlesBase, " (expected to parse u32 in ", endOfMsgSet - p, " bytes)\n");
 
@@ -1981,7 +1965,6 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                                 goto nextPartition;
                                         }
-
 
                                         if (msgAbsSeqNum > highWaterMark)
                                         {
@@ -2029,9 +2012,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                               ? requestedSeqNum == UINT64_MAX ? consumptionList.back().seqNum + 1 : Max(requestedSeqNum, consumptionList.back().seqNum + 1)
                                               : requestedSeqNum == UINT64_MAX ? highWaterMark + 1 : requestedSeqNum;
 
-			if (trace)
-				SLog("consumptionList.size = ", consumptionList.size(), ", requestedSeqNum = ", requestedSeqNum, ", highWaterMark = ", highWaterMark, "\n");
-
+                        if (trace)
+                                SLog("consumptionList.size = ", consumptionList.size(), ", requestedSeqNum = ", requestedSeqNum, ", highWaterMark = ", highWaterMark, "\n");
 
                         if (const uint32_t cnt = consumptionList.size())
                         {
@@ -2042,18 +2024,18 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 }
                                 else
                                 {
-					consumed_msg *p;
+                                        consumed_msg *p;
                                         const size_t s = sizeof(consumed_msg) * consumptionList.size();
 
-					if (s >= 2 * 1024 * 1024)
-					{
-						// large allocation; can't/shouldn't satisfy from the allocator
-						p = (consumed_msg *)malloc(s);
-						memcpy(p, consumptionList.data(), s);
-						resultsAllocations.push_back(p);
-					}
-					else
-                                        	p = resultsAllocator.CopyOf(consumptionList.data(), cnt);
+                                        if (s >= 2 * 1024 * 1024)
+                                        {
+                                                // large allocation; can't/shouldn't satisfy from the allocator
+                                                p = (consumed_msg *)malloc(s);
+                                                memcpy(p, consumptionList.data(), s);
+                                                resultsAllocations.push_back(p);
+                                        }
+                                        else
+                                                p = resultsAllocator.CopyOf(consumptionList.data(), cnt);
 
                                         consumedPartitionContent.push_back({clientReqId, topicName, partitionId, {p, cnt}, true, {next, lastPartialMsgMinFetchSize}});
                                         consumptionList.clear();
@@ -2084,11 +2066,11 @@ bool TankClient::process(connection *const c, const uint8_t msg, const uint8_t *
                 case TankAPIMsgType::Consume:
                         return process_consume(c, content, len);
 
-		case TankAPIMsgType::DiscoverPartitions:
-			return process_discover_partitions(c, content, len);
+                case TankAPIMsgType::DiscoverPartitions:
+                        return process_discover_partitions(c, content, len);
 
-		case TankAPIMsgType::CreateTopic:
-			return process_create_topic(c, content, len);
+                case TankAPIMsgType::CreateTopic:
+                        return process_create_topic(c, content, len);
 
                 case TankAPIMsgType::Ping:
                         if (trace)
@@ -2148,7 +2130,7 @@ bool TankClient::try_recv(connection *const c)
 
                                 require(c->bs);
                                 c->bs->set_reachability(broker::Reachability::Reachable, __LINE__);
-				c->bs->block_ctx.retries = 0;
+                                c->bs->block_ctx.retries = 0;
                                 c->state.flags &= ~(1u << uint8_t(connection::State::Flags::ConnectionAttempt));
                                 deregister_connection_attempt(c);
                         }
@@ -2211,11 +2193,9 @@ bool TankClient::try_recv(connection *const c)
                                 }
                         }
 
-
-
-			if (0 == (c->state.flags & (1u << uint8_t(connection::State::Flags::LockedInputBuffer))))
-			{
-				if (auto b = c->inB)
+                        if (0 == (c->state.flags & (1u << uint8_t(connection::State::Flags::LockedInputBuffer))))
+                        {
+                                if (auto b = c->inB)
                                 {
                                         if (b->IsAtEnd())
                                         {
@@ -2229,7 +2209,7 @@ bool TankClient::try_recv(connection *const c)
                                         }
                                 }
                         }
-			else
+                        else
                         {
                                 // We need to defer this
                                 // for the next Poll() call, because e.g process_consume() is going
@@ -2237,7 +2217,6 @@ bool TankClient::try_recv(connection *const c)
                                 // the caller had a chance to e.g go through all consumed messages.
                                 connsBufs.push_back({c, b});
                         }
-
 
                         return true;
                 }
@@ -2260,8 +2239,8 @@ bool TankClient::try_send(connection *const c)
 
         bs->outgoing_content.validate();
 
-	if (trace)
-		SLog("Trying to send\n");
+        if (trace)
+                SLog("Trying to send\n");
 
         for (;;)
         {
@@ -2298,8 +2277,8 @@ bool TankClient::try_send(connection *const c)
 
                         if (r == -1)
                         {
-				if (trace)
-					SLog("error:", strerror(errno), "\n");
+                                if (trace)
+                                        SLog("error:", strerror(errno), "\n");
 
                                 if (errno == EINTR)
                                         continue;
@@ -2316,11 +2295,11 @@ bool TankClient::try_send(connection *const c)
                                         return true;
                                 }
                                 else
-				{
-					// TODO: if this e.g EINVAL or some other error we should probably propagate it
-					// up to the application as a fault
+                                {
+                                        // TODO: if this e.g EINVAL or some other error we should probably propagate it
+                                        // up to the application as a fault
                                         return shutdown(c, __LINE__, true);
-				}
+                                }
                         }
 
                         c->state.lastOutputTS = nowMS;
@@ -2334,24 +2313,24 @@ bool TankClient::try_send(connection *const c)
                                         r -= len;
                                         if (++(it->iovIdx) == it->iovCnt)
                                         {
-                                		auto *const next = it->next;
-						const auto flags = it->flags;
+                                                auto *const next = it->next;
+                                                const auto flags = it->flags;
 
                                                 bs->outgoing_content.pop_front();
 
-						if (flags & (1u << uint8_t(outgoing_payload::Flags::ReqIsIdempotent)))
+                                                if (flags & (1u << uint8_t(outgoing_payload::Flags::ReqIsIdempotent)))
                                                 {
-							// Payload for an idempotent request.
-							// We are going to retain the payload and we will reschedule it to the same broker if need be
+                                                        // Payload for an idempotent request.
+                                                        // We are going to retain the payload and we will reschedule it to the same broker if need be
                                                         retain_for_resp(bs, it);
                                                 }
-						else if (flags & (1u << uint8_t(outgoing_payload::Flags::ReqMaybeRetried)))
-						{
-							// Not an idempotent request, but broker may request that we
-							// retry the request with another broker, a new leader for a (topic, partition)
-							// so we need to keep the payload around, and not reuse it via put_payload()
-							// we won't reschedule this to the same broker though
-						}
+                                                else if (flags & (1u << uint8_t(outgoing_payload::Flags::ReqMaybeRetried)))
+                                                {
+                                                        // Not an idempotent request, but broker may request that we
+                                                        // retry the request with another broker, a new leader for a (topic, partition)
+                                                        // so we need to keep the payload around, and not reuse it via put_payload()
+                                                        // we won't reschedule this to the same broker though
+                                                }
                                                 else
                                                         put_payload(it, __LINE__);
 
@@ -2405,19 +2384,19 @@ int TankClient::init_connection_to(const Switch::endpoint e)
 
         Switch::SetNoDelay(fd, 1);
 
-	// On Linux, the default send buffer size is 16kb, and the default recv buffer size is 86k
-	// use getsockopt() to determine it
-	if (sndBufSize)
-	{
-		if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (char *)&sndBufSize, sizeof(sndBufSize)) == -1)
-			Print("WARNING: unable to set socket send buffer size:", strerror(errno), "\n");
-	}
+        // On Linux, the default send buffer size is 16kb, and the default recv buffer size is 86k
+        // use getsockopt() to determine it
+        if (sndBufSize)
+        {
+                if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (char *)&sndBufSize, sizeof(sndBufSize)) == -1)
+                        Print("WARNING: unable to set socket send buffer size:", strerror(errno), "\n");
+        }
 
-	if (rcvBufSize)
-	{
-		if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (char *)&rcvBufSize, sizeof(rcvBufSize)) == -1)
-			Print("WARNING: unable to set socket rcv buffer size:", strerror(errno), "\n");
-	}
+        if (rcvBufSize)
+        {
+                if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (char *)&rcvBufSize, sizeof(rcvBufSize)) == -1)
+                        Print("WARNING: unable to set socket rcv buffer size:", strerror(errno), "\n");
+        }
 
         if (connect(fd, (sockaddr *)&sa, sizeof(sa)) == -1 && errno != EINPROGRESS)
         {
@@ -2434,14 +2413,13 @@ void TankClient::poll(uint32_t timeoutMS)
         // if this client has joined a consumer group, it is important that the application poll()s giving chances to
         // the tank client to send H/Bs to the broker so that it won't remove the client from the consumer group. See Kafka Consumer Groups
 
-
         // Reset state / buffers used for tracking collected content and responses in last poll() call
         for (auto &it : connsBufs)
         {
                 auto c = it.first;
                 auto b = it.second;
 
-                if (c->inB == b) 	// make sure they are still paired together
+                if (c->inB == b) // make sure they are still paired together
                 {
                         if (b->IsAtEnd())
                         {
@@ -2457,35 +2435,30 @@ void TankClient::poll(uint32_t timeoutMS)
         }
         connsBufs.clear();
 
-
-
         // TODO: https://github.com/phaistos-networks/TANK/issues/6
-	if (const auto n = usedBufs.size())
-	{
-		put_buffers(usedBufs.data(), n);
-		usedBufs.clear();
-	}
-
-
+        if (const auto n = usedBufs.size())
+        {
+                put_buffers(usedBufs.data(), n);
+                usedBufs.clear();
+        }
 
         // Reset prior to reschedule_any() not after we have called it
         // because it may push to capturedFaults[] so we don't want to clear it after we called it
-	if (trace)
-		SLog("POLLING, timeoutMS = ", timeoutMS, ", resetting consumedPartitionContent.size = ", consumedPartitionContent.size(), ": pendingConsumeReqs.size = ", pendingConsumeReqs.size(), "\n");
+        if (trace)
+                SLog("POLLING, timeoutMS = ", timeoutMS, ", resetting consumedPartitionContent.size = ", consumedPartitionContent.size(), ": pendingConsumeReqs.size = ", pendingConsumeReqs.size(), "\n");
 
-	for (auto ptr : resultsAllocations)
-		::free(ptr);
-	resultsAllocations.clear();
+        for (auto ptr : resultsAllocations)
+                ::free(ptr);
+        resultsAllocations.clear();
         resultsAllocator.reuse();
         consumedPartitionContent.clear();
         capturedFaults.clear();
         produceAcks.clear();
-	discoverPartitionsResults.clear();
-	createdTopicsResults.clear();
+        discoverPartitionsResults.clear();
+        createdTopicsResults.clear();
 
-
-	// it is important that we update_time_cache() here before we invoke reschedule_any() and right after Poll()
-	update_time_cache();
+        // it is important that we update_time_cache() here before we invoke reschedule_any() and right after Poll()
+        update_time_cache();
 
         reschedule_any();
 
@@ -2511,9 +2484,9 @@ void TankClient::poll(uint32_t timeoutMS)
                         throw Switch::system_error("epoll_wait(): ", strerror(errno));
         }
 
-	update_time_cache();
+        update_time_cache();
 
-	for (const auto it : poller.new_events(r))
+        for (const auto it : poller.new_events(r))
         {
                 const auto events = it->events;
                 auto *const c = (connection *)it->data.ptr;
@@ -2535,12 +2508,12 @@ void TankClient::poll(uint32_t timeoutMS)
 
                                 if (unlikely(ioctl(fd, FIONREAD, &n) == -1))
                                         throw Switch::system_error("ioctl() failed:", strerror(errno));
-				else if (unlikely(!n))
-				{
-					// Just in case we get 0; if we do, read() will fail with EAGAIN anyway
-					// We shouldn't get n == 0 but let's be on the safe side
-					n = sizeof(buf);
-				}
+                                else if (unlikely(!n))
+                                {
+                                        // Just in case we get 0; if we do, read() will fail with EAGAIN anyway
+                                        // We shouldn't get n == 0 but let's be on the safe side
+                                        n = sizeof(buf);
+                                }
 
                                 do
                                 {
@@ -2599,25 +2572,25 @@ void TankClient::poll(uint32_t timeoutMS)
 uint32_t TankClient::produce_to(const topic_partition &to, const std::vector<msg> &msgs)
 {
         const auto clientReqId = ids_tracker.client.next++;
-	const auto leader = leader_for(to.first, to.second);
-	produce_ctx ctx;
+        const auto leader = leader_for(to.first, to.second);
+        produce_ctx ctx;
 
-	ctx.leader = leader;
-	ctx.topic = to.first;
-	ctx.partitionId = to.second;
-	ctx.msgs = msgs.data();
-	ctx.msgsCnt = msgs.size();
+        ctx.leader = leader;
+        ctx.topic = to.first;
+        ctx.partitionId = to.second;
+        ctx.msgs = msgs.data();
+        ctx.msgsCnt = msgs.size();
 
-	update_time_cache();
+        update_time_cache();
         if (!produce_to_leader(clientReqId, leader, &ctx, 1))
-		return 0;
-	else
-		return clientReqId;
+                return 0;
+        else
+                return clientReqId;
 }
 
-uint32_t TankClient::produce_with_base(const std::vector< std::pair<topic_partition, std::pair<uint64_t, std::vector<msg>>>> &req)
+uint32_t TankClient::produce_with_base(const std::vector<std::pair<topic_partition, std::pair<uint64_t, std::vector<msg>>>> &req)
 {
-	return produce_with_base(req.data(), req.size());
+        return produce_with_base(req.data(), req.size());
 }
 
 uint32_t TankClient::produce_with_base(const std::pair<topic_partition, std::pair<uint64_t, std::vector<msg>>> *const list, const size_t listSize)
@@ -2628,12 +2601,12 @@ uint32_t TankClient::produce_with_base(const std::pair<topic_partition, std::pai
                 SLog("Producing into ", listSize, " partitions\n");
 
         out.clear();
-	for (size_t i{0}; i != listSize; ++i)
-	{
-		const auto &it = list[i];
+        for (size_t i{0}; i != listSize; ++i)
+        {
+                const auto &it = list[i];
                 const auto ref = it.first;
                 const auto topic = ref.first;
-		const auto leader = leader_for(topic, ref.second);
+                const auto leader = leader_for(topic, ref.second);
 
                 if (trace)
                         SLog("For (", topic, ", ", ref.second, "): ", it.second.second.size(), "\n");
@@ -2649,7 +2622,7 @@ uint32_t TankClient::produce_with_base(const std::pair<topic_partition, std::pai
         const auto cnt = out.size();
         const auto clientReqId = ids_tracker.client.next++;
 
-	update_time_cache();
+        update_time_cache();
         for (uint32_t i{0}; i != cnt;)
         {
                 auto it = all + i;
@@ -2683,19 +2656,18 @@ uint32_t TankClient::produce(const std::pair<topic_partition, std::vector<msg>> 
                 SLog("Producing into ", listSize, " partitions\n");
 
         out.clear();
-	for (size_t i{0}; i != listSize; ++i)
-	{
-		const auto &it = list[i];
+        for (size_t i{0}; i != listSize; ++i)
+        {
+                const auto &it = list[i];
                 const auto ref = it.first;
                 const auto topic = ref.first;
-		const auto leader = leader_for(topic, ref.second);
+                const auto leader = leader_for(topic, ref.second);
 
                 if (trace)
-		{
+                {
                         SLog("For (", topic, ", ", ref.second, "): ", it.second.size(), "\n");
-			SLog("leader for topic/partition:", leader, "\n");
-		}
-
+                        SLog("leader for topic/partition:", leader, "\n");
+                }
 
                 out.push_back(produce_ctx{{leader}, topic, ref.second, 0, it.second.data(), it.second.size()});
         }
@@ -2708,7 +2680,7 @@ uint32_t TankClient::produce(const std::pair<topic_partition, std::vector<msg>> 
         const auto cnt = out.size();
         const auto clientReqId = ids_tracker.client.next++;
 
-	update_time_cache();
+        update_time_cache();
         for (uint32_t i{0}; i != cnt;)
         {
                 auto it = all + i;
@@ -2722,8 +2694,8 @@ uint32_t TankClient::produce(const std::pair<topic_partition, std::vector<msg>> 
                         return a.topic < b.topic;
                 });
 
-		if (trace)
-			SLog("PRODUCING TO [", leader, "]\n");
+                if (trace)
+                        SLog("PRODUCING TO [", leader, "]\n");
 
                 if (!produce_to_leader(clientReqId, leader, all + base, i - base))
                         return 0;
@@ -2745,43 +2717,43 @@ void TankClient::set_topic_leader(const strwlen8_t topic, const strwlen32_t endp
 
 Switch::endpoint TankClient::leader_for(const strwlen8_t topic, const uint16_t partition)
 {
-	if (trace)
-		SLog("Requesting leader for [", topic, "] ", partition, "\n");
+        if (trace)
+                SLog("Requesting leader for [", topic, "] ", partition, "\n");
 
         if (const auto it = leadersMap.find(topic); it != leadersMap.end())
-	{
-		if (trace)
-			SLog("Returning ", it->second, "\n");
+        {
+                if (trace)
+                        SLog("Returning ", it->second, "\n");
 
                 return it->second;
-	}
+        }
 
         if (!defaultLeader)
                 throw Switch::data_error("Default leader not specified: use set_default_leader() to specify it");
-	
-	if (trace)
-		SLog("Returning default leader:", defaultLeader, "\n");
+
+        if (trace)
+                SLog("Returning default leader:", defaultLeader, "\n");
 
         return defaultLeader;
 }
 
 uint32_t TankClient::consume_from(const topic_partition &from, const uint64_t seqNum, const uint32_t minFetchSize, const uint64_t maxWait, const uint32_t minSize)
 {
-	const auto leader = leader_for(from.first, from.second);
+        const auto leader = leader_for(from.first, from.second);
         const auto clientReqId = ids_tracker.client.next++;
-	consume_ctx ctx;
+        consume_ctx ctx;
 
-	ctx.leader = leader;
-	ctx.topic = from.first;
-	ctx.partitionId = from.second;
-	ctx.absSeqNum = seqNum;
-	ctx.fetchSize = minFetchSize;
+        ctx.leader = leader;
+        ctx.topic = from.first;
+        ctx.partitionId = from.second;
+        ctx.absSeqNum = seqNum;
+        ctx.fetchSize = minFetchSize;
 
-	update_time_cache();
+        update_time_cache();
         if (!consume_from_leader(clientReqId, leader, &ctx, 1, maxWait, minSize))
-		return 0;
-	else
-		return clientReqId;
+                return 0;
+        else
+                return clientReqId;
 }
 
 uint32_t TankClient::consume(const std::vector<
@@ -2811,7 +2783,7 @@ uint32_t TankClient::consume(const std::vector<
         auto *const all = out.data();
         const auto clientReqId = ids_tracker.client.next++;
 
-	update_time_cache();
+        update_time_cache();
         for (uint32_t i{0}; i != n;)
         {
                 const auto leader = all[i].leader;
@@ -2841,13 +2813,13 @@ void TankClient::interrupt_poll()
         bool to{true};
 
         if (polling.compare_exchange_weak(to, false, std::memory_order_release, std::memory_order_relaxed))
-	{
-                if (write(pipeFd[1], " ", 1) == -1) 	// write()'s declared with [[gnu::warn_unused_result]] so keep compiler happy
-		{
-			// OK compiler, we know
-			// and we don't appreciate casting to void won't be enough for you to know we get it:)
-		}
-	}
+        {
+                if (write(pipeFd[1], " ", 1) == -1) // write()'s declared with [[gnu::warn_unused_result]] so keep compiler happy
+                {
+                        // OK compiler, we know
+                        // and we don't appreciate casting to void won't be enough for you to know we get it:)
+                }
+        }
 }
 
 void TankClient::broker::set_reachability(const Reachability r, const uint32_t ref)
@@ -2856,7 +2828,7 @@ void TankClient::broker::set_reachability(const Reachability r, const uint32_t r
                 SLog(ansifmt::bold, ansifmt::color_green, "Reachability from ", uint8_t(reachability), " to ", uint8_t(r), ansifmt::reset, "\n");
 
 #ifdef TRACE_REACHABILITY_OVERSEER
-	if (r != reachability)
+        if (r != reachability)
         {
                 Overseer::Emit("tankclient.reachability.trace"_s8,
                                {{"ref"_s8, ref},
@@ -2892,8 +2864,7 @@ void TankClient::put_buffers(IOBuffer **const list, const size_t n)
         IOBuffer *b;
         size_t newValue;
 
-        for (; i != n && (newValue = buffersPoolPressure + (b = list[i])->Reserved()) < _BUFFERS_PRESSURE_THRESHOLD 
-		&& buffersPool.size() < _BUFFERS_POOL_THRESHOLD; ++i)
+        for (; i != n && (newValue = buffersPoolPressure + (b = list[i])->Reserved()) < _BUFFERS_PRESSURE_THRESHOLD && buffersPool.size() < _BUFFERS_POOL_THRESHOLD; ++i)
         {
                 buffersPoolPressure = newValue;
                 b->clear();
@@ -2908,9 +2879,9 @@ void TankClient::set_default_leader(const Switch::endpoint e)
 {
         if (!e)
                 throw Switch::data_error("Unable to parse default leader endpoint");
-	
-	if (trace)
-		SLog("Default leader set to ", e, "\n");
+
+        if (trace)
+                SLog("Default leader set to ", e, "\n");
 
         defaultLeader = e;
 }

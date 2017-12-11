@@ -353,6 +353,37 @@ struct topic_partition_log
 
         append_res append_bundle(const time_t, const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt, const uint64_t, const uint64_t);
 
+	// utility method: appends a non-sparse bundle
+	// This is handy for appending bundles to the internal topics/partitions
+        append_res append_bundle(const time_t ts, const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt)
+	{
+                return append_bundle(ts, bundle, bundleSize, bundleMsgsCnt, 0, 0);
+        }
+
+	append_res append_msg(const time_t ts, const strwlen8_t key, const strwlen32_t msg)
+        {
+                const std::size_t required = (key.size() + msg.size()) * 24;
+                const uint8_t msgFlags = key.size() ? uint8_t(TankFlags::BundleMsgFlags::HaveKey) : 0;
+		IOBuffer _msgBuf;	 // XXX: Service instance
+		auto &b{_msgBuf};
+
+                b.clear();
+                b.reserve(required);
+                b.pack(uint8_t(1 << 2)); // bundle flags: 1 message in the bundle
+                b.pack(msgFlags, ts); 	// message header: flags and timestamp
+
+                if (key)
+                {
+                        b.pack(key.size());
+                        b.serialize(key.data(), key.size());
+                }
+
+                b.encode_varuint32(msg.size());
+                b.serialize(msg.data(), msg.size());
+
+                return append_bundle(ts, b.data(), b.size(), 1);
+        }
+
         bool should_roll(const uint32_t) const;
 
 	bool may_switch_index_wide(const uint64_t);
@@ -594,7 +625,7 @@ struct outgoing_queue
 
                                 struct
                                 {
-                                        struct iovec iov[64]; // https://github.com/phaistos-networks/TANK/issues/12
+                                        struct iovec iov[250]; // https://github.com/phaistos-networks/TANK/issues/12
                                         uint8_t iovIdx;
                                         uint8_t iovCnt;
                                 };

@@ -4402,7 +4402,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 
                         if (unlikely(!res.fdh))
                         {
-                                if (res.dataRange.len == UINT32_MAX)
+                                if (res.dataRange.size() == UINT32_MAX)
                                 {
                                         // Invalid request(offsets)
                                         respHeader->Serialize(uint8_t(2));
@@ -4888,6 +4888,7 @@ bool Service::try_send(connection *const c)
 
         const auto end = q->backIdx;
         [[maybe_unused]] size_t transmitted{0};
+	// TODO: transmit_trheshold should probably be computed dynamically based on current approximate load and other signals
         static constexpr size_t transmit_trheshold{24 * 1024 * 1024};
 
         for (auto idx = q->frontIdx; idx != end; idx = q->next(idx))
@@ -5112,6 +5113,7 @@ bool Service::try_send(connection *const c)
                                                 // https://github.com/phaistos-networks/TANK/issues/14#issuecomment-301442619
                                                 if (trace)
                                                         SLog("Bailing, transmitted ", transmitted, " but spent ", sum, " ", duration_repr(sum), "\n");
+
                                                 goto l2;
                                         }
 
