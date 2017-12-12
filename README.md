@@ -86,6 +86,7 @@ Features include:
 - Simple design (Simple is Beautiful; [Convenience is Key](https://medium.com/@markpapadakis/convenience-is-key-2aad97d531cd#.47eyjv6xt))
 - [compactions](https://github.com/phaistos-networks/TANK/wiki/Compactions) based on message keys and in the future based on programmable logic
 - A [powerful CLI tool](https://github.com/phaistos-networks/TANK/wiki/Tank-CLI) for managing, querying, setting messages, mirroring across brokers, etc.
+- [Prometheus Support](https://github.com/phaistos-networks/TANK/wiki/Prometheus-Support)
  
 You should probably use Kafka (the Confluent folk are particularly great), or Google Pub/Sub, or any other open source broker/queue instead of Tank - they are all perfectly fine, some more than others, if support for cluster-aware setups is crucial to you(this feature is in the works).
 
