@@ -3,12 +3,11 @@
  *	http://phaistosnetworks.gr/
  *
  *	Licensed under Apache 2 License
- *
  */
 #pragma once
 #include <switch.h>
 
-#define TANK_VERSION (0 * 100 + 55)
+#define TANK_VERSION (0 * 100 + 70)
 
 // All kind of if (trace) SLog() calls here, for checks and for debugging. Will be stripped out later
 

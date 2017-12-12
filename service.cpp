@@ -3517,20 +3517,14 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                 auto respHeader = get_buffer();
                 bool respondNow{false};
                 const auto replicaId = c->replicaId;
-
-                const auto clientVersion = *(uint16_t *)p;
-                p += sizeof(uint16_t);
-                const auto requestId = *(uint32_t *)p;
-                p += sizeof(uint32_t);
-                const strwlen8_t clientId((char *)(p + 1), *p);
-                p += clientId.len + sizeof(uint8_t);
-                const auto maxWait = *(uint64_t *)p; // if we don't get any data within `maxWait`ms, we 'll return nothing for the requested partitions
-                p += sizeof(uint64_t);
-                const auto minBytes = Min<uint32_t>(*(uint32_t *)p, 128 * 1024 * 1024); // keep it sane
-                p += sizeof(uint32_t);
+                [[maybe_unused]] const auto clientVersion = decode_pod<uint16_t>(p);
+                const auto requestId = decode_pod<uint32_t>(p);
+                const strwlen8_t clientId(reinterpret_cast<const char *>(p) + 1, *p);
+                p += clientId.size() + sizeof(uint8_t);
+                const auto maxWait = decode_pod<uint64_t>(p);                                    // if we don't get any data within `maxWait`ms, we 'll return nothing for the requested partitions
+                const auto minBytes = Min<uint32_t>(decode_pod<uint32_t>(p), 128 * 1024 * 1024); // keep it sane
                 const auto topicsCnt = *p++;
 
-                (void)clientVersion;
                 if (trace)
                         SLog(ansifmt::bold, ansifmt::color_magenta, "New COSNUME request for topicsCnt = ", topicsCnt, ansifmt::reset, "\n");
 
@@ -3562,8 +3556,8 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
 
                 for (uint32_t i{0}; i != topicsCnt; ++i)
                 {
-                        const strwlen8_t topicName((char *)(p + 1), *p);
-                        p += topicName.len + sizeof(uint8_t);
+                        const strwlen8_t topicName(reinterpret_cast<const char *>(p) + 1, *p);
+                        p += topicName.size() + sizeof(uint8_t);
                         const auto partitionsCnt = *p++;
                         auto topic = topic_by_name(topicName);
 
@@ -3591,12 +3585,9 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
 
                         for (uint32_t k{0}; k != partitionsCnt; ++k)
                         {
-                                const auto partitionId = *(uint16_t *)p;
-                                p += sizeof(uint16_t);
-                                const auto absSeqNum = *(uint64_t *)p;
-                                p += sizeof(uint64_t);
-                                const auto fetchSize = *(uint32_t *)p;
-                                p += sizeof(uint32_t);
+                                const auto partitionId = decode_pod<uint16_t>(p);
+                                const auto absSeqNum = decode_pod<uint64_t>(p);
+                                const auto fetchSize = decode_pod<uint32_t>(p);
                                 auto partition = topic->partition(partitionId);
 
                                 // TODO: we should probably limit this to say a few MBs at most
@@ -3610,6 +3601,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                 {
                                         if (trace)
                                                 SLog("Undefined partition ", partitionId, "\n");
+
                                         respHeader->Serialize(uint8_t(0xff));
                                         respondNow = true;
                                         continue;
@@ -3637,10 +3629,13 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                         const auto hwMark = res.highWatermark;
                                         range32_t range;
                                         bool firstBundleIsSparse;
+					uint64_t start;
 
                                         switch (res.fault)
                                         {
                                                 case lookup_res::Fault::NoFault:
+							// for promethus metrics
+							start = Timings::Microseconds::Tick();
                                                         firstBundleIsSparse = adjust_range_start(res, absSeqNum);
                                                         range.Set(res.fileOffset, fetchSize);
                                                         if (range.stop() > res.fileOffsetCeiling)
@@ -3697,7 +3692,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
 #endif
 
                                                         sum += range.len;
-                                                        q->push_back({res.fdh.get(), range});
+                                                        q->push_back({res.fdh.get(), range, start, topic});
 
                                                         // TODO:
                                                         // if (replicaId) { updateFollowerLogEndOffset(topic, partition, absSeqNum) }
@@ -3782,7 +3777,6 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                 SLog("respHeader.length = ", respHeader->size(), " ", *(uint32_t *)respHeader->At(sizeOffset), "\n");
 
                         headerPayload->set_iov(patchList, patchListSize);
-
                         return try_send_ifnot_blocked(c);
                 }
                 else
@@ -4095,16 +4089,13 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
         const uint64_t processBegin = trace ? Timings::Microseconds::Tick() : 0;
         auto *const respHeader = get_buffer();
         auto q = c->outQ;
-        const auto clientVersion = *(uint16_t *)p;
-        p += sizeof(uint16_t);
-        const auto requestId = *(uint32_t *)p;
-        p += sizeof(uint32_t);
+        [[maybe_unused]] const auto clientVersion = decode_pod<uint16_t>(p);
+        const auto requestId = decode_pod<uint32_t>(p);
 
-        const strwlen8_t clientId((char *)(p + 1), *p);
-        p += clientId.len + sizeof(uint8_t);
-        const auto requiredAcks = *p++;
-        const auto ackTimeout = *(uint32_t *)p;
-        p += sizeof(uint32_t);
+        const strwlen8_t clientId(reinterpret_cast<const char *>(p) + 1, *p);
+        p += clientId.size() + sizeof(uint8_t);
+        [[maybe_unused]] const auto requiredAcks = *p++;
+        [[maybe_unused]] const auto ackTimeout = decode_pod<uint32_t>(p);
         const auto topicsCnt = *p++;
         strwlen8_t topicName;
         strwlen32_t msgContent;
@@ -4115,9 +4106,6 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
         const auto sizeOffset = respHeader->size();
         respHeader->RoomFor(sizeof(uint32_t));
 
-        (void)clientVersion;
-        (void)requiredAcks;
-        (void)ackTimeout;
 
         if (!q)
                 q = c->outQ = get_outgoing_queue();
@@ -4177,8 +4165,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 
                 for (uint32_t k{0}; k != partitionsCnt; ++k)
                 {
-                        const auto partitionId = *(uint16_t *)p;
-                        p += sizeof(uint16_t);
+                        const auto partitionId = decode_pod<uint16_t>(p);
                         const auto bundleLen = Compression::UnpackUInt32(p);
                         auto partition = topic->partition(partitionId);
                         uint64_t firstMsgSeqNum{0}, lastMsgSeqNum;
@@ -4290,13 +4277,12 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                                 // iterate bundle's message set
                                 uint64_t msgTs{0};
                                 uint64_t absMsgSeqNum, prevAbsMsgSeqNum;
-                                bool monotonicallyIncreasing{true};
+                                [[maybe_unused]] bool monotonicallyIncreasing{true};
                                 uint32_t msgIdx{0};
 
                                 if (trace)
                                         SLog("Iterating ", msgSetContent.len, " bytes\n");
 
-                                (void)monotonicallyIncreasing;
                                 for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.len; p != e; ++msgIdx, ++absMsgSeqNum)
                                 {
                                         // Next message set message
@@ -4417,6 +4403,11 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                         {
                                 // success
                                 respHeader->Serialize(uint8_t(0));
+
+				// we deliberatly only care for the actual bundle for bytes_in
+				// i.e we don't account for the header
+				topic->metrics.bytes_in += bundleLen;
+				topic->metrics.msgs_in += msgSetSize;
                         }
 
                         if (trace)
@@ -4541,7 +4532,7 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes,
 
                                 const auto __v = it->fdh->use_count();
 
-                                q->push_back({it->fdh, it->range});
+                                q->push_back({it->fdh, it->range, Timings::Microseconds::Tick(), t});
 
                                 require(it->fdh->use_count() == __v + 1);
 
@@ -4705,17 +4696,22 @@ void Service::destroy_wait_ctx(wait_ctx *const wctx)
 
 void Service::cleanup_connection(connection *const c)
 {
+	const bool prom_connection = c->src_prometheus();
+
         poller.erase(c->fd);
         close(c->fd);
         c->fd = -1;
 
-        // For simplicity, place in a vector and drain it instead
-        expiredCtxList.clear();
-        for (auto it = c->waitCtxList.next; it != &c->waitCtxList; it = it->next)
-                expiredCtxList.push_back(switch_list_entry(wait_ctx, list, it));
+	if (!prom_connection)
+	{
+		// For simplicity, place in a vector and drain it instead
+		expiredCtxList.clear();
+		for (auto it = c->waitCtxList.next; it != &c->waitCtxList; it = it->next)
+			expiredCtxList.push_back(switch_list_entry(wait_ctx, list, it));
 
-        while (expiredCtxList.size())
-                destroy_wait_ctx(expiredCtxList.Pop());
+		while (expiredCtxList.size())
+			destroy_wait_ctx(expiredCtxList.Pop());
+	}
 
         switch_dlist_del(&c->connectionsList);
 
@@ -4772,6 +4768,15 @@ void Service::introduce_self(connection *const c, bool &haveCork)
         c->state.flags &= ~(1u << uint8_t(connection::State::Flags::PendingIntro));
 }
 
+void Service::stop_poll_outavail(connection *c)
+{
+        if (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail)))
+        {
+                poller.set_data_events(c->fd, c, POLLIN);
+                c->state.flags &= ~(1u << uint8_t(connection::State::Flags::NeedOutAvail));
+        }
+}
+
 void Service::poll_outavail(connection *const c)
 {
         if (!(c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))))
@@ -4784,7 +4789,7 @@ void Service::poll_outavail(connection *const c)
         }
 }
 
-bool Service::flush_iov(connection *const c, struct iovec *const iov, const uint32_t iovCnt)
+bool Service::flush_iov(connection *const c, struct iovec *const iov, const uint32_t iovCnt, const bool have_cork)
 {
         const auto fd = c->fd;
         auto q = c->outQ;
@@ -4805,7 +4810,8 @@ bool Service::flush_iov(connection *const c, struct iovec *const iov, const uint
                                 if (trace)
                                         SLog("Deactivating Cork\n");
 
-                                Switch::SetTCPCork(fd, 0);
+				if (have_cork)
+					Switch::SetTCPCork(fd, 0);
                                 poll_outavail(c);
                                 return true;
                         }
@@ -4831,7 +4837,16 @@ bool Service::flush_iov(connection *const c, struct iovec *const iov, const uint
                                         if (!r)
                                         {
                                                 // done
-                                                return true;
+						if (have_cork)
+							Switch::SetTCPCork(fd, 0);
+
+						if (c->state.flags & (1 << unsigned(connection::State::Flags::DrainingForShutdown)))
+						{
+							SLog("drained outgoing data\n");
+							return shutdown(c, __LINE__);
+						}
+						else
+                                                	return true;
                                         }
                                         else
                                         {
@@ -4843,13 +4858,14 @@ bool Service::flush_iov(connection *const c, struct iovec *const iov, const uint
                                         ++ptr;
                         }
 
-                        ptr->iov_base = (char *)ptr->iov_base + r;
+                        ptr->iov_base = reinterpret_cast<char *>(ptr->iov_base) + r;
                         ptr->iov_len -= r;
 
                         if (trace)
                                 SLog("Deactivating Cork\n");
 
-                        Switch::SetTCPCork(fd, 0);
+			if (have_cork)
+				Switch::SetTCPCork(fd, 0);
                         poll_outavail(c);
                         return true;
                 }
@@ -4858,13 +4874,14 @@ bool Service::flush_iov(connection *const c, struct iovec *const iov, const uint
         }
 }
 
-// this method's implementation is somewhat more complex that it perhaps ought to be, but we need to
+// This method's implementation is somewhat more complex that it perhaps ought to be, but we need to
 // keep the syscalls count down to minimum and coallesce data to write
+//
 // Related: https://github.com/phaistos-networks/TANK/issues/41
 bool Service::try_send(connection *const c)
 {
-        const auto fd = c->fd;
-        auto q = c->outQ;
+        const auto fd{c->fd};
+        auto q{c->outQ};
         bool haveCork{false};
         struct iovec iov[512];
         uint32_t iovCnt{0};
@@ -4874,33 +4891,33 @@ bool Service::try_send(connection *const c)
 
         if (!q)
         {
-                if (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail)))
-                {
-                        poller.set_data_events(fd, c, POLLIN);
-                        c->state.flags &= ~(1u << uint8_t(connection::State::Flags::NeedOutAvail));
-                }
+		if (trace)
+			SLog("Nothing to send\n");
 
+		stop_poll_outavail(c);
                 return true;
         }
 
         if (trace)
-                SLog("Attempting to send ", q->size(), "\n");
+                SLog("Attempting to send ", q->size(), " payloads\n");
 
-        const auto end = q->backIdx;
-        [[maybe_unused]] size_t transmitted{0};
+        const auto end{q->backIdx};
+        [[maybe_unused]] std::size_t transmitted{0};
 	// TODO: transmit_trheshold should probably be computed dynamically based on current approximate load and other signals
-        static constexpr size_t transmit_trheshold{24 * 1024 * 1024};
+        static constexpr std::size_t transmit_trheshold{24 * 1024 * 1024};
+	uint32_t next;
 
-        for (auto idx = q->frontIdx; idx != end; idx = q->next(idx))
+        for (auto idx = q->frontIdx; idx != end; idx = next)
         {
                 auto &it = q->A[idx];
 
+		next = q->next(idx);	// idx is the last one if (next == end)
                 if (it.payloadBuf)
                 {
-                        const auto n = Min<uint32_t>(it.iovCnt - it.iovIdx, sizeof_array(iov) - iovCnt);
+                        const auto n = std::min<uint32_t>(it.iovCnt - it.iovIdx, sizeof_array(iov) - iovCnt);
 
                         if (trace)
-                                SLog("payload holds buffer {", it.iovCnt, "}\n");
+                                SLog("payload holds buffer {", ptr_repr(it.buf), ", ", it.iovCnt, "}\n");
 
                         require(it.iovCnt);
                         require(it.iovIdx < it.iovCnt);
@@ -4911,13 +4928,17 @@ bool Service::try_send(connection *const c)
                         if (unlikely(iovCnt == sizeof_array(iov)))
                         {
                                 // local iov[] is full, need to flush it now
-                                if (!haveCork)
+                                if (!haveCork && next != end)
                                 {
+					// only cork if we need to
+                                        if (trace)
+                                                SLog("Activating Cork\n");
+
                                         haveCork = true;
                                         Switch::SetTCPCork(fd, 1);
                                 }
 
-                                if (!flush_iov(c, iov, iovCnt))
+                                if (!flush_iov(c, iov, iovCnt, haveCork))
                                         return false;
                                 else
                                         iovCnt = 0;
@@ -4932,6 +4953,8 @@ bool Service::try_send(connection *const c)
                         {
                                 if (!haveCork)
                                 {
+					// we really need to cork here
+					// because we have pending iovecs to stream before we stream the file range
                                         if (trace)
                                                 SLog("Activating Cork\n");
 
@@ -4953,7 +4976,7 @@ bool Service::try_send(connection *const c)
                                                         if (trace)
                                                                 SLog("Deactivating Cork\n");
 
-                                                        Switch::SetTCPCork(fd, 0);
+							Switch::SetTCPCork(fd, 0);
                                                         poll_outavail(c);
                                                         return true;
                                                 }
@@ -4991,14 +5014,14 @@ bool Service::try_send(connection *const c)
                                                                 ++ptr;
                                                 }
 
-                                                ptr->iov_base = (char *)ptr->iov_base + r;
+                                                ptr->iov_base = reinterpret_cast<char *>(ptr->iov_base) + r;
                                                 ptr->iov_len -= r;
 
                                                 if (trace)
                                                         SLog("Deactivating Cork\n");
 
-                                                Switch::SetTCPCork(fd, 0);
-                                                poll_outavail(c);
+						Switch::SetTCPCork(fd, 0);
+						poll_outavail(c);
                                                 return true;
                                         }
 
@@ -5010,7 +5033,8 @@ bool Service::try_send(connection *const c)
                         }
 
                         // https://github.com/phaistos-networks/TANK/issues/14
-                        // if only FreeBSD's great sendfile() syscall was available on Linux, with support for the
+			//
+                        // If only FreeBSD's great sendfile() syscall was available on Linux, with support for the
                         // extra flags based on NGINX's and Netflix's work, that'd make everything so much simpler.
                         // We 'd just use the SF_NODISKIO flag and the SF_READAHEAD macro, and check for EBUSY
                         // and optionally use readahead() and try again later(we could also mmap() the log and use mincore() to determine if
@@ -5077,6 +5101,15 @@ bool Service::try_send(connection *const c)
                                                 if (trace)
                                                         SLog("Releasing ", ansifmt::bold, ansifmt::color_blue, ptr_repr(it.file_range.fdh), " ", it.file_range.fdh->use_count(), ansifmt::reset, "\n");
 
+						if (const auto since = it.tracker.since)
+						{
+							const auto delta = Timings::Microseconds::ToMillis(Timings::Microseconds::Since(since));
+							auto topic{it.tracker.src_topic};
+
+							require(topic);
+							topic->metrics.latency.reg_sample(delta);
+						}
+
                                                 it.file_range.fdh->Release();
                                                 q->pop_front();
                                                 break;
@@ -5127,7 +5160,12 @@ bool Service::try_send(connection *const c)
                                         // https://github.com/phaistos-networks/TANK/issues/14#issuecomment-301000261
                                         l2:
                                                 if (haveCork)
+						{
+							if (trace)
+								SLog("Deactivating cork\n");
                                                         Switch::SetTCPCork(fd, 0);
+						}
+
                                                 poll_outavail(c);
                                                 return true;
                                         }
@@ -5145,6 +5183,9 @@ bool Service::try_send(connection *const c)
                 {
                         auto r = writev(fd, iov, iovCnt);
 
+			if (trace)
+				SLog("r = ", r, " for ", iovCnt, "\n");
+
                         if (r == -1)
                         {
                                 if (errno == EINTR)
@@ -5158,6 +5199,7 @@ bool Service::try_send(connection *const c)
 
                                                 Switch::SetTCPCork(fd, 0);
                                         }
+
                                         poll_outavail(c);
                                         return true;
                                 }
@@ -5171,6 +5213,9 @@ bool Service::try_send(connection *const c)
                                 auto &it = q->front();
                                 auto ptr = it.iov + it.iovIdx;
 
+				if (trace)
+					SLog("Payload iovIdx = ", it.iovIdx, " ", it.iovCnt, "\n");
+
                                 while (r >= ptr->iov_len)
                                 {
                                         r -= ptr->iov_len;
@@ -5181,12 +5226,37 @@ bool Service::try_send(connection *const c)
                                                 q->pop_front();
 
                                                 if (trace)
-                                                        SLog("done with payload, r now = ", r, "\n");
+                                                        SLog("done with payload, r now = ", r, ", close on flush = ", c->close_on_flush(), ", haveCork = ", haveCork, "\n");
 
                                                 if (!r)
                                                 {
                                                         // done with all data we we need to flush for the buffers
-                                                        break;
+							require(q->empty()); // sanity check
+
+                                                        if (haveCork)
+                                                        {
+                                                                if (trace)
+                                                                        SLog("Deactivating cork\n");
+
+								Switch::SetTCPCork(fd, 0);
+                                                                haveCork = false;
+                                                        }
+
+							if (trace)
+								SLog("Drained queue\n");
+
+							if (c->close_on_flush())
+							{
+								if (trace)
+									SLog("Drained\n");
+
+								return shutdown(c, __LINE__);
+							}
+							else
+							{
+								// done with the queue
+								goto l150;
+							}
                                                 }
                                                 else
                                                 {
@@ -5198,7 +5268,7 @@ bool Service::try_send(connection *const c)
                                                 ++ptr;
                                 }
 
-                                ptr->iov_base = (char *)ptr->iov_base + r;
+                                ptr->iov_base = reinterpret_cast<char *>(ptr->iov_base) + r;
                                 ptr->iov_len -= r;
 
                                 if (haveCork)
@@ -5208,15 +5278,13 @@ bool Service::try_send(connection *const c)
 
                                         Switch::SetTCPCork(fd, 0);
                                 }
+
                                 poll_outavail(c);
                                 return true;
                         }
                         break;
                 }
         }
-
-        put_outgoing_queue(q);
-        c->outQ = nullptr;
 
         if (haveCork)
         {
@@ -5226,12 +5294,14 @@ bool Service::try_send(connection *const c)
                 Switch::SetTCPCork(fd, 0);
         }
 
-        if (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail)))
-        {
-                c->state.flags &= ~(1u << uint8_t(connection::State::Flags::NeedOutAvail));
-                poller.set_data_events(fd, c, POLLIN);
-        }
+l150:
+	if (trace)
+		SLog("Releasing queue\n");
 
+        put_outgoing_queue(q);
+        c->outQ = nullptr;
+
+	stop_poll_outavail(c);
         return true;
 }
 
@@ -5246,13 +5316,29 @@ Service::~Service()
         while (outgoingQueuesPool.size())
                 delete outgoingQueuesPool.Pop();
 
+	for (auto it : waitCtxDeferredGC)
+		put_waitctx(it);
+
+	waitCtxDeferredGC.clear();
+
         while (connsPool.size())
                 delete connsPool.Pop();
+
+	for (auto &it : topics)
+	{
+		for (auto p : *it.second->partitions_)
+		{
+			for (auto it : p->waitingList)
+				std::free(it);
+
+			p->waitingList.clear();
+		}
+	}
 
         for (auto &it : waitCtxPool)
         {
                 while (it.size())
-                        free(it.Pop());
+                        std::free(it.Pop());
         }
 }
 
@@ -5271,7 +5357,7 @@ int Service::start(int argc, char **argv)
         int r;
         struct stat64 st;
         size_t totalPartitions{0};
-        Switch::endpoint listenAddr;
+        Switch::endpoint listenAddr, prom_endpoint;
 
 #ifndef LEAN_SWITCH
         // See: https://github.com/markpapadakis/BacktraceResolver
@@ -5342,10 +5428,19 @@ int Service::start(int argc, char **argv)
 
         signal(SIGPIPE, SIG_IGN);
         signal(SIGHUP, SIG_IGN);
-        while ((r = getopt(argc, argv, "p:l:hv")) != -1)
+        while ((r = getopt(argc, argv, "p:l:hvP:")) != -1)
         {
                 switch (r)
                 {
+			case 'P':
+				prom_endpoint = Switch::ParseSrvEndpoint({optarg}, "http"_s8, 9102);
+				if (!prom_endpoint)
+				{
+					Print("Failed to parse endpoint for prometheus metrics from ", optarg, "\n");
+					return 1;
+				}
+				break;
+
                         case 'p':
                                 basePath_.clear();
                                 basePath_.append(strwlen32_t(optarg, strlen(optarg)));
@@ -5364,6 +5459,7 @@ int Service::start(int argc, char **argv)
                                 Print("-p path: Specifies the base path where all topic exist. Used in standalone mode\n");
                                 Print("-l endpoint: Specifies that the service will run in standalone mode, listening for connections to that address\n");
                                 Print("-v : displays Tank version and exits\n");
+				Print("-P endpoint: Enables Prometheus Endpoint exporter. Requests to http://<endpoint>/metrics will return metrics prometheus can scrape and consume\n");
                                 Print("-h : this help message\n");
                                 return 0;
 
@@ -5667,6 +5763,8 @@ int Service::start(int argc, char **argv)
         }
 
         Print(ansifmt::bold, "<=TANK=>", ansifmt::reset, " v", TANK_VERSION / 100, ".", TANK_VERSION % 100, " ", dotnotation_repr(topics.size()), " topics registered, ", dotnotation_repr(totalPartitions), " partitions; will listen for new connections at ", listenAddr, "\n");
+	if (prom_endpoint)
+		Print("> Prometheus Exporter enabled, will respond to http://", prom_endpoint, "/metrics\n");
         Print("(C) Phaistos Networks, S.A. - ", ansifmt::color_green, "http://phaistosnetworks.gr/", ansifmt::reset, ". Licensed under the Apache License\n");
 
         if (topics.empty())
@@ -5708,6 +5806,39 @@ int Service::start(int argc, char **argv)
                 return 1;
         }
 
+	if (prom_endpoint)
+	{
+		prom_listen_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+
+		if (prom_listen_fd == -1)
+		{
+			Print("socket() failed:", strerror(errno), "\n");
+			return 1;
+		}
+
+		memset(&sa, 0, sizeof(sa));
+		sa.sin_addr.s_addr = prom_endpoint.addr4;
+		sa.sin_port=  htons(prom_endpoint.port);
+		sa.sin_family = AF_INET;
+
+		if (Switch::SetReuseAddr(prom_listen_fd, 1) == -1)
+		{
+			Print("SO_REUSEADDR: ", strerror(errno), "\n");
+			return 1;
+		}
+		else if (bind(prom_listen_fd, (sockaddr *)&sa, sizeof(sa)) == -1)
+		{
+			Print("bind() failed:", strerror(errno), ". Cannot accept Prometheus connections.\n");
+			return 1;
+		}
+		else if (listen(prom_listen_fd, 128))
+		{
+			Print("listen() failed:", strerror(errno), "\n");
+			return 1;
+		}
+	}
+
+
         std::thread([] {
                 Switch::vector<std::pair<int, int>> local;
 
@@ -5733,6 +5864,9 @@ int Service::start(int argc, char **argv)
             .detach();
 
         poller.insert(listenFd, POLLIN, &listenFd);
+	if (prom_listen_fd != -1)
+		poller.insert(prom_listen_fd, POLLIN, &prom_listen_fd);
+		
 
         signal(SIGINT, sig_handler);
         while (likely(running))
@@ -5930,6 +6064,41 @@ int Service::start(int argc, char **argv)
 
                                 continue;
                         }
+			else if (fd == prom_listen_fd)
+			{
+				socklen_t len = sizeof(sa);
+				auto new_fd = accept4(fd, (sockaddr *)&sa, &len, SOCK_NONBLOCK | SOCK_CLOEXEC);
+
+				if (new_fd == -1)
+				{
+					if (errno == EMFILE || errno == ENFILE)
+					{
+						// TODO: do something appropriate
+						continue;
+					}
+					else if (errno != EINTR && errno != EAGAIN)
+					{
+						Print("accept4() failed:", strerror(errno), "\n");
+						return 1;
+					}
+				}
+				else
+				{
+					auto c = get_connection();
+
+					c->fd = new_fd;
+					c->state.flags = 1 << unsigned(connection::State::Flags::TypePrometheus);
+					require(c->src_prometheus());
+
+                                        switch_dlist_init(&c->connectionsList);
+                                        switch_dlist_init(&c->waitCtxList); 	// no need for this, it's a prom connection, but that's OK
+                                        switch_dlist_insert_after(&allConnections, &c->connectionsList);
+
+					poller.insert(c->fd, POLLIN, c);
+				}
+
+				continue;
+			}
 
                         if (events & (POLLHUP | POLLERR))
                         {
@@ -5961,6 +6130,7 @@ int Service::start(int argc, char **argv)
                                         {
                                                 if (trace)
                                                         SLog("Failed:", strerror(errno), "\n");
+
                                                 shutdown(c, __LINE__);
                                                 continue;
                                         }
@@ -5976,66 +6146,291 @@ int Service::start(int argc, char **argv)
                                         c->state.lastInputTS = Timings::Milliseconds::Tick();
                                 }
 
-                                for (const auto *e = (uint8_t *)b->end();;)
-                                {
-                                        const auto *p = (uint8_t *)b->data_at_offset();
+				if (c->src_prometheus())
+				{
+					const auto *p = b->data() + b->offset(), *const e = b->end();
+					static constexpr const bool trace{false};
 
-                                        if (e - p >= sizeof(uint8_t) + sizeof(uint32_t))
+					if (trace)
+						SLog("From prometheus [", b->as_s32(), "]\n");
+
+					for (;;)
                                         {
-                                                const auto msg = *p++;
-                                                const uint32_t msgLen = *(uint32_t *)p;
-                                                p += sizeof(uint32_t);
+						// process next HTTP request, if we have one
+                                                while (p != e && isspace(*p))
+                                                        ++p;
 
-                                                if (unlikely(msgLen > 256 * 1024 * 1024))
+                                                if (p == e)
                                                 {
-                                                        Print("** TOO large incoming packet of length ", size_repr(msgLen), "\n");
-                                                        shutdown(c, __LINE__);
-                                                        goto nextEvent;
-                                                }
+							if (trace)
+								SLog("No other HTTP requests to process\n");
 
-                                                if (0 == (c->state.flags & (1u << uint8_t(connection::State::Flags::ConsideredReqHeader))))
-                                                {
-                                                        // So that ingestion of future incoming data will not require buffer reallocations
-                                                        const auto o = (char *)p - b->data();
-
-                                                        if (trace)
-                                                                SLog("Need to reserve(", msgLen, ")\n");
-
-                                                        b->reserve(msgLen);
-
-                                                        p = (uint8_t *)b->At(o);
-                                                        e = (uint8_t *)b->end();
-
-                                                        c->state.flags |= 1u << uint8_t(connection::State::Flags::ConsideredReqHeader);
-                                                }
-
-                                                if (p + msgLen > e)
-                                                {
-                                                        if (trace)
-                                                                SLog("Need more data for ", msg, "\n");
-
+                                                        put_buffer(b);
+                                                        c->inB = nullptr;
                                                         goto l1;
                                                 }
 
-                                                c->state.flags &= ~(1u << uint8_t(connection::State::Flags::ConsideredReqHeader));
-                                                if (!process_msg(c, msg, reinterpret_cast<const uint8_t *>(p), msgLen))
-                                                        goto nextEvent;
+						b->set_offset(p - b->data());
 
-                                                p += msgLen;
+                                                strwlen32_t method;
+
+						for (method.p = p; p != e && !isblank(*p); ++p)
+							continue;
+
                                                 if (p == e)
+                                                        goto l1;
+
+                                                method.SetEnd(p);
+
+						if (trace)
+							SLog("Method [", method, "]\n");
+
+                                                for (++p; p != e && isblank(*p); ++p)
+                                                        continue;
+
+                                                strwlen32_t path;
+
+                                                for (path.p = p;; ++p)
                                                 {
-                                                        b->clear();
-                                                        Drequire(b->offset() == 0);
-                                                        c->inB = nullptr;
-                                                        put_buffer(b);
-                                                        break;
+                                                        if (p == e)
+                                                                goto l1;
+                                                        else if (*p == '\n')
+                                                        {
+                                                                path.SetEnd(p);
+                                                                ++p;
+                                                                break;
+                                                        }
+                                                        else if (*p == '\r' && p + 1 < e && p[1] == '\n')
+                                                        {
+                                                                path.SetEnd(p);
+                                                                p += 2;
+                                                                break;
+                                                        }
                                                 }
-                                                else
-                                                        b->set_offset((char *)p);
+
+						if (trace)
+							SLog("Path [", path, "]\n");
+
+                                                // parse headers
+                                                strwlen32_t n, v;
+                                                uint64_t content_length{std::numeric_limits<uint64_t>::max()};
+
+                                                for (;;)
+                                                {
+                                                        for (n.p = p;; ++p)
+                                                        {
+                                                                if (p == e)
+                                                                        goto l1;
+                                                                else if (*p == ':')
+                                                                {
+                                                                        n.SetEnd(p);
+
+                                                                        for (++p; p != e && isblank(*p); ++p)
+                                                                                continue;
+
+                                                                        v.p = p;
+                                                                        for (;; ++p)
+                                                                        {
+                                                                                if (p == e)
+                                                                                        goto l1;
+                                                                                else if (*p == '\n')
+                                                                                {
+                                                                                        v.SetEnd(p);
+                                                                                        ++p;
+                                                                                        break;
+                                                                                }
+                                                                                else if (*p == '\r' && p + 1 < e && p[1] == '\n')
+                                                                                {
+                                                                                        v.SetEnd(p);
+                                                                                        p += 2;
+                                                                                        break;
+                                                                                }
+                                                                        }
+
+                                                                        break;
+                                                                }
+                                                                else if (*p == '\n')
+                                                                {
+                                                                        n.SetEnd(p);
+                                                                        ++p;
+                                                                        v.reset();
+                                                                        break;
+                                                                }
+                                                                else if (*p == '\r' && p + 1 < e && p[1] == '\n')
+                                                                {
+                                                                        n.SetEnd(p);
+                                                                        p += 2;
+                                                                        v.reset();
+                                                                        break;
+                                                                }
+                                                        }
+
+							if (trace)
+								SLog("[", n, "] [", v, "]\n");
+
+                                                        if (!n)
+                                                        {
+                                                                // done with headers
+								auto q = c->outQ;
+								outgoing_queue::payload payload;
+
+								if (!q)
+									q = c->outQ = get_outgoing_queue();
+
+
+								payload.iovCnt = 0;
+								payload.iovIdx = 0;
+								payload.payloadBuf = true; // even if we don't have a buf
+
+								const auto http_error = [&](auto c, const auto resp, const bool close_on_flush = false) {
+									if (trace)
+										SLog("Failed:", resp, "\n");
+
+									payload.append("HTTP/1.1 "_s32);
+									payload.append(resp);
+									payload.append("\r\nServer: TANK\r\nContent-Length: 0\r\n\r\n"_s32);
+									q->push_back(std::move(payload));
+								};
+
+                                                                b->set_offset(p - b->data());
+
+								if (content_length != std::numeric_limits<uint64_t>::max())
+								{
+									http_error(c, "413 Payload Too Large"_s32, true);
+									// shutdown immediately
+									goto l1;
+								}
+								if (!method.Eq(_S("GET")))
+									http_error(c, "405 Method Not Allowed"_s32);
+								else if (!path.BeginsWith(_S("/metrics")))
+									http_error(c, "404 Not Found"_s32);
+								else
+								{
+									auto b = get_buffer();
+
+									payload.set_buf(b);
+									payload.append("HTTP/1.1 200 OK\r\nServer: TANK\r\nContent-Type: text/plain\r\nContent-Length: "_s32);
+									const auto content_len_o{b->size()};
+									b->append("                     \r\n\r\n"_s32);
+
+									const auto body_o{b->size()};
+#pragma mark Prometheus Metrics Response
+									b->append("# HELP tanksrv_topic_latency Consumer latency\n"_s32);
+									b->append("# TYPE tanksrv_topic_latency histogram\n"_s32);
+									b->append("# HELP tanksrv_topic_produced_bytes Total bytes of all accepted new messages\n"_s32);
+									b->append("# TYPE tanksrv_topic_produced_bytes counter\n"_s32);
+									b->append("# HELP tanksrv_topic_produced_msgs Total accepted messages\n"_s32);
+									b->append("# TYPE tanksrv_topic_produced_msgs counter\n"_s32);
+
+
+									for (const auto &it : topics)
+									{
+										const auto [name, topic] = it;
+
+                                                                                if (const auto v = topic->metrics.bytes_in)
+                                                                                        b->append("tanksrv_topic_produced_bytes{m=\""_s32, name, "\"} "_s32, v, "\n");
+                                                                                if (const auto v = topic->metrics.msgs_in)
+                                                                                        b->append("tanksrv_topic_produced_msgs{m=\""_s32, name, "\"} "_s32, v, "\n");
+
+                                                                                if (const auto cnt = topic->metrics.latency.cnt)
+										{
+											uint64_t total{0};
+
+											for (uint32_t i{0}; i != sizeof_array(topic::metrics_struct::latency_struct::histogram_scale); ++i)
+											{
+												total += topic->metrics.latency.hist_buckets[i];
+												if (total)
+													b->append("tanksrv_topic_latency_bucket{le=\""_s32, topic::metrics_struct::latency_struct::histogram_scale[i], "\", n=\""_s32, name, "\"} "_s32, total, "\n"_s32);
+											}
+
+											b->append("tanksrv_topic_latency_bucket{le=\"+Inf\", n=\""_s32, name, "\"} "_s32, cnt, "\n"_s32);
+											b->append("tanksrv_topic_latency_sum{n=\""_s32, name, "\"} "_s32, topic->metrics.latency.sum, "\n"_s32);
+											b->append("tanksrv_topic_latency_count{n=\""_s32, name, "\"} "_s32, cnt, "\n\n"_s32);
+										}
+									}
+									
+
+									b->data()[content_len_o + sprintf(b->data() + content_len_o, "%u", b->size() - body_o)] = ' ';
+									payload.append(b->as_s32());
+									q->push_back(std::move(payload));
+								}
+
+								if (!try_send_ifnot_blocked(c))
+									goto nextEvent;
+
+								break;
+                                                        }
+                                                        else
+                                                        {
+                                                                if (n.EqNoCase(_S("content-length")))
+                                                                        content_length = v.as_uint64();
+                                                        }
+                                                }
                                         }
-                                        else
-                                                break;
                                 }
+				else
+				{
+					for (const auto *e = (uint8_t *)b->end();;)
+					{
+						const auto *p = (uint8_t *)b->data_at_offset();
+
+						if (e - p >= sizeof(uint8_t) + sizeof(uint32_t))
+						{
+							const auto msg = *p++;
+							const uint32_t msgLen = *(uint32_t *)p;
+							p += sizeof(uint32_t);
+
+							if (unlikely(msgLen > 256 * 1024 * 1024))
+							{
+								Print("** TOO large incoming packet of length ", size_repr(msgLen), "\n");
+								shutdown(c, __LINE__);
+								goto nextEvent;
+							}
+
+							if (0 == (c->state.flags & (1u << uint8_t(connection::State::Flags::ConsideredReqHeader))))
+							{
+								// So that ingestion of future incoming data will not require buffer reallocations
+								const auto o = (char *)p - b->data();
+
+								if (trace)
+									SLog("Need to reserve(", msgLen, ")\n");
+
+								b->reserve(msgLen);
+
+								p = (uint8_t *)b->At(o);
+								e = (uint8_t *)b->end();
+
+								c->state.flags |= 1u << uint8_t(connection::State::Flags::ConsideredReqHeader);
+							}
+
+							if (p + msgLen > e)
+							{
+								if (trace)
+									SLog("Need more data for ", msg, "\n");
+
+								goto l1;
+							}
+
+							c->state.flags &= ~(1u << uint8_t(connection::State::Flags::ConsideredReqHeader));
+							if (!process_msg(c, msg, reinterpret_cast<const uint8_t *>(p), msgLen))
+								goto nextEvent;
+
+							p += msgLen;
+							if (p == e)
+							{
+								b->clear();
+								Drequire(b->offset() == 0);
+								c->inB = nullptr;
+								put_buffer(b);
+								break;
+							}
+							else
+								b->set_offset((char *)p);
+						}
+						else
+							break;
+					}
+				}
 
                                 if (auto b = c->inB)
                                 {
@@ -6056,7 +6451,7 @@ int Service::start(int argc, char **argv)
 
                 if (nowMS > nextIdleCheck)
                 {
-                        // We don't currentl deal with idle connections, and I am not sure
+                        // We don't currently deal with idle connections, and I am not sure
                         // we should
                         nextIdleCheck = nowMS + 800;
 

@@ -555,6 +555,12 @@ class Buffer
                 return strwlen32_t(buffer, length_, strwlen32_t::NoMaxLenCheck{});
         }
 
+        inline strwlen32_t as_s32() const noexcept
+        {
+                return strwlen32_t(buffer, length_, strwlen32_t::NoMaxLenCheck{});
+        }
+
+
         inline uint32_t AsUInt32() const
         {
                 return strwlen32_t(buffer, length_).AsUint32();

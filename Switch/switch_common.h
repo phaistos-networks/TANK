@@ -664,6 +664,11 @@ struct strwithlen
                 return res;
         }
 
+	inline auto as_uint64() const
+	{
+		return AsUint64();
+	}
+
         inline bool Eq(const CT *const ptr) const
         {
                 return operator==(ptr);
@@ -1498,4 +1503,20 @@ template <typename T>
 [[gnu::always_inline]] inline int32_t constexpr TrivialCmp(const int64_t a, const int64_t b)
 {
         return (a > b) - (a < b);
+}
+
+template <typename T>
+static inline void encode_pod(const T v, uint8_t *&ptr) noexcept
+{
+        *reinterpret_cast<T *>(ptr) = v;
+        ptr += sizeof(T);
+}
+
+template <typename T>
+static inline T decode_pod(const uint8_t *&p) noexcept
+{
+        const auto res = *(T *)p;
+
+        p += sizeof(T);
+        return res;
 }

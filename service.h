@@ -261,6 +261,8 @@ struct topic_partition_log
 	// Whenever we cleanup, we update lastCleanupMaxSeqNum with the lastAvailSeqNum of the latest ro segment compacted
 	uint64_t lastCleanupMaxSeqNum{0};
 
+
+
         auto first_dirty_offset() const
         {
                 return lastCleanupMaxSeqNum + 1;
@@ -509,6 +511,61 @@ struct topic
         Switch::vector<topic_partition *> *partitions_;
 	partition_config partitionConf;
 
+	// for Prometheus metrics
+	struct metrics_struct
+        {
+                struct latency_struct
+                {
+			// inline is handy here
+                        static inline constexpr uint32_t histogram_scale[]{1, 2, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 65, 75, 85, 95, 100, 110, 120, 130, 140, 150, 200, 250, 300, 350, 400, 450, 500};
+                        uint64_t hist_buckets[sizeof_array(histogram_scale)] = {0};
+                        uint64_t sum{0}, cnt{0};
+
+                        static inline int32_t bucket_index(const uint32_t delta) noexcept
+                        {
+                                int32_t top = sizeof_array(histogram_scale) - 1, btm{0};
+
+                                while (btm <= top)
+                                {
+                                        const auto mid = (btm + top) / 2;
+                                        const auto v = histogram_scale[mid];
+
+                                        if (v == delta)
+                                        {
+                                                btm = mid;
+                                                break;
+                                        }
+                                        else if (delta < v)
+                                                top = mid - 1;
+                                        else
+                                                btm = mid + 1;
+                                }
+
+                                // -1 if out of bounds
+                                return btm;
+                        }
+
+                        void reg_sample(const uint32_t delta)
+                        {
+                                ++cnt;
+                                sum += delta;
+
+                                // currently, histogram_scale[], contains, with the exception of the first 2 values, values that increment by 5 so
+                                // we can compute the index with a simple idiv, but later we may want to use arbitrary scales, and this binary search
+                                // is fast anyway, so we are sticking to it for now
+                                if (const auto idx = bucket_index(delta); idx != -1)
+                                        ++hist_buckets[idx];
+                        }
+                } latency;
+
+		uint64_t bytes_in{0};
+		uint64_t msgs_in{0};
+		// TODO: count current distinct consumers and producers
+		// i.e distinct connections that have consumed or produced at least one from/to this topic
+        } metrics;
+
+
+
         topic(const strwlen8_t name, const partition_config c)
             : name_{name.Copy(), name.len}, partitionConf{c}
         {
@@ -618,6 +675,12 @@ struct outgoing_queue
         {
                 bool payloadBuf;
 
+		struct
+		{
+			uint64_t since;
+			topic *src_topic;
+		} tracker;
+
                 union {
                         struct
                         {
@@ -647,31 +710,49 @@ struct outgoing_queue
                         }
                 }
 
+		void append(const strwlen32_t s)
+		{
+			iov[iovCnt].iov_base = (void *)s.data();
+			iov[iovCnt++].iov_len = s.size();
+		}
+
                 payload()
-                    : payloadBuf{false}
+                    : payloadBuf{false} 
                 {
+			tracker.since = 0;
                 }
 
                 payload(IOBuffer *const b)
                 {
                         payloadBuf = true;
                         buf = b;
+			tracker.since = 0;
 			iovCnt = iovIdx = 0;
                 }
 
-                payload(fd_handle *const fdh, const range32_t r)
+                payload(fd_handle *const fdh, const range32_t r, const uint64_t start, topic *t)
                 {
                         payloadBuf = false;
+			tracker.since = start;
+			tracker.src_topic = t;
                         file_range.fdh = fdh;
                         file_range.range = r;
                         file_range.fdh->Retain();
                 }
+
+		void set_buf(IOBuffer *b)
+		{
+			payloadBuf = true;
+			buf = b;
+		}
 
                 payload &operator=(const payload &) = delete;
 
 		payload &operator=(payload &&o)
 		{
                         payloadBuf = o.payloadBuf;
+			tracker.since = o.tracker.since;
+			tracker.src_topic = o.tracker.src_topic;
 
                         if (payloadBuf)
 			{
@@ -690,7 +771,6 @@ struct outgoing_queue
 
 			o.payloadBuf = false;
                         return *this;
-
 		}
         };
 
@@ -815,7 +895,10 @@ struct outgoing_queue
                         auto &p = A[frontIdx];
 
                         if (p.payloadBuf)
-                                l(p.buf);
+			{
+				if (p.buf)
+					l(p.buf);
+			}
                         else
                                 p.file_range.fdh->Release();
 
@@ -851,12 +934,30 @@ struct connection
                 {
                         PendingIntro = 0,
                         NeedOutAvail,
-			ConsideredReqHeader
+			ConsideredReqHeader,
+			TypePrometheus,
+			DrainingForShutdown
                 };
 
                 uint8_t flags;
                 uint64_t lastInputTS;
         } state;
+
+	inline bool src_prometheus() const noexcept
+	{
+		return state.flags & (1 << unsigned(State::Flags::TypePrometheus));
+	}
+
+	void set_close_on_flush()
+	{
+		state.flags |= (1 << unsigned(State::Flags::DrainingForShutdown));
+	}
+
+	bool close_on_flush() const noexcept
+	{
+		return state.flags & (1 << unsigned(State::Flags::DrainingForShutdown));
+	}
+
 };
 
 class Service final
@@ -891,7 +992,7 @@ class Service final
 	// has ever happened) and we are dealing with it here.
         Switch::vector<wait_ctx *> expiredCtxList, expiredCtxList2, expiredCtxList3, waitCtxDeferredGC;
         uint32_t nextDistinctPartitionId{0};
-        int listenFd;
+        int listenFd, prom_listen_fd{-1};
         EPoller poller;
         Switch::vector<topic_partition *> deferList;
 	range32_t patchList[1024];
@@ -925,13 +1026,16 @@ class Service final
 
         void put_buffer(IOBuffer *b)
         {
-		if (b->Reserved() > 800*1024 || bufs.size() > 16)
-			delete b;
-		else
-                {
-                        b->clear();
-                        bufs.push_back(b);
-                }
+		if (b)
+		{
+			if (b->Reserved() > 800*1024 || bufs.size() > 16)
+				delete b;
+			else
+			{
+				b->clear();
+				bufs.push_back(b);
+			}
+		}
         }
 
         auto get_connection()
@@ -1029,20 +1133,19 @@ class Service final
 
         bool shutdown(connection *const c, const uint32_t ref);
 
-        bool flush_iov(connection *, struct iovec *, const uint32_t);
+        bool flush_iov(connection *, struct iovec *, const uint32_t, const bool);
 
         bool try_send_ifnot_blocked(connection *const c)
         {
                 if (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail)))
-                {
-                        // Blocked
                         return true;
-                }
                 else
                         return try_send(c);
         }
 
 	void poll_outavail(connection *);
+
+	void stop_poll_outavail(connection *);
 
 	void introduce_self(connection *, bool &);
 

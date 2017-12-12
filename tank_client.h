@@ -615,16 +615,17 @@ class TankClient final
         void poll(uint32_t timeoutMS);
 
 	// Maybe you want to use it after poll() has returned
+	// TODO: check if (!vector.empty()) instead; should be faster for std::vector<>
         bool any_responses() const noexcept
         {
                 return consumed().size() || faults().size() || produce_acks().size() || discovered_partitions().size() || created_topics().size();
         }
 
-        [[gnu::warn_unused_result]] uint32_t produce(const std::vector<std::pair<topic_partition, std::vector<msg>>> &req);
+        [[gnu::warn_unused_result, nodiscard]] uint32_t produce(const std::vector<std::pair<topic_partition, std::vector<msg>>> &req);
 
-        [[gnu::warn_unused_result]] uint32_t produce(const std::pair<topic_partition, std::vector<msg>> *, const size_t);
+        [[gnu::warn_unused_result, nodiscard]] uint32_t produce(const std::pair<topic_partition, std::vector<msg>> *, const size_t);
 
-        [[gnu::warn_unused_result]] uint32_t produce_to(const topic_partition &to, const std::vector<msg> &msgs);
+        [[gnu::warn_unused_result, nodiscard]] uint32_t produce_to(const topic_partition &to, const std::vector<msg> &msgs);
 
 
 
@@ -632,19 +633,19 @@ class TankClient final
 	// e.g tank-ctl mirroring functionality
 	//
 	// Right now, it's only required for implementing the mirroring functionality
-        [[gnu::warn_unused_result]] uint32_t produce_with_base(const std::vector<std::pair<topic_partition, std::pair<uint64_t, std::vector<msg>>>> &req);
+        [[gnu::warn_unused_result, nodiscard]] uint32_t produce_with_base(const std::vector<std::pair<topic_partition, std::pair<uint64_t, std::vector<msg>>>> &req);
 
-        [[gnu::warn_unused_result]] uint32_t produce_with_base(const std::pair<topic_partition, std::pair<uint64_t, std::vector<msg>>> *, const size_t);
+        [[gnu::warn_unused_result, nodiscard]] uint32_t produce_with_base(const std::pair<topic_partition, std::pair<uint64_t, std::vector<msg>>> *, const size_t);
 
         Switch::endpoint leader_for(const strwlen8_t topic, const uint16_t partition);
 
-        [[gnu::warn_unused_result]] uint32_t consume(const std::vector<std::pair<topic_partition, std::pair<uint64_t, uint32_t>>> &req, const uint64_t maxWait, const uint32_t minSize);
+        [[gnu::warn_unused_result, nodiscard]] uint32_t consume(const std::vector<std::pair<topic_partition, std::pair<uint64_t, uint32_t>>> &req, const uint64_t maxWait, const uint32_t minSize);
 
-        [[gnu::warn_unused_result]] uint32_t consume_from(const topic_partition &from, const uint64_t seqNum, const uint32_t minFetchSize, const uint64_t maxWait, const uint32_t minSize);
+        [[gnu::warn_unused_result, nodiscard]] uint32_t consume_from(const topic_partition &from, const uint64_t seqNum, const uint32_t minFetchSize, const uint64_t maxWait, const uint32_t minSize);
 
-	[[gnu::warn_unused_result]] uint32_t discover_partitions(const strwlen8_t topic);
+	[[gnu::warn_unused_result, nodiscard]] uint32_t discover_partitions(const strwlen8_t topic);
 
-	[[gnu::warn_unused_result]] uint32_t create_topic(const strwlen8_t topic, const uint16_t numPartitions, const strwlen32_t configuration);
+	[[gnu::warn_unused_result, nodiscard]] uint32_t create_topic(const strwlen8_t topic, const uint16_t numPartitions, const strwlen32_t configuration);
 
 
 	void reset();
