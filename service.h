@@ -560,6 +560,7 @@ struct topic
 
 		uint64_t bytes_in{0};
 		uint64_t msgs_in{0};
+		uint64_t bytes_out{0};
 		// TODO: count current distinct consumers and producers
 		// i.e distinct connections that have consumed or produced at least one from/to this topic
         } metrics;

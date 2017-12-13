@@ -5096,6 +5096,9 @@ bool Service::try_send(connection *const c)
                                         range.len -= r;
                                         range.offset += r;
 
+					if (it.tracker.since)
+						it.tracker.src_topic->metrics.bytes_out += r;
+
                                         if (0 == range.len)
                                         {
                                                 if (trace)
@@ -6321,6 +6324,8 @@ int Service::start(int argc, char **argv)
 									b->append("# TYPE tanksrv_topic_produced_bytes counter\n"_s32);
 									b->append("# HELP tanksrv_topic_produced_msgs Total accepted messages\n"_s32);
 									b->append("# TYPE tanksrv_topic_produced_msgs counter\n"_s32);
+									b->append("# HELP tanksrv_topic_consumed_bytes Total bytes of all outgoing messages\n"_s32);
+									b->append("# TYPE tanksrv_topic_consumed_bytes counter\n"_s32);
 
 
 									for (const auto &it : topics)
@@ -6331,6 +6336,8 @@ int Service::start(int argc, char **argv)
                                                                                         b->append("tanksrv_topic_produced_bytes{m=\""_s32, name, "\"} "_s32, v, "\n");
                                                                                 if (const auto v = topic->metrics.msgs_in)
                                                                                         b->append("tanksrv_topic_produced_msgs{m=\""_s32, name, "\"} "_s32, v, "\n");
+                                                                                if (const auto v = topic->metrics.bytes_out)
+                                                                                        b->append("tanksrv_topic_consumed_bytes{m=\""_s32, name, "\"} "_s32, v, "\n");
 
                                                                                 if (const auto cnt = topic->metrics.latency.cnt)
 										{
