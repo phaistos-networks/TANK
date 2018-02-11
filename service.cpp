@@ -5429,6 +5429,8 @@ int Service::start(int argc, char **argv)
                 return 0;
         }
 
+	prom_endpoint.unset();
+
         signal(SIGPIPE, SIG_IGN);
         signal(SIGHUP, SIG_IGN);
         while ((r = getopt(argc, argv, "p:l:hvP:")) != -1)

@@ -53,6 +53,12 @@ static uint64_t parse_timestamp(strwlen32_t s)
                 return Timings::Seconds::ToMillis(res);
 }
 
+static uint64_t lcrng(const uint64_t state) noexcept
+{
+        return state * 6364136223846793005 + 1442695040888963407;
+}
+
+
 int main(int argc, char *argv[])
 {
         Buffer topic, endpoint;
@@ -1453,7 +1459,7 @@ int main(int argc, char *argv[])
                 }
                 else if (type.Eq(_S("p2b")))
                 {
-                        // Measure latency when publishing from publisher to brokerr
+                        // Measure latency when publishing from publisher to broker
                         size_t size{128}, cnt{1}, batchSize{1};
 			bool compressionDisabled{false};
 
@@ -1495,37 +1501,39 @@ int main(int argc, char *argv[])
                         argc -= optind;
                         argv += optind;
 
-                        auto *p = (char *)malloc(size + 16);
+			auto data = std::make_unique<char []>(size + 16);
+			auto p{data.get()};
 
-                        Defer({ free(p); });
 
-			// A mostly random collection of bytes for each message
+			// A random collection of bytes for each message
+			uint64_t state{0};
+
 			for (uint32_t i{0}; i != size; ++i)
-				p[i] = (i + (i&3)) & 127;
+			{
+				state = lcrng(state);
+				
+				p[i] = (state >> 32) & 0xff;
+			}
 
-			Print("Will publish ", dotnotation_repr(cnt), " messages, in batches of ", dotnotation_repr(batchSize), " messages, each message content is ", size_repr(size), compressionDisabled ? " (compression disabled)" : "", "\n");
+			Print("Will publish ", dotnotation_repr(cnt), " messages, in batches of ", dotnotation_repr(batchSize), " messages (", dotnotation_repr(cnt / batchSize), " batch(es)), each message content is ", size_repr(size), compressionDisabled ? " (compression disabled)" : "", "\n");
 
                         const strwlen32_t content(p, size);
-                        std::vector<TankClient::msg> msgs;
+                        std::vector<std::pair<TankClient::topic_partition, std::vector<TankClient::msg>>> batch;
 
-
-                        msgs.reserve(cnt);
                         for (uint32_t i{0}; i < cnt; )
-			{
-				const auto n = i + batchSize;
+                        {
+                                std::vector<TankClient::msg> msgs;
 
-				while (i != n && i < cnt)
-				{
-	                                msgs.push_back({content, 0, {}});
-					++i;
-				}
-			}
+                        	msgs.reserve(cnt);
+                                for (const auto n = std::min<uint32_t>(i + batchSize, cnt); i != n; ++i)
+                                        msgs.push_back({content, 0, {}});
+
+                                batch.push_back({topicPartition, std::move(msgs)});
+                        }
 
                         const auto start{Timings::Microseconds::Tick()};
 
-                        if (tankClient.produce({{
-                                topicPartition, msgs,
-                            }}) == 0)
+                        if (0 == tankClient.produce(batch))
                         {
                                 Print("Unable to schedule publisher request\n");
                                 return 1;
