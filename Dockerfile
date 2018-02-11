@@ -1,12 +1,14 @@
-FROM alpine:latest
+FROM alpine:edge
 MAINTAINER Phaistos Networks
 
 RUN apk add --update \
-	    zlib-dev \
-	    make \
-	    g++ \
-	    jemalloc \
-	    && rm -rf /var/cache/apk/*
+  zlib-dev \
+  musl-dev \
+  make \
+  g++ \
+  clang \
+  jemalloc \
+  && rm -rf /var/cache/apk/*
 
 RUN mkdir -p /TANK
 ADD Makefile *.cpp *.h /TANK/
