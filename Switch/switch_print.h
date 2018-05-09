@@ -171,7 +171,7 @@ static pthread_key_t bufKey;
 }
 #endif
 
-static Buffer &thread_local_buf()
+static inline Buffer &thread_local_buf()
 {
 #ifdef __linux__
         static thread_local Buffer b;

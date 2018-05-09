@@ -70,6 +70,11 @@ namespace Switch
                 }
         };
 
+        inline int SetDeferAccept(int fd, const int timeout = 1)
+        {
+                return setsockopt(fd, SOL_TCP, TCP_DEFER_ACCEPT, &timeout, sizeof(timeout));
+        }
+
 	inline int SetNoDelay(int fd, const int v)
 	{
 		// Nagle's algorithm
@@ -89,6 +94,14 @@ namespace Switch
         {
                 return setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &v, sizeof(v));
         }
+
+#ifdef SO_REUSEPORT
+        inline int SetReusePort(int fd, const int v)
+        {
+                // http://lwn.net/Articles/542629/
+                return setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &v, sizeof(v));
+        }
+#endif
 
         inline uint32_t ParseHostAddress(const strwlen8_t repr, bool &succ)
         {

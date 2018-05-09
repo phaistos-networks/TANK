@@ -40,6 +40,10 @@ struct simple_allocator
                 return bankCapacity_ & INT32_MAX;
         }
 
+        bool can_allocate(const std::size_t size) const noexcept {
+                return bankSize() >= size;
+        }
+
 	simple_allocator &operator=(simple_allocator &&o)
 	{
 		require(bankCapacity_ == o.bankCapacity_);

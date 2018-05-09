@@ -41,7 +41,7 @@ namespace ansifmt
 	};
 };
 
-static void PrintImpl(Buffer &out, const ansifmt::set_col &c)
+[[maybe_unused]] static void PrintImpl(Buffer &out, const ansifmt::set_col &c)
 {
 	// We need to reset to 0 first with \r and then advance
 	// maybe there's another escape sequence for explicitly setting the column

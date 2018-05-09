@@ -7,7 +7,12 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <initializer_list>
 #include "switch_compiler_aux.h"
+#include <string>
+
+size_t as_escaped_repr_length(const char *p, const size_t len);
+uint32_t escape_impl(const char *const p, const uint32_t len, char *out, const uint32_t available);
 
 class Buffer
 {
@@ -129,6 +134,18 @@ class Buffer
         {
                 Append(c);
                 return *this;
+        }
+
+	void AppendEscaped(const char *content, const size_t len)
+        {
+                if (unlikely(!content))
+                        return;
+
+		const auto required = as_escaped_repr_length(content, len);
+
+                reserve(required + 16);
+		length_ += escape_impl(content, len, buffer + length_, required);
+                buffer[length_] = '\0';
         }
 
         inline Buffer &operator+=(const char *const str)
@@ -1868,3 +1885,30 @@ static inline void PrintImpl(Buffer &out, const duration_repr &r)
         out.reserve(32);
         out.AdvanceLength(r.Get(out.end()).len);
 }
+
+struct escaped_repr
+{
+        const strwlen32_t v;
+
+        escaped_repr(const void *const p, const uint32_t len)
+            : v((char *)p, len)
+        {
+        }
+
+        template <typename LT, typename CT = char>
+        escaped_repr(const strwithlen<LT, CT> s)
+            : v(s.p, s.len)
+        {
+        }
+};
+
+static inline void PrintImpl(Buffer &out, const escaped_repr &e)
+{
+        out.AppendEscaped(e.v.p, e.v.len);
+}
+
+static inline void PrintImpl(Buffer &out, const std::string &s)
+{
+        out.Append(s.data(), s.size());
+}
+

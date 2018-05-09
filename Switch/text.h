@@ -85,9 +85,14 @@ struct dotnotation_repr
         }
 };
 
+namespace Text
+{
+        uint8_t ToBase(uint64_t input, const uint32_t toBase, char *out);
+        uint64_t FromBase(const char *const input, const uint32_t len, const uint8_t base);
+}
+
 static inline void PrintImpl(Buffer &out, const dotnotation_repr &r)
 {
         out.reserve(32);
         out.advance_size(r.Get(out.end()).len);
 }
-

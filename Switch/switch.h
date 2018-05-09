@@ -3,26 +3,26 @@
 #include <assert.h>
 #include <ctype.h>
 #include <stdint.h>
-#include <stdio.h>
+#include <cstdio>
 #include <string.h>
 #include <type_traits>
 #include <unistd.h>
 #include <cmath>
+#include <cstddef>
 #include <cstdlib>
 #include <limits.h>
+#include <utility>
+#include <limits>
+#include <memory>
+#include <functional>
+#include <algorithm>
+#include <cmath>
 
 #define require(x) assert(x)
 #define Drequire(x) assert(x)
-#define expect(x) assert(x)
-#define Dexpect(x) assert(x)
+#define EXPECT(x) assert(x)
+#define DEXPECT(x) assert(x)
 
-#if __GNUC__ >= 3
-#define likely(x) __builtin_expect(!!(x), 1)
-#define unlikely(x) __builtin_expect(!!(x), 0)
-#else
-#define likely(x) (x)
-#define unlikely(x) (x)
-#endif
 
 [[gnu::noreturn]] static inline void Unreachable()
 {

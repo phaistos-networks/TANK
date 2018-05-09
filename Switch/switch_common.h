@@ -1,11 +1,5 @@
 #pragma once
 #include "switch_numops.h"
-#include <algorithm>
-#include <cmath>
-#include <functional>
-#include <limits>
-#include <memory>
-#include <utility>
 #ifdef HAVE_ICU
 #include <unicode/normalizer2.h>
 #include <unicode/stringpiece.h>
@@ -14,6 +8,9 @@
 #include <unicode/ustring.h>
 #include <unicode/utf8.h>
 #endif
+#include <string.h>
+#include "switch_compiler_aux.h"
+
 
 // http://gcc.gnu.org/onlinedocs/gcc/Other-Builtins.html
 // returns true if this is a static const, most likely allocated in RODATA segment
@@ -50,6 +47,29 @@ struct strwithlen
 
         using iterator = const CT *;
         using value_type = CT;
+
+        constexpr auto as_s32() const noexcept
+        {
+                return strwithlen<uint32_t, CT>{p, uint32_t(len)};
+        }
+
+        constexpr auto as_s16() const noexcept
+        {
+                return strwithlen<uint16_t, CT>{p, uint16_t(len)};
+        }
+
+        constexpr auto as_s8() const noexcept
+        {
+                return strwithlen<uint8_t, CT>{p, uint8_t(len)};
+        }
+
+        strwithlen ws_trimmed() const noexcept
+        {
+                strwithlen res(p, len);
+
+                res.TrimWS();
+                return res;
+        }
 
         strwithlen<LT> Div(const CT c)
         {
@@ -592,6 +612,11 @@ struct strwithlen
 
                 return res;
         }
+
+	auto as_uint32() const
+	{
+		return AsUint32();
+	}
 
         int32_t AsInt32() const
         {
@@ -1436,7 +1461,6 @@ constexpr size_t operator"" _len(const char *const, const size_t len)
 #define _S16(s) strwlen16_t(s, STRLEN(s))
 #define _S8(s) strwlen8_t(s, STRLEN(s))
 
-#ifdef LEAN_SWITCH
 namespace std
 {
         template <typename LT, typename CT>
@@ -1456,7 +1480,6 @@ namespace std
                 }
         };
 }
-#endif
 
 template <typename T>
 [[gnu::always_inline]] inline static constexpr int32_t TrivialCmp(const T &a, const T &b)
@@ -1520,3 +1543,7 @@ static inline T decode_pod(const uint8_t *&p) noexcept
         p += sizeof(T);
         return res;
 }
+
+using str_view8 = strwlen8_t;
+using str_view16 = strwlen16_t;
+using str_view32 = strwlen32_t;
