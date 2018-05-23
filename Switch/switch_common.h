@@ -15,7 +15,7 @@
 // http://gcc.gnu.org/onlinedocs/gcc/Other-Builtins.html
 // returns true if this is a static const, most likely allocated in RODATA segment
 // This is _very_ useful, for we can check if that's the case and just don't alloc()/copy/free() data instead just point to them
-extern char etext, edata, end;
+extern char etext, edata;
 
 template <typename T>
 [[gnu::always_inline]] inline static bool IsConstant(T *const expr)

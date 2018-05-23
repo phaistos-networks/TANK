@@ -1260,6 +1260,13 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
 
                         capturedFaults.push_back({clientReqId, fault::Type::UnknownTopic, fault::Req::Produce, topicName, 0});
                         ctx += partitionsCnt * sizeof(uint16_t);
+		} else if (err == 0xfe) {
+			// read only?
+                        if (trace)
+                                SLog("Read only?\n");
+
+                        capturedFaults.push_back({clientReqId, fault::Type::NotAllowed, fault::Req::Produce, topicName, 0});
+                        ctx += partitionsCnt * sizeof(uint16_t);
                 } else {
                         // topic known, consider all partitions
                         for (;;) {
@@ -1328,6 +1335,11 @@ bool TankClient::process_create_topic(connection *const c, const uint8_t *const 
                 case 1: // exists
                         capturedFaults.push_back({clientReqId, fault::Type::AlreadyExists, fault::Req::Ctrl, topicName, 0});
                         break;
+
+		case 5: // read-only or otherwise not possible now
+                        capturedFaults.push_back({clientReqId, fault::Type::NotAllowed, fault::Req::Ctrl, topicName, 0});
+                        break;
+
 
                 default:
                         createdTopicsResults.push_back({clientReqId, topicName});
@@ -1518,7 +1530,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 }
 
                                 if (trace)
-                                        SLog("NEW bundle at ", p - bundlesBase, "(", consumptionList.size(), ") ", ++totalSeenBundles, "\n");
+                                        SLog("NEW bundle at offset:", p - bundlesBase, "(", consumptionList.size(), ") seen bundles:", ++totalSeenBundles, "\n");
 
                                 const auto        bundleLen = Compression::UnpackUInt32(p);
                                 const auto *const bundleEnd = p + bundleLen;
@@ -1666,6 +1678,9 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                 // Parse the bundle's message set
                                 // if this a compressed messages set, the boundary checks are not necessary
+				if (trace)
+					SLog("msgSetContent.size = ", msgSetContent.size(), "\n");
+
                                 for (const auto *p = msgSetContent.offset, *const endOfMsgSet = p + msgSetContent.len;; ++msgIdx, ++logBaseSeqNum) {
                                         // parse next bundle message
                                         if (p + sizeof(uint8_t) > endOfMsgSet) {
@@ -1792,8 +1807,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         } else if (requestedSeqNum == UINT64_MAX || msgAbsSeqNum >= requestedSeqNum) {
                                                 const strwlen32_t content((char *)p, len); // message content
 
-                                                if (trace && false)
-                                                        SLog("( flags = ", msgFlags, ", ts = ", ts, ", len = ", len, ", msgAbsSeqNum = ", msgAbsSeqNum, " [", content, ", requestedSeqNum = ", requestedSeqNum, "] )\n");
+                                                if (trace)
+                                                        SLog("( flags = ", msgFlags, ", ts = ", ts, ", len = ", len, ", msgAbsSeqNum = ", msgAbsSeqNum, " [requestedSeqNum = ", requestedSeqNum, "] ", consumptionList.size(), ")\n");
 
                                                 consumptionList.push_back({msgAbsSeqNum, ts, key, content});
                                         } else {
@@ -1826,7 +1841,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                               : requestedSeqNum == UINT64_MAX ? highWaterMark + 1 : requestedSeqNum;
 
                         if (trace)
-                                SLog("consumptionList.size = ", consumptionList.size(), ", requestedSeqNum = ", requestedSeqNum, ", highWaterMark = ", highWaterMark, "\n");
+                                SLog("NEXTPARTITION:consumptionList.size = ", consumptionList.size(), ", requestedSeqNum = ", requestedSeqNum, ", highWaterMark = ", highWaterMark, "\n");
 
                         if (const uint32_t cnt = consumptionList.size()) {
                                 if (i == topicsCnt - 1 && k == partitionsCnt - 1) {
@@ -2239,6 +2254,8 @@ void TankClient::poll(uint32_t timeoutMS) {
                 const auto  events = it->events;
                 auto *const c      = static_cast<connection *>(it->data.ptr);
 
+		// POLLHUP: no longer connected; in TCP, FIN has been received
+		// POLLERR: socket got an async. error. In TCP, typically means an RST has been received or sent.
                 if (events & (POLLERR | POLLHUP)) {
                         shutdown(c, __LINE__, true);
                         continue;

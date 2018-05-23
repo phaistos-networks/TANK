@@ -17,65 +17,54 @@
 // 1. read from the log file starting from there onwards, until we find the first message
 // /w sequence number >= target sequence number, or
 // 2. we just stream rom that previous message and expect the clients to skip messages themselves
-namespace std
-{
+namespace std {
         // Returns an iterator to the _last_ element in [first, last) that is <= `value`
         // You should probably return TrivialCmp(comp, value);
         template <class ForwardIt, class T, class Compare>
-        static ForwardIt upper_bound_or_match(ForwardIt first, ForwardIt last, const T &value, const Compare comp)
-        {
+        static ForwardIt upper_bound_or_match(ForwardIt first, ForwardIt last, const T &value, const Compare comp) {
                 ForwardIt res = last;
 
-                for (int32_t top = (last - first) - 1, btm{0}; btm <= top;)
-                {
+                for (int32_t top = (last - first) - 1, btm{0}; btm <= top;) {
                         const auto mid = (btm + top) / 2;
-                        const auto p = first + mid;
-                        const auto r = comp(*p, value);
+                        const auto p   = first + mid;
+                        const auto r   = comp(*p, value);
 
                         if (!r)
                                 return p;
-                        else if (r > 0)
-                        {
+                        else if (r > 0) {
                                 res = p;
                                 btm = mid + 1;
-                        }
-                        else
+                        } else
                                 top = mid - 1;
                 }
 
                 return res;
         }
-}
+} // namespace std
 
-struct index_record
-{
+struct index_record {
         uint32_t relSeqNum;
         uint32_t absPhysical;
 };
 
-struct ro_segment_lookup_res
-{
+struct ro_segment_lookup_res {
         index_record record;
-        uint32_t span;
+        uint32_t     span;
 };
 
 struct fd_handle
-    : public RefCounted<fd_handle>
-{
+    : public RefCounted<fd_handle> {
         int fd;
 
         fd_handle(int f)
-            : fd{f}
-        {
+            : fd{f} {
         }
 
-        ~fd_handle()
-        {
-                if (fd != -1)
-		{
-			fdatasync(fd);
+        ~fd_handle() {
+                if (fd != -1) {
+                        fdatasync(fd);
                         close(fd);
-		}
+                }
         }
 };
 
@@ -86,8 +75,7 @@ struct fd_handle
 // while the compaction is in progess, we won't delete any of those segments passed to the thread (i.e in consider_ro_segments() )
 // For now, we can return immediately from consider_ro_segments() if compaction is scheduled for the partition, and later we can
 // do this properly.
-struct ro_segment
-{
+struct ro_segment {
         // the absolute sequence number of the first message in this segment
         const uint64_t baseSeqNum;
         // the absolute sequence number of the last message in this segment
@@ -95,20 +83,20 @@ struct ro_segment
         // See: https://github.com/phaistos-networks/TANK/issues/2 for rationale
         const uint64_t lastAvailSeqNum;
 
-	// For RO segments, this used to be set to the creation time of the
-	// mutable segment that was then turned into a R/O segment.
-	//
-	// This however turned out to be problematic, because retention logic would
-	// consider that timestamp for retentions, instead of what makes more sense, the time when 
-	// the last message was appended to the mutable segment, before it was frozen as a RO segment.
-	// 
-	// We need to encode this in the file path, because a process may update the mtime of the RO segment for whatever reason
-	// and so it's important that we do not depend on the file's mtime, and instead encode it in the path.
-	// see: https://github.com/phaistos-networks/TANK/issues/37
+        // For RO segments, this used to be set to the creation time of the
+        // mutable segment that was then turned into a R/O segment.
+        //
+        // This however turned out to be problematic, because retention logic would
+        // consider that timestamp for retentions, instead of what makes more sense, the time when
+        // the last message was appended to the mutable segment, before it was frozen as a RO segment.
+        //
+        // We need to encode this in the file path, because a process may update the mtime of the RO segment for whatever reason
+        // and so it's important that we do not depend on the file's mtime, and instead encode it in the path.
+        // see: https://github.com/phaistos-networks/TANK/issues/37
         const uint32_t createdTS;
 
         Switch::shared_refptr<fd_handle> fdh;
-        uint32_t fileSize;
+        uint32_t                         fileSize;
 
         // In order to support compactions (in the future), in the very improbable and unlikely case compaction leads
         // to situations where because of deduplication we will end up having to store messages in a segment where any of those
@@ -123,21 +111,19 @@ struct ro_segment
         struct
         {
                 const uint8_t *data;
-                uint32_t fileSize;
+                uint32_t       fileSize;
 
                 // last record in the index
                 index_record lastRecorded;
         } index;
 
         ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, const uint32_t creationTS)
-            : baseSeqNum{absSeqNum}, lastAvailSeqNum{lastAbsSeqNum}, createdTS{creationTS}, haveWideEntries{false}
-        {
+            : baseSeqNum{absSeqNum}, lastAvailSeqNum{lastAbsSeqNum}, createdTS{creationTS}, haveWideEntries{false} {
         }
 
         ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, const strwlen32_t base, const uint32_t, const bool haveWideEntries);
 
-        ~ro_segment()
-        {
+        ~ro_segment() {
                 if (index.data && index.data != MAP_FAILED)
                         munmap((void *)index.data, index.fileSize);
         }
@@ -148,25 +134,21 @@ struct ro_segment
         // Locate the (relative seq.num, abs.file offset) for the LAST index record where record.relSqNum >= targetRelSeqNum
         std::pair<uint32_t, uint32_t> snapUp(const uint64_t absSeqNum) const;
 
-        ro_segment_lookup_res translateDown(const uint64_t absSeqNum, const uint32_t max) const
-        {
+        ro_segment_lookup_res translateDown(const uint64_t absSeqNum, const uint32_t max) const {
                 const auto res = snapDown(absSeqNum);
 
                 return {{res.first, res.second}, fileSize - res.second};
         }
 };
 
-struct append_res
-{
+struct append_res {
         Switch::shared_refptr<fd_handle> fdh;
-        range32_t dataRange;
-        range_base<uint64_t, uint16_t> msgSeqNumRange;
+        range32_t                        dataRange;
+        range_base<uint64_t, uint16_t>   msgSeqNumRange;
 };
 
-struct lookup_res
-{
-        enum class Fault : uint8_t
-        {
+struct lookup_res {
+        enum class Fault : uint8_t {
                 NoFault = 0,
                 Empty,
                 BoundaryCheck,
@@ -176,7 +158,7 @@ struct lookup_res
         // This is set to either fileSize of the segment log file or lower if
         // we are are setting a boundary based on last assigned committed sequence number phys.offset
         // adjust_range() cannot exceed that offset
-        uint32_t fileOffsetCeiling;
+        uint32_t                         fileOffsetCeiling;
         Switch::shared_refptr<fd_handle> fdh;
 
         // Absolute base sequence number of the first message in the first bundle
@@ -192,53 +174,46 @@ struct lookup_res
         uint64_t highWatermark;
 
         lookup_res(lookup_res &&o)
-            : fault{o.fault}, fileOffsetCeiling{o.fileOffsetCeiling}, fdh(std::move(o.fdh)), absBaseSeqNum{o.absBaseSeqNum}, fileOffset{o.fileOffset}, highWatermark{o.highWatermark}
-        {
+            : fault{o.fault}, fileOffsetCeiling{o.fileOffsetCeiling}, fdh(std::move(o.fdh)), absBaseSeqNum{o.absBaseSeqNum}, fileOffset{o.fileOffset}, highWatermark{o.highWatermark} {
         }
 
         lookup_res(const lookup_res &) = delete;
 
         lookup_res()
-            : fault{Fault::NoFault}
-        {
+            : fault{Fault::NoFault} {
         }
 
         lookup_res(fd_handle *const f, const uint32_t c, const uint64_t seqNum, const uint32_t o, const uint64_t h)
-            : fault{Fault::NoFault}, fileOffsetCeiling{c}, fdh{f}, absBaseSeqNum{seqNum}, fileOffset{o}, highWatermark{h}
-        {
+            : fault{Fault::NoFault}, fileOffsetCeiling{c}, fdh{f}, absBaseSeqNum{seqNum}, fileOffset{o}, highWatermark{h} {
         }
 
         lookup_res(const Fault f, const uint64_t h)
-            : fault{f}, highWatermark{h}
-        {
+            : fault{f}, highWatermark{h} {
         }
 };
 
-enum class CleanupPolicy: uint8_t
-{
-	DELETE = 0,
-	CLEANUP
+enum class CleanupPolicy : uint8_t {
+        DELETE = 0,
+        CLEANUP
 };
 
-struct partition_config
-{
+struct partition_config {
         // Kafka defaults
-        size_t roSegmentsCnt{0};
-        uint64_t roSegmentsSize{0};
-        uint64_t maxSegmentSize{1 * 1024 * 1024 * 1024};
-        size_t indexInterval{4096};
-        size_t maxIndexSize{10 * 1024 * 1024};
-        size_t maxRollJitterSecs{0};
-        size_t lastSegmentMaxAge{0};         // Kafka's default is 1 week, we don't want to explicitly specify a retention limit
-        size_t curSegmentMaxAge{86400 * 7};  // 1 week (soft limit)
-        size_t flushIntervalMsgs{0};         // never
-        size_t flushIntervalSecs{0};         // never
-	CleanupPolicy logCleanupPolicy{CleanupPolicy::DELETE};
-	float logCleanRatioMin{0.5};
+        size_t        roSegmentsCnt{0};
+        uint64_t      roSegmentsSize{0};
+        uint64_t      maxSegmentSize{1 * 1024 * 1024 * 1024};
+        size_t        indexInterval{4096};
+        size_t        maxIndexSize{10 * 1024 * 1024};
+        size_t        maxRollJitterSecs{0};
+        size_t        lastSegmentMaxAge{0};        // Kafka's default is 1 week, we don't want to explicitly specify a retention limit
+        size_t        curSegmentMaxAge{86400 * 7}; // 1 week (soft limit)
+        size_t        flushIntervalMsgs{0};        // never
+        size_t        flushIntervalSecs{0};        // never
+        CleanupPolicy logCleanupPolicy{CleanupPolicy::DELETE};
+        float         logCleanRatioMin{0.5};
 } config;
 
-static void PrintImpl(Buffer &out, const lookup_res &res)
-{
+static void PrintImpl(Buffer &out, const lookup_res &res) {
         if (res.fault != lookup_res::Fault::NoFault)
                 out.append("{fd = ", res.fdh ? res.fdh->fd : -1, ", absBaseSeqNum = ", res.absBaseSeqNum, ", fileOffset = ", res.fileOffset, "}");
         else
@@ -247,24 +222,20 @@ static void PrintImpl(Buffer &out, const lookup_res &res)
 
 // An append-only log for storing bundles, divided into segments
 struct topic_partition;
-struct topic_partition_log
-{
+struct topic_partition_log {
         // The first available absolute sequence number across all segments
         uint64_t firstAvailableSeqNum;
 
         // This will be initialized from the latest segment in initPartition()
         uint64_t lastAssignedSeqNum{0};
 
-	topic_partition *partition;
-	bool compacting{false};
+        topic_partition *partition;
+        bool             compacting{false};
 
-	// Whenever we cleanup, we update lastCleanupMaxSeqNum with the lastAvailSeqNum of the latest ro segment compacted
-	uint64_t lastCleanupMaxSeqNum{0};
+        // Whenever we cleanup, we update lastCleanupMaxSeqNum with the lastAvailSeqNum of the latest ro segment compacted
+        uint64_t lastCleanupMaxSeqNum{0};
 
-
-
-        auto first_dirty_offset() const
-        {
+        auto first_dirty_offset() const {
                 return lastCleanupMaxSeqNum + 1;
         }
 
@@ -285,7 +256,7 @@ struct topic_partition_log
 
                 // When this was created, in seconds
                 uint32_t createdTS;
-                bool nameEncodesTS;
+                bool     nameEncodesTS;
 
                 struct
                 {
@@ -295,15 +266,15 @@ struct topic_partition_log
                         // relative sequence number = absSeqNum - baseSeqNum
                         Switch::vector<std::pair<uint32_t, uint32_t>> skipList;
 
-			// see above
-			bool haveWideEntries;
+                        // see above
+                        bool haveWideEntries;
 
                         // We may access the index both directly, if ondisk is valid, and via the skipList
                         // This is so that we won't have to restore the skiplist on init
                         struct
                         {
                                 const uint8_t *data;
-                                uint32_t span;
+                                uint32_t       span;
 
                                 // last recorded tuple in the index; we need this here
                                 struct
@@ -324,8 +295,7 @@ struct topic_partition_log
 
         } cur; // the _current_ (latest) segment
 
-	partition_config config;
-
+        partition_config config;
 
         // a topic partition is comprised of a set of segments(log file, index file) which
         // are immutable, and we don't need to serialize access to them, and a cur(rent) segment, which is not immutable.
@@ -334,19 +304,16 @@ struct topic_partition_log
         // make sure roSegments is sorted
         std::shared_ptr<std::vector<ro_segment *>> roSegments;
 
-        ~topic_partition_log()
-        {
-                if (roSegments)
-                {
+        ~topic_partition_log() {
+                if (roSegments) {
                         for (ro_segment *it : *roSegments)
                                 delete it;
                 }
 
-		if (cur.index.fd != -1)
-		{
-			fdatasync(cur.index.fd);
-			close(cur.index.fd);
-		}
+                if (cur.index.fd != -1) {
+                        fdatasync(cur.index.fd);
+                        close(cur.index.fd);
+                }
         }
 
         lookup_res read_cur(const uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum);
@@ -355,27 +322,24 @@ struct topic_partition_log
 
         append_res append_bundle(const time_t, const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt, const uint64_t, const uint64_t);
 
-	// utility method: appends a non-sparse bundle
-	// This is handy for appending bundles to the internal topics/partitions
-        append_res append_bundle(const time_t ts, const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt)
-	{
+        // utility method: appends a non-sparse bundle
+        // This is handy for appending bundles to the internal topics/partitions
+        append_res append_bundle(const time_t ts, const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt) {
                 return append_bundle(ts, bundle, bundleSize, bundleMsgsCnt, 0, 0);
         }
 
-	append_res append_msg(const time_t ts, const strwlen8_t key, const strwlen32_t msg)
-        {
+        append_res append_msg(const time_t ts, const strwlen8_t key, const strwlen32_t msg) {
                 const std::size_t required = (key.size() + msg.size()) * 24;
-                const uint8_t msgFlags = key.size() ? uint8_t(TankFlags::BundleMsgFlags::HaveKey) : 0;
-		IOBuffer _msgBuf;	 // XXX: Service instance
-		auto &b{_msgBuf};
+                const uint8_t     msgFlags = key.size() ? uint8_t(TankFlags::BundleMsgFlags::HaveKey) : 0;
+                IOBuffer          _msgBuf; // XXX: Service instance
+                auto &            b{_msgBuf};
 
                 b.clear();
                 b.reserve(required);
                 b.pack(uint8_t(1 << 2)); // bundle flags: 1 message in the bundle
-                b.pack(msgFlags, ts); 	// message header: flags and timestamp
+                b.pack(msgFlags, ts);    // message header: flags and timestamp
 
-                if (key)
-                {
+                if (key) {
                         b.pack(key.size());
                         b.serialize(key.data(), key.size());
                 }
@@ -388,13 +352,13 @@ struct topic_partition_log
 
         bool should_roll(const uint32_t) const;
 
-	bool may_switch_index_wide(const uint64_t);
+        bool may_switch_index_wide(const uint64_t);
 
         void schedule_flush(const uint32_t);
 
         void consider_ro_segments();
 
-	void compact(const char *);
+        void compact(const char *);
 };
 
 struct connection;
@@ -403,56 +367,51 @@ struct topic_partition;
 // In order to support minBytes semantics, we will
 // need to track produced data for each tracked topic partition, so that
 // we will be able to flush once we can satisfy the minBytes semantics
-struct wait_ctx_partition
-{
-        fd_handle *fdh;
-        uint64_t seqNum;
-        range32_t range;
+struct wait_ctx_partition {
+        fd_handle *      fdh;
+        uint64_t         seqNum;
+        range32_t        range;
         topic_partition *partition;
 };
 
-struct wait_ctx
-{
-        connection *c;
-	bool scheduledForDtor;
-        uint32_t requestId;
+struct wait_ctx {
+        connection * c;
+        bool         scheduledForDtor;
+        uint32_t     requestId;
         switch_dlist list, expList;
-        uint64_t expiration; // in MS
-        uint32_t minBytes;
+        uint64_t     expiration; // in MS
+        uint32_t     minBytes;
 
         // A request may involve multiple partitions
         // minBytes applies to the sum of all captured content for all specified partitions
         uint32_t capturedSize;
 
-        uint8_t partitionsCnt;
+        uint8_t            partitionsCnt;
         wait_ctx_partition partitions[0];
 };
 
 struct topic;
 struct topic_partition
-    : public RefCounted<topic_partition>
-{
-        uint16_t idx; // (0, ...)
-        uint32_t distinctId;
-        topic *owner{nullptr};
-        uint16_t localBrokerId; // for convenience
+    : public RefCounted<topic_partition> {
+        uint16_t         idx; // (0, ...)
+        uint32_t         distinctId;
+        topic *          owner{nullptr};
+        uint16_t         localBrokerId; // for convenience
         partition_config config;
 
-	// for foreach_msg()
-        struct msg
-        {
-                uint64_t seqNum;
-                uint64_t ts;
-                strwlen8_t key;
+        // for foreach_msg()
+        struct msg {
+                uint64_t    seqNum;
+                uint64_t    ts;
+                strwlen8_t  key;
                 strwlen32_t data;
         };
 
         struct replica
-            : public RefCounted<replica>
-        {
+            : public RefCounted<replica> {
                 const uint16_t brokerId; // owner
-                uint64_t time;
-                uint64_t initialHighWaterMark;
+                uint64_t       time;
+                uint64_t       initialHighWaterMark;
 
                 // The high watermark sequence number; maintained for followers replicas
                 uint64_t highWatermMark;
@@ -462,31 +421,28 @@ struct topic_partition
                 uint64_t lastAssignedSeqNum;
 
                 replica(const uint16_t id)
-                    : brokerId{id}
-                {
+                    : brokerId{id} {
                 }
         };
 
         struct
         {
-                uint16_t brokerId;
-                uint64_t epoch;
+                uint16_t                       brokerId;
+                uint64_t                       epoch;
                 Switch::shared_refptr<replica> replica;
         } leader;
 
         // this node may or may not be a replica for this partition
-        std::unique_ptr<topic_partition_log> log_;
+        std::unique_ptr<topic_partition_log>                         log_;
         ska::flat_hash_map<uint16_t, Switch::shared_refptr<replica>> replicasMap;
-        Switch::vector<replica *> insyncReplicas;
-        Switch::vector<wait_ctx *> waitingList;
+        Switch::vector<replica *>                                    insyncReplicas;
+        Switch::vector<wait_ctx *>                                   waitingList;
 
-        auto highwater_mark() const
-        {
+        auto highwater_mark() const {
                 return log_->lastAssignedSeqNum;
         }
 
-        Switch::shared_refptr<replica> replicaByBrokerId(const uint16_t brokerId)
-        {
+        Switch::shared_refptr<replica> replicaByBrokerId(const uint16_t brokerId) {
                 const auto it = replicasMap.find(brokerId);
 
                 return it != replicasMap.end() ? it->second.get() : nullptr;
@@ -498,44 +454,37 @@ struct topic_partition
 
         lookup_res read_from_local(const bool fetchOnlyFromLeader, const bool fetchOnlyComittted, const uint64_t absSeqNum, const uint32_t fetchSize);
 
-	// This is mostly useful for scanning internal topics, e.g on startup
-	// where you want to, for example, use it to checkpoint offsets and whatnot
-	// https://github.com/phaistos-networks/TANK/issues/40
-	bool foreach_msg(std::function<bool(msg &)> &) const;
+        // This is mostly useful for scanning internal topics, e.g on startup
+        // where you want to, for example, use it to checkpoint offsets and whatnot
+        // https://github.com/phaistos-networks/TANK/issues/40
+        bool foreach_msg(std::function<bool(msg &)> &) const;
 };
 
 struct topic
-    : public RefCounted<topic>
-{
-        const strwlen8_t name_;
+    : public RefCounted<topic> {
+        const strwlen8_t                   name_;
         Switch::vector<topic_partition *> *partitions_;
-	partition_config partitionConf;
+        partition_config                   partitionConf;
 
-	// for Prometheus metrics
-	struct metrics_struct
-        {
-                struct latency_struct
-                {
-			// inline is handy here
+        // for Prometheus metrics
+        struct metrics_struct {
+                struct latency_struct {
+                        // inline is handy here
                         static inline constexpr uint32_t histogram_scale[]{1, 2, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 65, 75, 85, 95, 100, 110, 120, 130, 140, 150, 200, 250, 300, 350, 400, 450, 500};
-                        uint64_t hist_buckets[sizeof_array(histogram_scale)] = {0};
-                        uint64_t sum{0}, cnt{0};
+                        uint64_t                         hist_buckets[sizeof_array(histogram_scale)] = {0};
+                        uint64_t                         sum{0}, cnt{0};
 
-                        static inline int32_t bucket_index(const uint32_t delta) noexcept
-                        {
+                        static inline int32_t bucket_index(const uint32_t delta) noexcept {
                                 int32_t top = sizeof_array(histogram_scale) - 1, btm{0};
 
-                                while (btm <= top)
-                                {
+                                while (btm <= top) {
                                         const auto mid = (btm + top) / 2;
-                                        const auto v = histogram_scale[mid];
+                                        const auto v   = histogram_scale[mid];
 
-                                        if (v == delta)
-                                        {
+                                        if (v == delta) {
                                                 btm = mid;
                                                 break;
-                                        }
-                                        else if (delta < v)
+                                        } else if (delta < v)
                                                 top = mid - 1;
                                         else
                                                 btm = mid + 1;
@@ -545,8 +494,7 @@ struct topic
                                 return btm;
                         }
 
-                        void reg_sample(const uint32_t delta)
-                        {
+                        void reg_sample(const uint32_t delta) {
                                 ++cnt;
                                 sum += delta;
 
@@ -558,45 +506,37 @@ struct topic
                         }
                 } latency;
 
-		uint64_t bytes_in{0};
-		uint64_t msgs_in{0};
-		uint64_t bytes_out{0};
-		// TODO: count current distinct consumers and producers
-		// i.e distinct connections that have consumed or produced at least one from/to this topic
+                uint64_t bytes_in{0};
+                uint64_t msgs_in{0};
+                uint64_t bytes_out{0};
+                // TODO: count current distinct consumers and producers
+                // i.e distinct connections that have consumed or produced at least one from/to this topic
         } metrics;
 
-
-
         topic(const strwlen8_t name, const partition_config c)
-            : name_{name.Copy(), name.len}, partitionConf{c}
-        {
+            : name_{name.Copy(), name.len}, partitionConf{c} {
                 partitions_ = new Switch::vector<topic_partition *>();
         }
 
-        auto name() const
-        {
+        auto name() const {
                 return name_;
         }
 
-        ~topic()
-        {
+        ~topic() {
                 if (auto *const p = const_cast<char *>(name_.p))
                         free(p);
 
-                if (partitions_)
-                {
-			while (partitions_->size())
-			{
-				partitions_->back()->Release();
-				partitions_->pop_back();
-			}
+                if (partitions_) {
+                        while (partitions_->size()) {
+                                partitions_->back()->Release();
+                                partitions_->pop_back();
+                        }
 
                         delete partitions_;
                 }
         }
 
-        void register_partition(topic_partition *const p)
-        {
+        void register_partition(topic_partition *const p) {
                 p->owner = this;
                 partitions_->push_back(p);
 
@@ -607,36 +547,30 @@ struct topic
                 require(partitions_->back()->idx == partitions_->size() - 1);
         }
 
-	void register_partitions(topic_partition **const all, const size_t n)
-	{
-		for (uint32_t i{0}; i != n; ++i)
-		{
-			require(all[i]);
-			all[i]->owner = this;
-			partitions_->push_back(all[i]);
-		}
+        void register_partitions(topic_partition **const all, const size_t n) {
+                for (uint32_t i{0}; i != n; ++i) {
+                        require(all[i]);
+                        all[i]->owner = this;
+                        partitions_->push_back(all[i]);
+                }
 
                 std::sort(partitions_->begin(), partitions_->end(), [](const auto a, const auto b) {
                         return a->idx < b->idx;
                 });
 
                 require(partitions_->back()->idx == partitions_->size() - 1);
-	}
+        }
 
-        const topic_partition *partition(const uint16_t idx) const
-        {
+        const topic_partition *partition(const uint16_t idx) const {
                 return idx < partitions_->size() ? partitions_->at(idx) : nullptr;
         }
 
-        topic_partition *partition(const uint16_t idx)
-        {
+        topic_partition *partition(const uint16_t idx) {
                 return idx < partitions_->size() ? partitions_->at(idx) : nullptr;
         }
 
-	void foreach_msg(std::function<bool(topic_partition::msg &)> &l) const
-        {
-                for (auto p : *partitions_)
-                {
+        void foreach_msg(std::function<bool(topic_partition::msg &)> &l) const {
+                for (auto p : *partitions_) {
                         if (!p->foreach_msg(l))
                                 return;
                 }
@@ -645,42 +579,36 @@ struct topic
 
 // We could have used Switch::deque<> but let's just use something simpler
 // TODO: Maybe we should just use a linked list instead
-struct outgoing_queue
-{
-        struct content_file_range
-        {
+struct outgoing_queue {
+        struct content_file_range {
                 fd_handle *fdh;
-                range32_t range;
+                range32_t  range;
 
-                content_file_range &operator=(const content_file_range &o)
-                {
+                content_file_range &operator=(const content_file_range &o) {
                         fdh = o.fdh;
-			fdh->Retain();
+                        fdh->Retain();
                         range = o.range;
                         return *this;
                 }
 
-                content_file_range &operator=(content_file_range &&o)
-                {
-                        fdh = o.fdh;
+                content_file_range &operator=(content_file_range &&o) {
+                        fdh   = o.fdh;
                         range = o.range;
 
-			o.fdh = nullptr;
-			o.range.reset();
+                        o.fdh = nullptr;
+                        o.range.reset();
                         return *this;
                 }
-
         };
 
-        struct payload
-        {
+        struct payload {
                 bool payloadBuf;
 
-		struct
-		{
-			uint64_t since;
-			topic *src_topic;
-		} tracker;
+                struct
+                {
+                        uint64_t since;
+                        topic *  src_topic;
+                } tracker;
 
                 union {
                         struct
@@ -690,235 +618,202 @@ struct outgoing_queue
                                 struct
                                 {
                                         struct iovec iov[250]; // https://github.com/phaistos-networks/TANK/issues/12
-                                        uint8_t iovIdx;
-                                        uint8_t iovCnt;
+                                        uint8_t      iovIdx;
+                                        uint8_t      iovCnt;
                                 };
                         };
 
                         content_file_range file_range;
                 };
 
-		void set_iov(const range32_t *const l, const uint32_t cnt)
-                {
+                void set_iov(const range32_t *const l, const uint32_t cnt) {
                         iovCnt = cnt;
 
-                        for (uint32_t i{0}; i != cnt; ++i)
-                        {
+                        for (uint32_t i{0}; i != cnt; ++i) {
                                 auto ptr = iov + i;
 
                                 ptr->iov_base = static_cast<void *>(buf->At(l[i].offset));
-                                ptr->iov_len = l[i].len;
+                                ptr->iov_len  = l[i].len;
                         }
                 }
 
-		void append(const strwlen32_t s)
-		{
-			iov[iovCnt].iov_base = (void *)s.data();
-			iov[iovCnt++].iov_len = s.size();
-		}
+                void append(const strwlen32_t s) {
+                        iov[iovCnt].iov_base  = (void *)s.data();
+                        iov[iovCnt++].iov_len = s.size();
+                }
 
                 payload()
-                    : payloadBuf{false} 
-                {
-			tracker.since = 0;
+                    : payloadBuf{false} {
+                        tracker.since = 0;
                 }
 
-                payload(IOBuffer *const b)
-                {
-                        payloadBuf = true;
-                        buf = b;
-			tracker.since = 0;
-			iovCnt = iovIdx = 0;
+                payload(IOBuffer *const b) {
+                        payloadBuf    = true;
+                        buf           = b;
+                        tracker.since = 0;
+                        iovCnt = iovIdx = 0;
                 }
 
-                payload(fd_handle *const fdh, const range32_t r, const uint64_t start, topic *t)
-                {
-                        payloadBuf = false;
-			tracker.since = start;
-			tracker.src_topic = t;
-                        file_range.fdh = fdh;
-                        file_range.range = r;
+                payload(fd_handle *const fdh, const range32_t r, const uint64_t start, topic *t) {
+                        payloadBuf        = false;
+                        tracker.since     = start;
+                        tracker.src_topic = t;
+                        file_range.fdh    = fdh;
+                        file_range.range  = r;
                         file_range.fdh->Retain();
                 }
 
-		void set_buf(IOBuffer *b)
-		{
-			payloadBuf = true;
-			buf = b;
-		}
+                void set_buf(IOBuffer *b) {
+                        payloadBuf = true;
+                        buf        = b;
+                }
 
                 payload &operator=(const payload &) = delete;
 
-		payload &operator=(payload &&o)
-		{
-                        payloadBuf = o.payloadBuf;
-			tracker.since = o.tracker.since;
-			tracker.src_topic = o.tracker.src_topic;
+                payload &operator=(payload &&o) {
+                        payloadBuf        = o.payloadBuf;
+                        tracker.since     = o.tracker.since;
+                        tracker.src_topic = o.tracker.src_topic;
 
-                        if (payloadBuf)
-			{
-                                buf = o.buf;
-				iovCnt = o.iovCnt;
-				iovIdx = o.iovIdx;
-				memcpy(iov, o.iov, iovCnt * sizeof(struct iovec));
+                        if (payloadBuf) {
+                                buf    = o.buf;
+                                iovCnt = o.iovCnt;
+                                iovIdx = o.iovIdx;
+                                memcpy(iov, o.iov, iovCnt * sizeof(struct iovec));
 
-				o.buf = nullptr;
-				o.iovCnt = o.iovIdx = 0;
-			}
-                        else
-			{
+                                o.buf    = nullptr;
+                                o.iovCnt = o.iovIdx = 0;
+                        } else {
                                 file_range = std::move(o.file_range);
-			}
+                        }
 
-			o.payloadBuf = false;
+                        o.payloadBuf = false;
                         return *this;
-		}
+                }
         };
 
-        using reference = payload &;
+        using reference       = payload &;
         using reference_const = const payload &;
 
-        payload A[128]; // fixed size
-        uint8_t backIdx{0}, frontIdx{0}, size_{0};
+        payload                 A[128]; // fixed size
+        uint8_t                 backIdx{0}, frontIdx{0}, size_{0};
         static constexpr size_t capacity{sizeof_array(A)};
 
-
-        inline uint32_t prev(const uint32_t idx) const noexcept
-        {
+        inline uint32_t prev(const uint32_t idx) const noexcept {
                 return (idx + (capacity - 1)) & (capacity - 1);
         }
 
-        inline uint32_t next(const uint32_t idx) const noexcept
-        {
+        inline uint32_t next(const uint32_t idx) const noexcept {
                 return (idx + 1) & (capacity - 1);
         }
 
-        inline reference front() noexcept
-        {
+        inline reference front() noexcept {
                 return A[frontIdx];
         }
 
-        inline reference_const front() const noexcept
-        {
+        inline reference_const front() const noexcept {
                 return A[frontIdx];
         }
 
-        inline reference back() noexcept 
-        {
+        inline reference back() noexcept {
                 return A[prev(backIdx)];
         }
 
-        inline reference_const back() const noexcept
-        {
+        inline reference_const back() const noexcept {
                 return A[prev(backIdx)];
         }
 
-        inline reference at(const size_t idx) noexcept
-        {
+        inline reference at(const size_t idx) noexcept {
                 return A[(frontIdx + idx) & (capacity - 1)];
         }
 
-        inline reference_const at(const size_t idx) const noexcept
-        {
+        inline reference_const at(const size_t idx) const noexcept {
                 return A[(frontIdx + idx) & (capacity - 1)];
         }
 
-	inline void did_push() noexcept
-        {
-		++size_;
+        inline void did_push() noexcept {
+                ++size_;
         }
 
-	inline void did_pop() noexcept
-	{
-		--size_;
-	}
+        inline void did_pop() noexcept {
+                --size_;
+        }
 
         payload &push_back(const payload &v) = delete;
 
-        auto push_back(payload &&v)
-        {
+        auto push_back(payload &&v) {
                 if (unlikely(size_ == capacity))
                         throw Switch::system_error("Queue full");
 
-		payload *const res = A + backIdx;
+                payload *const res = A + backIdx;
 
-                *res= std::move(v);
+                *res    = std::move(v);
                 backIdx = next(backIdx);
-		did_push();
+                did_push();
 
-		return res;
+                return res;
         }
 
         void push_front(const payload &v) = delete;
 
-        void push_front(payload &&v)
-        {
+        void push_front(payload &&v) {
                 if (unlikely(size_ == capacity))
                         throw Switch::system_error("Queue full");
 
-                frontIdx = prev(frontIdx);
+                frontIdx    = prev(frontIdx);
                 A[frontIdx] = std::move(v);
-		did_push();
+                did_push();
         }
 
-        inline void pop_back() noexcept
-        {
+        inline void pop_back() noexcept {
                 backIdx = prev(backIdx);
-		did_pop();
+                did_pop();
         }
 
-        inline void pop_front() noexcept
-        {
+        inline void pop_front() noexcept {
                 frontIdx = next(frontIdx);
-		did_pop();
+                did_pop();
         }
 
-        inline bool full() const noexcept
-        {
+        inline bool full() const noexcept {
                 return size_ == capacity;
         }
 
-        inline bool empty() const noexcept
-        {
+        inline bool empty() const noexcept {
                 return !size_;
         }
 
-        inline auto size() const noexcept
-        {
+        inline auto size() const noexcept {
                 return size_;
         }
 
         template <typename L>
-        void clear(L &&l)
-        {
-                while (frontIdx != backIdx)
-                {
+        void clear(L &&l) {
+                while (frontIdx != backIdx) {
                         auto &p = A[frontIdx];
 
-                        if (p.payloadBuf)
-			{
-				if (p.buf)
-					l(p.buf);
-			}
-                        else
+                        if (p.payloadBuf) {
+                                if (p.buf)
+                                        l(p.buf);
+                        } else
                                 p.file_range.fdh->Release();
 
                         frontIdx = next(frontIdx);
                 }
 
-                size_ = 0;
+                size_    = 0;
                 frontIdx = backIdx = 0;
         }
 
-        outgoing_queue()
-        {
+        outgoing_queue() {
         }
 };
 
-struct connection
-{
-        int fd;
+struct connection {
+        int       fd;
         IOBuffer *inB{nullptr};
+
+	uint32_t addr4;
 
         // May have an attached outgoing queue
         outgoing_queue *outQ{nullptr};
@@ -929,90 +824,80 @@ struct connection
         // issue an REPLICA_ID request as soon as they connect
         uint16_t replicaId;
 
-        struct State
-        {
-                enum class Flags : uint8_t
-                {
+        struct State {
+                enum class Flags : uint8_t {
                         PendingIntro = 0,
                         NeedOutAvail,
-			ConsideredReqHeader,
-			TypePrometheus,
-			DrainingForShutdown
+                        ConsideredReqHeader,
+                        TypePrometheus,
+                        DrainingForShutdown
                 };
 
-                uint8_t flags;
+                uint8_t  flags;
                 uint64_t lastInputTS;
         } state;
 
-	inline bool src_prometheus() const noexcept
-	{
-		return state.flags & (1 << unsigned(State::Flags::TypePrometheus));
-	}
+        inline bool src_prometheus() const noexcept {
+                return state.flags & (1 << unsigned(State::Flags::TypePrometheus));
+        }
 
-	void set_close_on_flush()
-	{
-		state.flags |= (1 << unsigned(State::Flags::DrainingForShutdown));
-	}
+        void set_close_on_flush() {
+                state.flags |= (1 << unsigned(State::Flags::DrainingForShutdown));
+        }
 
-	bool close_on_flush() const noexcept
-	{
-		return state.flags & (1 << unsigned(State::Flags::DrainingForShutdown));
-	}
-
+        bool close_on_flush() const noexcept {
+                return state.flags & (1 << unsigned(State::Flags::DrainingForShutdown));
+        }
 };
 
-class Service final
-{
-	friend struct ro_segment;
+class Service final {
+        friend struct ro_segment;
 
       private:
-      	enum class OperationMode  : uint8_t 
-	{
-		Standalone = 0,
-		Clustered
-	} opMode{OperationMode::Standalone};
-        Switch::vector<wait_ctx *> waitCtxPool[255];
+        enum class OperationMode : uint8_t {
+                Standalone = 0,
+                Clustered
+        } opMode{OperationMode::Standalone};
+        Switch::vector<wait_ctx *>                                   waitCtxPool[255];
         ska::flat_hash_map<strwlen8_t, Switch::shared_refptr<topic>> topics;
-        uint16_t selfBrokerId{1};
-        Switch::vector<IOBuffer *> bufs;
-        Switch::vector<connection *> connsPool;
-        Switch::vector<outgoing_queue *> outgoingQueuesPool;
-        switch_dlist allConnections, waitExpList;
-	// In the past, it was possible, however improbably, that
-	// we 'd invoke destroy_wait_ctx() twice on the same context, or would otherwise
-	// use or re-use the same context while it was either invalid, or was reused
-	// and that would obviously cause problems.
-	// In ordet to eliminate that possibility, destroy_wait_ctx() now
-	// defers put_waitctx() until the next I/O loop iteration
-	// where it's safe to release and reuse that context
-	//
-	// We used to use a single expiredCtxList, but now using multiple just so that we 
-	// won't accidently clear/use one for multiple occasions. It was used in order to track
-	// down a hasenbug, though it turned out to be a silly application bug, not a Tank bug.
-	// It's nonethless great that we figured out this edge case(no evidence that this
-	// has ever happened) and we are dealing with it here.
-        Switch::vector<wait_ctx *> expiredCtxList, expiredCtxList2, expiredCtxList3, waitCtxDeferredGC;
-        uint32_t nextDistinctPartitionId{0};
-        int listenFd, prom_listen_fd{-1};
-        EPoller poller;
+        uint16_t                                                     selfBrokerId{1};
+        Switch::vector<IOBuffer *>                                   bufs;
+        Switch::vector<connection *>                                 connsPool;
+        Switch::vector<outgoing_queue *>                             outgoingQueuesPool;
+        switch_dlist                                                 allConnections, waitExpList;
+        // In the past, it was possible, however improbably, that
+        // we 'd invoke destroy_wait_ctx() twice on the same context, or would otherwise
+        // use or re-use the same context while it was either invalid, or was reused
+        // and that would obviously cause problems.
+        // In ordet to eliminate that possibility, destroy_wait_ctx() now
+        // defers put_waitctx() until the next I/O loop iteration
+        // where it's safe to release and reuse that context
+        //
+        // We used to use a single expiredCtxList, but now using multiple just so that we
+        // won't accidently clear/use one for multiple occasions. It was used in order to track
+        // down a hasenbug, though it turned out to be a silly application bug, not a Tank bug.
+        // It's nonethless great that we figured out this edge case(no evidence that this
+        // has ever happened) and we are dealing with it here.
+        Switch::vector<wait_ctx *>        expiredCtxList, expiredCtxList2, expiredCtxList3, waitCtxDeferredGC;
+        uint32_t                          nextDistinctPartitionId{0};
+        int                               listenFd, prom_listen_fd{-1};
+        EPoller                           poller;
         Switch::vector<topic_partition *> deferList;
-	range32_t patchList[1024];
-	time_t curTime;
+        range32_t                         patchList[1024];
+        time_t                            curTime;
 
       private:
         static void parse_partition_config(const char *, partition_config *);
 
         static void parse_partition_config(const strwlen32_t, partition_config *);
 
-        auto get_outgoing_queue()
-        {
+        auto get_outgoing_queue() {
                 return outgoingQueuesPool.size() ? outgoingQueuesPool.Pop() : new outgoing_queue();
         }
 
-	topic *topic_by_name(const strwlen8_t) const;
+        topic *topic_by_name(const strwlen8_t) const;
 
-        void put_outgoing_queue(outgoing_queue *const q)
-        {
+        void put_outgoing_queue(outgoing_queue *const q) {
                 q->clear([this](auto buf) {
                         this->put_buffer(buf);
                 });
@@ -1020,75 +905,61 @@ class Service final
                 outgoingQueuesPool.push_back(q);
         }
 
-        auto get_buffer()
-        {
+        auto get_buffer() {
                 return bufs.size() ? bufs.Pop() : new IOBuffer();
         }
 
-        void put_buffer(IOBuffer *b)
-        {
-		if (b)
-		{
-			if (b->Reserved() > 800*1024 || bufs.size() > 16)
-				delete b;
-			else
-			{
-				b->clear();
-				bufs.push_back(b);
-			}
-		}
+        void put_buffer(IOBuffer *b) {
+                if (b) {
+                        if (b->Reserved() > 800 * 1024 || bufs.size() > 16)
+                                delete b;
+                        else {
+                                b->clear();
+                                bufs.push_back(b);
+                        }
+                }
         }
 
-        auto get_connection()
-        {
-		return connsPool.size() ? connsPool.Pop() : new connection();
+        auto get_connection() {
+                return connsPool.size() ? connsPool.Pop() : new connection();
         }
 
-        void put_connection(connection *const c)
-        {
-                if (c->inB)
-                {
+        void put_connection(connection *const c) {
+                if (c->inB) {
                         put_buffer(c->inB);
                         c->inB = nullptr;
                 }
 
-		if (connsPool.size() > 16)
-			delete c;
-		else
-		{
-	                connsPool.push_back(c);
-		}
+                if (connsPool.size() > 16)
+                        delete c;
+                else {
+                        connsPool.push_back(c);
+                }
         }
 
-        void register_topic(topic *const t)
-        {
-		if (!topics.insert({t->name(), t}).second)
+        void register_topic(topic *const t) {
+                if (!topics.insert({t->name(), t}).second)
                         throw Switch::exception("Topic ", t->name(), " already registered");
         }
 
-
         Switch::shared_refptr<topic_partition> init_local_partition(const uint16_t idx, const char *const bp, const partition_config &);
 
-        bool isValidBrokerId(const uint16_t replicaId)
-        {
+        bool isValidBrokerId(const uint16_t replicaId) {
                 return replicaId != 0;
         }
 
-        uint32_t partitionLeader(const topic_partition *const p)
-        {
+        uint32_t partitionLeader(const topic_partition *const p) {
                 return 1;
         }
 
-        const topic_partition *getPartition(const strwlen8_t topic, const uint16_t partitionIdx) const
-        {
+        const topic_partition *getPartition(const strwlen8_t topic, const uint16_t partitionIdx) const {
                 if (const auto it = topics.find(topic); it != topics.end())
                         return it->second->partition(partitionIdx);
                 else
                         return nullptr;
         }
 
-        topic_partition *getPartition(const strwlen8_t topic, const uint16_t partitionIdx)
-        {
+        topic_partition *getPartition(const strwlen8_t topic, const uint16_t partitionIdx) {
                 if (const auto it = topics.find(topic); it != topics.end())
                         return it->second->partition(partitionIdx);
                 else
@@ -1105,16 +976,14 @@ class Service final
 
         bool process_create_topic(connection *const c, const uint8_t *p, const size_t len);
 
-        wait_ctx *get_waitctx(const uint8_t totalPartitions)
-        {
+        wait_ctx *get_waitctx(const uint8_t totalPartitions) {
                 if (waitCtxPool[totalPartitions].size())
                         return waitCtxPool[totalPartitions].Pop();
                 else
                         return (wait_ctx *)malloc(sizeof(wait_ctx) + totalPartitions * sizeof(wait_ctx_partition));
         }
 
-        void put_waitctx(wait_ctx *const ctx)
-        {
+        void put_waitctx(wait_ctx *const ctx) {
                 waitCtxPool[ctx->partitionsCnt].push_back(ctx);
         }
 
@@ -1136,32 +1005,30 @@ class Service final
 
         bool flush_iov(connection *, struct iovec *, const uint32_t, const bool);
 
-        bool try_send_ifnot_blocked(connection *const c)
-        {
+        bool try_send_ifnot_blocked(connection *const c) {
                 if (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail)))
                         return true;
                 else
                         return try_send(c);
         }
 
-	void poll_outavail(connection *);
+        void poll_outavail(connection *);
 
-	void stop_poll_outavail(connection *);
+        void stop_poll_outavail(connection *);
 
-	void introduce_self(connection *, bool &);
+        void introduce_self(connection *, bool &);
 
         bool try_send(connection *const c);
 
-	protected:
-	static void rebuild_index(int, int);
+      protected:
+        static void rebuild_index(int, int);
 
-	static uint32_t verify_log(int);
+        static uint32_t verify_log(int);
 
-	static void verify_index(int, const bool);
+        static void verify_index(int, const bool);
 
       public:
-        Service()
-        {
+        Service() {
                 switch_dlist_init(&allConnections);
                 switch_dlist_init(&waitExpList);
         }

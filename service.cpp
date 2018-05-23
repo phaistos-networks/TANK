@@ -29,6 +29,7 @@ static constexpr bool trace{false};
 static Switch::mutex                       mboxLock;
 static Switch::vector<std::pair<int, int>> mbox;
 static Buffer                              basePath_;
+static bool                                read_only{false};
 static bool                                cleanupTrackerIsDirty{false};
 static std::vector<topic_partition_log *>  cleanupTracker;
 
@@ -93,9 +94,9 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
 
         if (indexFd == -1) {
                 if (haveWideEntries)
-                        indexFd = open(Buffer::build(base, "/", absSeqNum, "_64.index").data(), O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME, 0775);
+                        indexFd = open(Buffer::build(base, "/", absSeqNum, "_64.index").data(), read_only ? O_RDONLY : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME), 0775);
                 else
-                        indexFd = open(Buffer::build(base, "/", absSeqNum, ".index").data(), O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME, 0775);
+                        indexFd = open(Buffer::build(base, "/", absSeqNum, ".index").data(), read_only ? O_RDONLY : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME), 0775);
 
                 if (indexFd == -1)
                         throw Switch::system_error("Failed to rebuild index file:", strerror(errno));
@@ -1752,7 +1753,7 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
 
                 basePath.append(cur.baseSeqNum, "_", cur.createdTS, ".log");
 
-                cur.fdh.reset(new fd_handle(open(basePath.data(), O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND, 0775)));
+                cur.fdh.reset(new fd_handle(open(basePath.data(), read_only ? O_RDONLY : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND), 0775)));
                 require(cur.fdh->use_count() == 2);
                 cur.fdh->Release();
 
@@ -1761,7 +1762,7 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
 
                 basePath.resize(basePathLen);
                 basePath.append(cur.baseSeqNum, ".index");
-                cur.index.fd = open(basePath.data(), O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND, 0775);
+                cur.index.fd = open(basePath.data(), read_only ? O_RDWR : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND), 0775);
                 basePath.resize(basePathLen);
 
                 if (cur.index.fd == -1)
@@ -2842,7 +2843,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         else
                                 Snprint(basePath, sizeof(basePath), b, curLogSeqNum, ".log");
 
-                        fd = open(basePath, O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME, 0775);
+                        fd = open(basePath, read_only ? O_RDONLY : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME), 0775);
                         if (fd == -1)
                                 throw Switch::system_error("open(", basePath, ") failed:", strerror(errno), ". Cannot open current segment log");
 
@@ -2855,7 +2856,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         // TODO(markp): check if index has wideEntries
                         // and set l->cur.index.haveWideEntries accordingly
                         Snprint(basePath, sizeof(basePath), b, curLogSeqNum, ".index");
-                        fd = open(basePath, O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND, 0775);
+                        fd = open(basePath, read_only ? O_RDWR : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND), 0775);
 
                         if (trace)
                                 SLog("Considering ", basePath, "\n");
@@ -3069,6 +3070,36 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         SLog("Exception:", e.what(), "\n");
                 throw;
         }
+}
+
+static int log_fd;
+
+void init_log() {
+#ifndef LEAN_SWITCH
+        log_fd = open("/tmp/tank_srv.log", O_WRONLY | O_CREAT | O_LARGEFILE | O_APPEND, 0775);
+
+	if (log_fd != -1) {
+		Buffer m;
+
+		m.append(Date::ts_repr(time(nullptr)), " TANK service initialization in progress\n");
+		write(log_fd, m.data(), m.size());
+	}
+#else
+        log_fd = -1;
+#endif
+}
+
+template <typename... T>
+void track_shutdown(connection *const c, const size_t line, T &&... args) {
+#ifndef LEAN_SWITCH
+	if (auto fd{log_fd}; fd != -1) {
+                Buffer b;
+
+                b.append(Date::ts_repr(time(nullptr)), ": Unexpected shutdown at ", line, " for connection from ", ip4addr_repr(c ? c->addr4 : INADDR_NONE), ":");
+                b.append(std::forward<T>(args)...);
+                write(fd, b.data(), b.size());
+        }
+#endif
 }
 
 bool Service::process_consume(connection *const c, const uint8_t *p, const size_t /*len*/) {
@@ -3357,6 +3388,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                 if (trace)
                         SLog("Cought exception:", e.what(), "\n");
 
+                track_shutdown(c, __LINE__, "Exception thrown:", e.what(), "\n");
                 return shutdown(c, __LINE__);
         }
 }
@@ -3406,6 +3438,7 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
                 if (trace)
                         SLog("Unexpected len = ", len, "\n");
 
+                track_shutdown(c, __LINE__, "Uenxpected length ", len, "\n");
                 return shutdown(c, __LINE__);
         }
 
@@ -3448,7 +3481,9 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
                 }
         }
 
-        if (topic_by_name(topicName))
+        if (read_only)
+                resp->pack(uint8_t(5));
+        else if (topic_by_name(topicName))
                 resp->Serialize<uint8_t>(1); // already exists
         else {
                 char       topicPath[PATH_MAX];
@@ -3523,6 +3558,7 @@ bool Service::process_discover_partitions(connection *const c, const uint8_t *p,
                 if (trace)
                         SLog("Unexpected len = ", len, "\n");
 
+                track_shutdown(c, __LINE__, "Unexpected length ", len, "\n");
                 return shutdown(c, __LINE__);
         }
 
@@ -3587,13 +3623,17 @@ bool Service::process_replica_reg(connection *const c, const uint8_t *p, const s
 }
 
 bool Service::process_produce(const TankAPIMsgType msg, connection *const c, const uint8_t *p, const size_t len) {
-        if (unlikely(len < sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint8_t)))
+        if (unlikely(len < sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint8_t))) {
+                track_shutdown(c, __LINE__, "Unexpected request\n");
                 return shutdown(c, __LINE__);
+        }
 
         const auto *const __end = p + len;
 
-        if (unlikely(p + (*p) + sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint8_t) >= __end))
+        if (unlikely(p + (*p) + sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint8_t) >= __end)) {
+                track_shutdown(c, __LINE__, "Unexpected request\n");
                 return shutdown(c, __LINE__);
+        }
 
         const uint64_t              processBegin  = trace ? Timings::Microseconds::Tick() : 0;
         auto *const                 respHeader    = get_buffer();
@@ -3626,7 +3666,8 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
         // it would send this produce response respHeader before it has been built, we are going
         // to provide this connection to wakeup_wait_ctx() so that it will check if the connection it need to wake up
         // is this connection, and if so, not wake it up for we will wake it up here.
-        auto payload = q->push_back(respHeader);
+        auto    payload = q->push_back(respHeader);
+        uint8_t error_code;
 
         respHeader->Serialize(requestId);
 
@@ -3634,31 +3675,46 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                 SLog("Parsing ", topicsCnt, "\n");
 
         for (uint32_t i{0}; i != topicsCnt; ++i) {
-                if (unlikely(p + (*p) >= __end))
+                if (unlikely(p + (*p) >= __end)) {
+                        track_shutdown(c, __LINE__, "Unexpected request\n");
                         return shutdown(c, __LINE__);
+                }
 
                 topicName.Set((char *)p + 1, *p);
                 p += sizeof(uint8_t) + topicName.len;
 
                 auto topic = topic_by_name(topicName);
 
+                if (read_only) {
+                        // can't do that
+                        error_code = 0xfe;
+                        goto skip1;
+                }
+
                 if (!topic) {
+                        error_code = 0xff;
+
                         if (trace)
                                 SLog("Unknown topic [", topicName, "]\n");
 
+                skip1:
                         for (auto cnt = *p++; cnt; --cnt) {
-                                if (unlikely(p + sizeof(uint16_t) >= __end))
+                                if (unlikely(p + sizeof(uint16_t) >= __end)) {
+                                        track_shutdown(c, __LINE__, "Unexpected request\n");
                                         return shutdown(c, __LINE__);
+                                }
 
                                 p += sizeof(uint16_t); // skip partition ID
 
-                                if (unlikely(!Compression::UnpackUInt32Check(p, __end)))
+                                if (unlikely(!Compression::UnpackUInt32Check(p, __end))) {
+                                        track_shutdown(c, __LINE__, "Unexpected request\n");
                                         return shutdown(c, __LINE__);
+                                }
 
                                 p += Compression::UnpackUInt32(p); // skip bundle
                         }
 
-                        respHeader->Serialize(uint8_t(0xff));
+                        respHeader->Serialize(uint8_t(error_code));
                         continue;
                 }
 
@@ -3674,8 +3730,10 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                         auto       partition   = topic->partition(partitionId);
                         uint64_t   firstMsgSeqNum{0}, lastMsgSeqNum;
 
-                        if (unlikely(!bundleLen))
+                        if (unlikely(!bundleLen)) {
+                                track_shutdown(c, __LINE__, "Unexpected request\n");
                                 return shutdown(c, __LINE__);
+                        }
 
                         if (msg == TankAPIMsgType::ProduceWithBaseSeqNum) {
                                 // See common.h
@@ -3717,6 +3775,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 
                                 if (unlikely(msgSetSize == 0)) {
                                         // This is absolutely unacceptable
+                                        track_shutdown(c, __LINE__, "Unexpected request\n");
                                         return shutdown(c, __LINE__);
                                 }
                         }
@@ -3740,6 +3799,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 
                                 if (unlikely(lastMsgSeqNum < firstMsgSeqNum || !lastMsgSeqNum)) {
                                         // Invalid; sequence number's base is (1)
+                                        track_shutdown(c, __LINE__, "Unexpected request\n");
                                         return shutdown(c, __LINE__);
                                 }
                         } else {
@@ -4254,8 +4314,10 @@ bool Service::flush_iov(connection *const c, struct iovec *const iov, const uint
                                         Switch::SetTCPCork(fd, 0);
                                 poll_outavail(c);
                                 return true;
-                        } else
+                        } else {
+				track_shutdown(c, __LINE__, "writev() failed for ", iovCnt, ": ", strerror(errno), "\n");
                                 return shutdown(c, __LINE__);
+			}
                 }
 
                 for (;;) {
@@ -4276,7 +4338,8 @@ bool Service::flush_iov(connection *const c, struct iovec *const iov, const uint
                                                         Switch::SetTCPCork(fd, 0);
 
                                                 if (c->state.flags & (1 << unsigned(connection::State::Flags::DrainingForShutdown))) {
-                                                        SLog("drained outgoing data\n");
+                                                        if (trace)
+                                                                SLog("drained outgoing data\n");
                                                         return shutdown(c, __LINE__);
                                                 } else
                                                         return true;
@@ -4396,8 +4459,10 @@ bool Service::try_send(connection *const c) {
                                                         Switch::SetTCPCork(fd, 0);
                                                         poll_outavail(c);
                                                         return true;
-                                                } else
+                                                } else {
+							track_shutdown(c, __LINE__, "writev() failed:", strerror(errno), " for ", iovCnt, "\n");
                                                         return shutdown(c, __LINE__);
+						}
                                         }
 
                                         for (;;) {
@@ -4472,7 +4537,7 @@ bool Service::try_send(connection *const c) {
 
                                 if (trace) {
                                         // See https://github.com/phaistos-networks/TANK/issues/14 for measurements
-                                        SLog("Sending contents ", range, " => ", r, " ", duration_repr(Timings::Microseconds::Since(before)), "\n");
+                                        SLog("Sending contents ", range, " => ", size_repr(r), " ", size_repr(range.size()), " ", duration_repr(Timings::Microseconds::Since(before)), "\n");
                                 }
 
                                 if (r == -1) {
@@ -4491,8 +4556,10 @@ bool Service::try_send(connection *const c) {
 
                                                 poll_outavail(c);
                                                 return true;
-                                        } else
+                                        } else {
+						track_shutdown(c, __LINE__, "sendfile() failed: ", strerror(errno), " for ", outLen, "\n");
                                                 return shutdown(c, __LINE__);
+					}
                                 } else {
                                         range.len -= r;
                                         range.offset += r;
@@ -4502,11 +4569,14 @@ bool Service::try_send(connection *const c) {
 
                                         if (0 == range.len) {
                                                 if (trace)
-                                                        SLog("Releasing ", ansifmt::bold, ansifmt::color_blue, ptr_repr(it.file_range.fdh), " ", it.file_range.fdh->use_count(), ansifmt::reset, "\n");
+                                                        SLog("SENT-releasing ", ansifmt::bold, ansifmt::color_blue, ptr_repr(it.file_range.fdh), " ", it.file_range.fdh->use_count(), ansifmt::reset, "\n");
 
                                                 if (const auto since = it.tracker.since) {
                                                         const auto delta = Timings::Microseconds::ToMillis(Timings::Microseconds::Since(since));
                                                         auto       topic{it.tracker.src_topic};
+
+                                                        if (trace)
+                                                                SLog("Took ", duration_repr(delta), " to send\n");
 
                                                         require(topic);
                                                         topic->metrics.latency.reg_sample(delta);
@@ -4595,8 +4665,10 @@ bool Service::try_send(connection *const c) {
 
                                         poll_outavail(c);
                                         return true;
-                                } else
+                                } else {
+					track_shutdown(c, __LINE__, "writev() failed for ", iovCnt, ": ", strerror(errno), "\n");
                                         return shutdown(c, __LINE__);
+				}
                         }
 
                         for (;;) {
@@ -4726,7 +4798,7 @@ static void sig_handler(int) {
 // TODO(markp): https://github.com/phaistos-networks/TANK/issues/7
 int Service::start(int argc, char **argv) {
         sockaddr_in      sa;
-        uint64_t         nextIdleCheck{0}, nextExpWaitCtxCheck{0}, nextPubSubQueueDrain{0}, nextCleanupTrackerPersist{0};
+        uint64_t         nextIdleCheck{0}, nextExpWaitCtxCheck{0}, nextPubSubQueueDrain{0}, nextCleanupTrackerPersist{read_only ? std::numeric_limits<uint64_t>::max() : 0};
         int              r;
         struct stat64    st;
         size_t           totalPartitions{0};
@@ -4792,8 +4864,12 @@ int Service::start(int argc, char **argv) {
 
         signal(SIGPIPE, SIG_IGN);
         signal(SIGHUP, SIG_IGN);
-        while ((r = getopt(argc, argv, "p:l:hvP:")) != -1) {
+        while ((r = getopt(argc, argv, "p:l:hvP:r")) != -1) {
                 switch (r) {
+                        case 'r':
+                                read_only = true;
+                                break;
+
                         case 'P':
                                 prom_endpoint = Switch::ParseSrvEndpoint({optarg}, "http"_s8, 9102);
                                 if (!prom_endpoint) {
@@ -4888,7 +4964,7 @@ int Service::start(int argc, char **argv) {
                                                 return 1;
                                         }
 
-                                        Defer(
+                                        DEFER(
                                             {
                                                     munmap(fileData, fileSize);
                                             });
@@ -5084,6 +5160,8 @@ int Service::start(int argc, char **argv) {
         Print(ansifmt::bold, "<=TANK=>", ansifmt::reset, " v", TANK_VERSION / 100, ".", TANK_VERSION % 100, " ", dotnotation_repr(topics.size()), " topics registered, ", dotnotation_repr(totalPartitions), " partitions; will listen for new connections at ", listenAddr, "\n");
         if (prom_endpoint)
                 Print("> Prometheus Exporter enabled, will respond to http://", prom_endpoint, "/metrics\n");
+        if (read_only)
+                Print("> Read-Only mode; some functionality/APIs will be unavailable\n");
         Print("(C) Phaistos Networks, S.A. - ", ansifmt::color_green, "http://phaistosnetworks.gr/", ansifmt::reset, ". Licensed under the Apache License\n");
 
         if (topics.empty()) {
@@ -5304,6 +5382,7 @@ int Service::start(int argc, char **argv) {
                                                         Print("WARNING: unable to set socket send buffer size:", strerror(errno), "\n");
                                         }
 
+                                        c->addr4     = *reinterpret_cast<const uint32_t *>(&sa.sin_addr.s_addr);
                                         c->fd        = newFd;
                                         c->replicaId = 0;
                                         switch_dlist_init(&c->connectionsList);
@@ -5374,6 +5453,7 @@ int Service::start(int argc, char **argv) {
                                                 if (trace)
                                                         SLog("Failed:", strerror(errno), "\n");
 
+						track_shutdown(c, __LINE__, "read() failed: ", strerror(errno), "\n");
                                                 shutdown(c, __LINE__);
                                                 continue;
                                         }
@@ -5592,6 +5672,7 @@ int Service::start(int argc, char **argv) {
 
                                                         if (unlikely(msgLen > 256 * 1024 * 1024)) {
                                                                 Print("** TOO large incoming packet of length ", size_repr(msgLen), "\n");
+								track_shutdown(c, __LINE__, "Too large incoming packet of length ", msgLen, "\n");
                                                                 shutdown(c, __LINE__);
                                                                 goto nextEvent;
                                                         }
@@ -5704,5 +5785,7 @@ topic *Service::topic_by_name(const strwlen8_t name) const {
 }
 
 int main(int argc, char *argv[]) {
+	init_log();
+
         return Service{}.start(argc, argv);
 }

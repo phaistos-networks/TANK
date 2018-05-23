@@ -1,5 +1,6 @@
 HOST:=$(shell hostname)
 
+
 ifeq ($(HOST), origin)
 # When building on our dev.system
 	include /home/system/Development/Switch/Makefile.dfl

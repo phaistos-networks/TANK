@@ -218,7 +218,8 @@ class TankClient final {
                         BoundaryCheck,
                         InvalidReq,
                         SystemFail,
-                        AlreadyExists
+                        AlreadyExists,
+			NotAllowed,
                 } type;
 
                 enum class Req : uint8_t {
