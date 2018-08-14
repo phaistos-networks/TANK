@@ -387,7 +387,7 @@ int main(int argc, char *argv[]) {
                         }
 
                         for (const auto &it : tankClient.consumed()) {
-                                if (drainAndExit && it.msgs.empty() && minFetchSize <= it.next.minFetchSize) {
+                                if (drainAndExit && it.msgs.empty() && minFetchSize >= it.next.minFetchSize) {
                                         // Drained if we got no message in the response, and if the size we specified
                                         // is <= next.minFetchSize. This is important because we could get no messages
                                         // because the message is so large the minFetchSize we provided for the request was too low
