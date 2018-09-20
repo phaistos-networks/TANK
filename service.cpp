@@ -332,8 +332,9 @@ static bool adjust_range_start(lookup_res &res, const uint64_t absSeqNum) {
                 const bool sparseBundleBitSet  = bundleFlags & (1u << 6);
                 uint32_t   msgSetSize          = (bundleFlags >> 2) & 0xf;
 
-                if (!msgSetSize)
+                if (!msgSetSize) {
                         msgSetSize = Compression::UnpackUInt32(p);
+                }
 
                 if (sparseBundleBitSet) {
                         const auto firstMsgSeqNum = *(uint64_t *)p;
@@ -345,12 +346,14 @@ static bool adjust_range_start(lookup_res &res, const uint64_t absSeqNum) {
                                 lastMsgSeqNum = firstMsgSeqNum;
                         }
 
-                        if (trace)
+                        if (trace) {
                                 SLog("sparseBundleBitSet, firstMsgSeqNum = ", firstMsgSeqNum, ", lastMsgSeqNum, ", lastMsgSeqNum, "\n");
+                        }
 
                         firstBundleIsSparse = true;
-                } else
+                } else {
                         firstBundleIsSparse = false;
+                }
 
                 const auto nextBundleBaseSeqNum = sparseBundleBitSet ? lastMsgSeqNum + 1 : baseSeqNum + msgSetSize;
 
@@ -367,7 +370,7 @@ static bool adjust_range_start(lookup_res &res, const uint64_t absSeqNum) {
                 } else {
                         // Our target is in this bundle
                         if (trace)
-                                SLog("Target in this bundle(", o, ")\n");
+                                SLog("Target in this bundle(offset ", o, ")\n");
 
                         res.fileOffset    = o;
                         res.absBaseSeqNum = baseSeqNum;
@@ -1391,9 +1394,9 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
                         SLog("maxSize == 0\n");
 
                 return {lookup_res::Fault::Empty, highWatermark};
-        } else 
+        } else
 #endif
-	if (maxAbsSeqNum < absSeqNum) {
+        if (maxAbsSeqNum < absSeqNum) {
                 // Should be handled by the client
                 if (trace)
                         SLog("Past maxAbsSeqNum = ", maxAbsSeqNum, "\n");
@@ -1421,7 +1424,7 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
         } else if (absSeqNum >= cur.baseSeqNum) {
                 // Great, definitely in the current segment
                 if (trace)
-                        SLog("absSeqNum >= cur.baseSeqNum(", cur.baseSeqNum, "). Will get from current\n");
+                        SLog("absSeqNum(", absSeqNum, ") >= cur.baseSeqNum(", cur.baseSeqNum, "). Will get from current\n");
 
                 return read_cur(absSeqNum, maxSize, maxAbsSeqNum);
         }
@@ -3278,7 +3281,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                 }
 
                                 if (trace)
-                                        SLog("> REQUEST FOR partition ", partitionId, ", absSeqNum ", absSeqNum, ", fetchSize ", fetchSize, "\n");
+                                        SLog("> REQUEST FOR partition ", partitionId, ", absSeqNum ", absSeqNum, ", fetchSize ", fetchSize, " firstAvailableSeqNum = ", partition->log_->firstAvailableSeqNum, ", lastAssignedSeqNum = ", partition->log_->lastAssignedSeqNum, "\n");
 
                                 if (absSeqNum == UINT64_MAX) {
                                         // Fetch starting from whatever bundles are commited from now on
@@ -3304,11 +3307,21 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                                         start               = Timings::Microseconds::Tick();
                                                         firstBundleIsSparse = adjust_range_start(res, absSeqNum);
                                                         range.Set(res.fileOffset, fetchSize);
-                                                        if (range.stop() > res.fileOffsetCeiling)
+
+                                                        if (trace) {
+                                                                SLog(ansifmt::bold, ansifmt::color_green, "Initial range ", range, ansifmt::reset, " for ", absSeqNum, "\n");
+                                                        }
+
+                                                        if (range.stop() > res.fileOffsetCeiling) {
                                                                 range.SetEnd(res.fileOffsetCeiling);
 
-                                                        if (trace)
+                                                                if (trace)
+                                                                        SLog("Adjuted to ", range, "\n");
+                                                        }
+
+                                                        if (trace) {
                                                                 SLog(ansifmt::bold, "Response:(baseSeqNum = ", res.absBaseSeqNum, ", range ", range, ", firstBundleIsSparse = ", firstBundleIsSparse, ")", ansifmt::reset, "\n");
+							}
 
                                                         if (firstBundleIsSparse) {
                                                                 // Set special errorOrFlags to let the client know that we are not going to encode here the seq.num of the first msg of the first bundle, because
@@ -3379,9 +3392,11 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                                         respHeader->Serialize(res.absBaseSeqNum);
                                                         respHeader->Serialize(hwMark);
                                                         respHeader->Serialize(uint32_t(0));
-							if (trace) {
-								SLog("EMPTY\n");
-							}
+
+                                                        if (trace) {
+                                                                SLog("EMPTY\n");
+                                                        }
+
                                                         respondNow = true;
                                                         break;
 
@@ -3394,9 +3409,11 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                                                 // Only for this specific fault
                                                                 respHeader->Serialize<uint64_t>(partition->log_->firstAvailableSeqNum);
                                                         }
-							if (trace) {
-								SLog("Boundary Check\n");
-							}
+
+                                                        if (trace) {
+                                                                SLog("Boundary Check\n");
+                                                        }
+
                                                         respondNow = true;
                                                         break;
                                         }
@@ -3406,7 +3423,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
 
                 if (trace) {
                         SLog("respondNow = ", respondNow, ", maxWait = ", maxWait, "\n");
-		}
+                }
 
                 // TODO(markp): https://github.com/phaistos-networks/TANK/issues/17#issuecomment-236106945
                 // (don't respond even if we have any data, amount >= minBytes)
