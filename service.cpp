@@ -3196,13 +3196,14 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                 const auto                  requestId     = decode_pod<uint32_t>(p);
                 const strwlen8_t            clientId(reinterpret_cast<const char *>(p) + 1, *p);
                 p += clientId.size() + sizeof(uint8_t);
-                // if we don't get any data within `maxWait`ms, we 'll return nothing for the requested partitions
                 const auto maxWait   = normalized_max_wait(decode_pod<uint64_t>(p));
                 const auto minBytes  = Min<uint32_t>(decode_pod<uint32_t>(p), 128 * 1024 * 1024); // keep it sane
                 const auto topicsCnt = *p++;
+                // if we don't get any data within `maxWait`ms, we 'll return nothing for the requested partitions
 
-                if (trace)
+                if (trace) {
                         SLog(ansifmt::bold, ansifmt::color_magenta, "New COSNUME request for topicsCnt = ", topicsCnt, ansifmt::reset, "\n");
+		}
 
                 respHeader->Serialize(uint8_t(TankAPIMsgType::Consume));
                 const auto sizeOffset = respHeader->size();
@@ -3215,18 +3216,15 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                 respHeader->Serialize(requestId);
                 respHeader->Serialize(topicsCnt);
 
-                auto     q = c->outQ;
-                size_t   sum{0};
-                uint32_t patchListSize{0};
-                uint8_t  patchIndices[256];
+                size_t      sum{0};
+                uint32_t    patchListSize{0};
+                uint8_t     patchIndices[256];
+                auto *const q             = c->outQ ?: (c->outQ = get_outgoing_queue());
+                const auto  qSize         = q->size();
+                auto *const headerPayload = q->push_back(respHeader);
 
                 // TODO(markp): https://github.com/phaistos-networks/TANK/issues/12
                 patchList[0].offset = 0;
-                if (!q)
-                        q = c->outQ = get_outgoing_queue();
-
-                const auto  qSize         = q->size();
-                auto *const headerPayload = q->push_back(respHeader);
 
                 deferList.clear();
 
@@ -3236,16 +3234,18 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                         const auto partitionsCnt = *p++;
                         auto       topic         = topic_by_name(topicName);
 
-                        if (trace)
+                        if (trace) {
                                 SLog("topic [", topicName, "]\n");
+			}
 
                         respHeader->Serialize(topicName.len);
                         respHeader->Serialize(topicName.p, topicName.len);
                         respHeader->Serialize(partitionsCnt);
 
                         if (!topic) {
-                                if (trace)
+                                if (trace) {
                                         SLog("Unknown topic [", topicName, "]\n");
+				}
 
                                 p += (sizeof(uint16_t) + sizeof(uint64_t) + sizeof(uint32_t)) * partitionsCnt;
                                 // Absuse scheme so that we won't have another field for this fault
@@ -3255,8 +3255,9 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                 continue;
                         }
 
-                        if (trace)
+                        if (trace) {
                                 SLog(partitionsCnt, " for topic [", topicName, "]\n");
+			}
 
                         for (uint32_t k{0}; k != partitionsCnt; ++k) {
                                 const auto partitionId = decode_pod<uint16_t>(p);
@@ -3272,16 +3273,19 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                 respHeader->Serialize(partitionId);
 
                                 if (!partition) {
-                                        if (trace)
+                                        if (trace) {
                                                 SLog("Undefined partition ", partitionId, "\n");
+					}	
 
                                         respHeader->Serialize(uint8_t(0xff));
                                         respondNow = true;
                                         continue;
                                 }
 
-                                if (trace)
-                                        SLog("> REQUEST FOR partition ", partitionId, ", absSeqNum ", absSeqNum, ", fetchSize ", fetchSize, " firstAvailableSeqNum = ", partition->log_->firstAvailableSeqNum, ", lastAssignedSeqNum = ", partition->log_->lastAssignedSeqNum, "\n");
+                                if (trace) {
+                                        SLog("> REQUEST FOR partition ", partitionId, ", absSeqNum ", absSeqNum, 
+						", fetchSize ", fetchSize, " firstAvailableSeqNum = ", partition->log_->firstAvailableSeqNum, ", lastAssignedSeqNum = ", partition->log_->lastAssignedSeqNum, "\n");
+				}
 
                                 if (absSeqNum == UINT64_MAX) {
                                         // Fetch starting from whatever bundles are commited from now on
@@ -3329,8 +3333,10 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                                                 // in the bundle header anyway
                                                                 respHeader->Serialize(uint8_t(0xfe)); // errorOrFlags
 
-                                                                if (trace)
+                                                                if (trace) {
                                                                         SLog("Setting errorOrFlags to 0xfe\n");
+								}
+
                                                         } else {
                                                                 respHeader->Serialize(uint8_t(0));        // errorOrFlags
                                                                 respHeader->Serialize(res.absBaseSeqNum); // absolute first seq.num of the first message of the first bundle in the streamed chunk
@@ -3361,8 +3367,9 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
 
                                                                 readahead(res.fdh->fd, range.offset, range.len);
 
-                                                                if (trace)
+                                                                if (trace) {
                                                                         SLog("Took ", duration_repr(Timings::Microseconds::Since(b)), " for readahead(", range, ") ", size_repr(range.len), "\n");
+								}
                                                         }
 #endif
 
@@ -3375,8 +3382,9 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                                         break;
 
                                                 case lookup_res::Fault::AtEOF: {
-                                                        if (trace)
+                                                        if (trace) {
                                                                 SLog("Got AtEOF; will wait\n");
+							}
 
                                                         const auto l = respHeader->size();
 
@@ -3434,8 +3442,9 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                         uint32_t   extra{0};
                         const auto n = deferList.size();
 
-                        if (trace)
+                        if (trace) {
                                 SLog("Responding now, n = ", deferList.size(), "\n");
+			}
 
                         patchList[patchListSize++].SetEnd(respHeader->size());
 
@@ -3456,8 +3465,9 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                         *reinterpret_cast<uint32_t *>(respHeader->At(sizeOffset))       = respHeader->size() - sizeOffset - sizeof(uint32_t) + sum + extra;
                         *reinterpret_cast<uint32_t *>(respHeader->At(headerSizeOffset)) = respHeader->size() - headerSizeOffset - sizeof(uint32_t) + extra;
 
-                        if (trace)
+                        if (trace) {
                                 SLog("respHeader.length = ", respHeader->size(), " ", *(uint32_t *)respHeader->At(sizeOffset), "\n");
+			}
 
                         headerPayload->set_iov(patchList, patchListSize);
                         return try_send_ifnot_blocked(c);
@@ -3465,26 +3475,30 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                         // Can't respond; we 'll need to wait until we have any data for any of those
                         // topic/partitions first
 
-                        if (trace)
+                        if (trace) {
                                 SLog("Cannot respond yet (", q->size(), ", ", qSize, ")\n");
+			}
 
                         while (q->size() != qSize) {
                                 auto &p = q->back();
 
-                                if (trace)
+                                if (trace) {
                                         SLog("Dropping payload ", p.payloadBuf, "\n");
+				}
 
-                                if (p.payloadBuf)
+                                if (p.payloadBuf) {
                                         put_buffer(p.buf);
-                                else
+				} else {
                                         p.file_range.fdh->Release();
+				}
 
                                 q->pop_back();
                         }
 
                         if (q->empty()) {
-                                if (trace)
+                                if (trace) {
                                         SLog("No longer needed outQ\n");
+				}
 
                                 put_outgoing_queue(q);
                                 c->outQ = nullptr;
@@ -3493,8 +3507,9 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                         return register_consumer_wait(c, requestId, maxWait, minBytes, deferList.data(), deferList.size());
                 }
         } catch (const std::exception &e) {
-                if (trace)
+                if (trace) {
                         SLog("Cought exception:", e.what(), "\n");
+		}
 
                 track_shutdown(c, __LINE__, "Exception thrown:", e.what(), "\n");
                 return shutdown(c, __LINE__);
