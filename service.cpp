@@ -1382,13 +1382,18 @@ lookup_res topic_partition_log::range_for(uint64_t absSeqNum, const uint32_t max
 
         const auto highWatermark = lastAssignedSeqNum;
 
+#if 0
+	// we no longer do this
+	// this was kind of silly
         if (maxSize == 0) {
                 // Should be handled by the client
                 if (trace)
                         SLog("maxSize == 0\n");
 
                 return {lookup_res::Fault::Empty, highWatermark};
-        } else if (maxAbsSeqNum < absSeqNum) {
+        } else 
+#endif
+	if (maxAbsSeqNum < absSeqNum) {
                 // Should be handled by the client
                 if (trace)
                         SLog("Past maxAbsSeqNum = ", maxAbsSeqNum, "\n");
@@ -3374,6 +3379,9 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                                         respHeader->Serialize(res.absBaseSeqNum);
                                                         respHeader->Serialize(hwMark);
                                                         respHeader->Serialize(uint32_t(0));
+							if (trace) {
+								SLog("EMPTY\n");
+							}
                                                         respondNow = true;
                                                         break;
 
@@ -3386,6 +3394,9 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                                                 // Only for this specific fault
                                                                 respHeader->Serialize<uint64_t>(partition->log_->firstAvailableSeqNum);
                                                         }
+							if (trace) {
+								SLog("Boundary Check\n");
+							}
                                                         respondNow = true;
                                                         break;
                                         }
@@ -3393,12 +3404,13 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                         }
                 }
 
-                if (trace)
+                if (trace) {
                         SLog("respondNow = ", respondNow, ", maxWait = ", maxWait, "\n");
+		}
 
                 // TODO(markp): https://github.com/phaistos-networks/TANK/issues/17#issuecomment-236106945
                 // (don't respond even if we have any data, amount >= minBytes)
-                if (respondNow || maxWait == 0) {
+                if (respondNow || 0 == maxWait) {
                         // - fetch request does not want to wait
                         // - fetch request does not require any data, or we already have some data to provide to the client
                         // - one or more errors were generated
