@@ -32,7 +32,7 @@ bool TankClient::should_poll() const noexcept {
         if (trace)
                 SLog(connectionAttempts.size(), " ", pendingConsumeReqs.size(), " ", pendingProduceReqs.size(), " ", pendingCtrlReqs.size(), "\n");
 
-        return !connectionAttempts.empty() || !pendingConsumeReqs.empty() || !pendingProduceReqs.empty() || !pendingCtrlReqs.empty();
+        return  !connectionAttempts.empty() || !pendingConsumeReqs.empty() || !pendingProduceReqs.empty() || !pendingCtrlReqs.empty();
 }
 
 void TankClient::wait_scheduled(const uint32_t reqID) {
@@ -42,7 +42,7 @@ void TankClient::wait_scheduled(const uint32_t reqID) {
                 poll(1e3);
 
                 if (unlikely(faults().size())) {
-#if 1
+#if 0
                         for (const auto &it : faults())
                                 SLog("Fault ", unsigned(it.type), "\n");
 #endif
@@ -169,6 +169,7 @@ void TankClient::reset() {
         capturedFaults.clear();
         produceAcks.clear();
         discoverPartitionsResults.clear();
+	reload_conf_results_v.clear();
         createdTopicsResults.clear();
         consumptionList.clear();
         consumeOut.clear();
@@ -857,10 +858,46 @@ uint32_t TankClient::create_topic(const strwlen8_t topic, const uint16_t totPart
 
         *reinterpret_cast<uint32_t *>(b.At(lenOffset)) = b.size() - lenOffset - sizeof(uint32_t);
 
-        if (!try_transmit(bs))
+        if (!try_transmit(bs)) {
                 return 0;
-        else
+	} else {
                 return clientReqId;
+	}
+}
+
+uint32_t TankClient::reload_partition_conf(const strwlen8_t topic, const uint16_t partition) {
+        auto       bs            = broker_state(defaultLeader);
+        auto       payload       = get_payload();
+        auto &     b             = *payload->b;
+        const auto client_req_id = ids_tracker.client.next++;
+        const auto req_id        = ids_tracker.leader_reqs.next++;
+
+        b.Serialize(uint8_t(TankAPIMsgType::ReloadConf));
+        const auto lenOffset = b.size();
+        b.RoomFor(sizeof(uint32_t));
+
+        b.Serialize<uint32_t>(req_id);
+        b.Serialize(topic.size());
+        b.Serialize(topic.data(), topic.size());
+        b.pack(partition);
+
+        payload->iov[0] = {(void *)b.data(), b.size()};
+        payload->iovCnt = 1;
+
+        bs->reqs_tracker.pendingCtrl.insert(req_id);
+        payload->flags = (1u << uint8_t(outgoing_payload::Flags::ReqIsIdempotent)) | (1u << uint8_t(outgoing_payload::Flags::ReqMaybeRetried));
+        bs->outgoing_content.push_back(payload);
+
+        pendingCtrlReqs.Add(req_id, {client_req_id, payload, nowMS});
+        track_inflight_req(req_id, nowMS, TankAPIMsgType::ReloadConf);
+
+        *reinterpret_cast<uint32_t *>(b.At(lenOffset)) = b.size() - lenOffset - sizeof(uint32_t);
+
+        if (!try_transmit(bs)) {
+                return 0;
+        } else {
+                return client_req_id;
+        }
 }
 
 uint32_t TankClient::discover_partitions(const strwlen8_t topic) {
@@ -891,10 +928,11 @@ uint32_t TankClient::discover_partitions(const strwlen8_t topic) {
 
         *reinterpret_cast<uint32_t *>(b.At(lenOffset)) = b.size() - lenOffset - sizeof(uint32_t);
 
-        if (!try_transmit(bs))
+        if (!try_transmit(bs)) {
                 return 0;
-        else
+        } else {
                 return clientReqId;
+	}
 }
 
 bool TankClient::consume_from_leader(const uint32_t clientReqId, const Switch::endpoint leader, const consume_ctx *const from, const size_t total, const uint64_t maxWait, const uint32_t minSize) {
@@ -1020,6 +1058,7 @@ void TankClient::flush_broker(broker *const bs) {
                 capturedFaults.push_back({info.clientReqId, fault::Type::Network, fault::Req::Consume, {}, 0});
         }
         bs->reqs_tracker.pendingConsume.clear();
+
 
         for (const auto id : bs->reqs_tracker.pendingCtrl) {
                 forget_inflight_req(id, TankAPIMsgType::DiscoverPartitions); // XXX: proper type?
@@ -1231,7 +1270,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
         // if broker reports that it is no longer the leader for (topic, broker), we need to retain
         // reqInfo.payload and reqInfo.ctx, and retry with that node instead
         ack_payload(bs, reqInfo.reqPayload);
-        Defer({ free(reqInfo.ctx); });
+        DEFER({ free(reqInfo.ctx); });
 
         c->state.flags |= (1u << uint8_t(connection::State::Flags::LockedInputBuffer));
 
@@ -1343,6 +1382,58 @@ bool TankClient::process_create_topic(connection *const c, const uint8_t *const 
 
                 default:
                         createdTopicsResults.push_back({clientReqId, topicName});
+                        break;
+        }
+
+        return true;
+}
+
+bool TankClient::process_reload_conf(connection *const c, const uint8_t *content, [[maybe_unused]] const size_t len) {
+        const uint8_t *p             = content;
+        const auto     bs            = c->bs;
+        const auto     req_id        = decode_pod<uint32_t>(p);
+        const auto     res           = pendingCtrlReqs.detach(req_id);
+        const auto     req_info      = res.value();
+        const auto     client_req_id = req_info.clientReqId;
+        str_view8      topic_name;
+
+        ack_payload(bs, req_info.reqPayload);
+        bs->reqs_tracker.pendingCtrl.erase(req_id);
+        forget_inflight_req(req_id, TankAPIMsgType::ReloadConf);
+
+        topic_name.set(reinterpret_cast<const char *>(p) + 1, *p);
+        p += topic_name.size() + sizeof(uint8_t);
+
+        const auto partition = decode_pod<uint16_t>(p);
+        const auto opres     = decode_pod<uint8_t>(p);
+
+        switch (opres) {
+                case 0:
+                        reload_conf_results_v.emplace_back(reload_conf_result{
+                            client_req_id,
+                            resultsAllocator.make_copy(topic_name),
+                            partition,
+                        });
+                        break;
+
+                case 1:
+                        capturedFaults.push_back({client_req_id, fault::Type::UnknownTopic, fault::Req::Ctrl, resultsAllocator.make_copy(topic_name), 0});
+                        break;
+
+                case 10:
+                        capturedFaults.push_back({client_req_id, fault::Type::UnknownPartition, fault::Req::Ctrl, resultsAllocator.make_copy(topic_name), partition});
+                        break;
+
+                case 2:
+                        capturedFaults.push_back({client_req_id, fault::Type::SystemFail, fault::Req::Ctrl, resultsAllocator.make_copy(topic_name), partition});
+                        break;
+
+                case 3:
+                        capturedFaults.push_back({client_req_id, fault::Type::InvalidReq, fault::Req::Ctrl, resultsAllocator.make_copy(topic_name), partition});
+                        break;
+
+                default:
+                        IMPLEMENT_ME();
                         break;
         }
 
@@ -1887,6 +1978,9 @@ bool TankClient::process(connection *const c, const uint8_t msg, const uint8_t *
                 case TankAPIMsgType::DiscoverPartitions:
                         return process_discover_partitions(c, content, len);
 
+		case TankAPIMsgType::ReloadConf:
+			return process_reload_conf(c, content, len);
+
                 case TankAPIMsgType::CreateTopic:
                         return process_create_topic(c, content, len);
 
@@ -2221,6 +2315,7 @@ void TankClient::poll(uint32_t timeoutMS) {
         capturedFaults.clear();
         produceAcks.clear();
         discoverPartitionsResults.clear();
+	reload_conf_results_v.clear();
         createdTopicsResults.clear();
 
         // it is important that we update_time_cache() here before we invoke reschedule_any() and right after Poll()

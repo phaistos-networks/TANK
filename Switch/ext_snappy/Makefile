@@ -1,8 +1,7 @@
-all:  libsnappy.a
+all:  lib
 
-libsnappy.a: snappy.o snappy-sinksource.o snappy-stubs-internal.o
+lib: snappy.o snappy-sinksource.o snappy-stubs-internal.o
 	ar rc libsnappy.a snappy.o snappy-sinksource.o snappy-stubs-internal.o
-
 
 .o : .cpp
 

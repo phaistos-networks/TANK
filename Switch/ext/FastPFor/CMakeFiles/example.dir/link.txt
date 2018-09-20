@@ -1,0 +1,1 @@
+/usr/bin/c++   -Wall -Wcast-align -Ofast -lm  -DNDEBUG -std=c++11 -DHAVE_CXX0X -march=native   CMakeFiles/example.dir/example.cpp.o  -o example -rdynamic libFastPFor.a 

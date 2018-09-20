@@ -10,7 +10,9 @@
 #include <sys/mman.h>
 #include <sys/sendfile.h>
 #include <thread.h>
-#include <ext/flat_hash_map.h>
+#include <unordered_map>
+#include <ext/ebtree/eb64tree.h>
+#include <thread>
 
 // The index is sparse, so we need to be able to locate the _last_ index entry for relative sequence number <= targetRelativeSeqNumber
 // so that we can either
@@ -42,12 +44,12 @@ namespace std {
         }
 } // namespace std
 
-struct index_record {
+struct index_record final {
         uint32_t relSeqNum;
         uint32_t absPhysical;
 };
 
-struct ro_segment_lookup_res {
+struct ro_segment_lookup_res final {
         index_record record;
         uint32_t     span;
 };
@@ -75,7 +77,7 @@ struct fd_handle
 // while the compaction is in progess, we won't delete any of those segments passed to the thread (i.e in consider_ro_segments() )
 // For now, we can return immediately from consider_ro_segments() if compaction is scheduled for the partition, and later we can
 // do this properly.
-struct ro_segment {
+struct ro_segment final {
         // the absolute sequence number of the first message in this segment
         const uint64_t baseSeqNum;
         // the absolute sequence number of the last message in this segment
@@ -141,13 +143,23 @@ struct ro_segment {
         }
 };
 
-struct append_res {
+struct eb64_node_ctx final {
+        enum class ContainerType : uint8_t {
+                Connection,
+                WaitCtx,
+		CleanupTracker
+        } type;
+
+        eb64_node node;
+};
+
+struct append_res final {
         Switch::shared_refptr<fd_handle> fdh;
         range32_t                        dataRange;
         range_base<uint64_t, uint16_t>   msgSeqNumRange;
 };
 
-struct lookup_res {
+struct lookup_res final {
         enum class Fault : uint8_t {
                 NoFault = 0,
                 Empty,
@@ -197,7 +209,7 @@ enum class CleanupPolicy : uint8_t {
         CLEANUP
 };
 
-struct partition_config {
+struct partition_config final {
         // Kafka defaults
         size_t        roSegmentsCnt{0};
         uint64_t      roSegmentsSize{0};
@@ -222,7 +234,7 @@ static void PrintImpl(Buffer &out, const lookup_res &res) {
 
 // An append-only log for storing bundles, divided into segments
 struct topic_partition;
-struct topic_partition_log {
+struct topic_partition_log final {
         // The first available absolute sequence number across all segments
         uint64_t firstAvailableSeqNum;
 
@@ -367,20 +379,20 @@ struct topic_partition;
 // In order to support minBytes semantics, we will
 // need to track produced data for each tracked topic partition, so that
 // we will be able to flush once we can satisfy the minBytes semantics
-struct wait_ctx_partition {
+struct wait_ctx_partition final {
         fd_handle *      fdh;
         uint64_t         seqNum;
         range32_t        range;
         topic_partition *partition;
 };
 
-struct wait_ctx {
+struct wait_ctx final {
         connection * c;
         bool         scheduledForDtor;
         uint32_t     requestId;
-        switch_dlist list, expList;
-        uint64_t     expiration; // in MS
-        uint32_t     minBytes;
+        switch_dlist list;
+        eb64_node_ctx exp_tree_node;
+        uint32_t minBytes;
 
         // A request may involve multiple partitions
         // minBytes applies to the sum of all captured content for all specified partitions
@@ -400,7 +412,7 @@ struct topic_partition
         partition_config config;
 
         // for foreach_msg()
-        struct msg {
+        struct msg final {
                 uint64_t    seqNum;
                 uint64_t    ts;
                 strwlen8_t  key;
@@ -434,7 +446,7 @@ struct topic_partition
 
         // this node may or may not be a replica for this partition
         std::unique_ptr<topic_partition_log>                         log_;
-        ska::flat_hash_map<uint16_t, Switch::shared_refptr<replica>> replicasMap;
+        std::unordered_map<uint16_t, Switch::shared_refptr<replica>> replicasMap;
         Switch::vector<replica *>                                    insyncReplicas;
         Switch::vector<wait_ctx *>                                   waitingList;
 
@@ -467,8 +479,8 @@ struct topic
         partition_config                   partitionConf;
 
         // for Prometheus metrics
-        struct metrics_struct {
-                struct latency_struct {
+        struct metrics_struct final {
+                struct latency_struct final {
                         // inline is handy here
                         static inline constexpr uint32_t histogram_scale[]{1, 2, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 65, 75, 85, 95, 100, 110, 120, 130, 140, 150, 200, 250, 300, 350, 400, 450, 500};
                         uint64_t                         hist_buckets[sizeof_array(histogram_scale)] = {0};
@@ -523,8 +535,9 @@ struct topic
         }
 
         ~topic() {
-                if (auto *const p = const_cast<char *>(name_.p))
+                if (auto *const p = const_cast<char *>(name_.p)) {
                         free(p);
+		}
 
                 if (partitions_) {
                         while (partitions_->size()) {
@@ -540,25 +553,26 @@ struct topic
                 p->owner = this;
                 partitions_->push_back(p);
 
-                std::sort(partitions_->begin(), partitions_->end(), [](const auto a, const auto b) {
+                std::sort(partitions_->begin(), partitions_->end(), [](const auto a, const auto b) noexcept {
                         return a->idx < b->idx;
                 });
 
-                require(partitions_->back()->idx == partitions_->size() - 1);
+                EXPECT(partitions_->back()->idx == partitions_->size() - 1);
         }
 
         void register_partitions(topic_partition **const all, const size_t n) {
                 for (uint32_t i{0}; i != n; ++i) {
-                        require(all[i]);
+                        EXPECT(all[i]);
+
                         all[i]->owner = this;
                         partitions_->push_back(all[i]);
                 }
 
-                std::sort(partitions_->begin(), partitions_->end(), [](const auto a, const auto b) {
+                std::sort(partitions_->begin(), partitions_->end(), [](const auto a, const auto b) noexcept{
                         return a->idx < b->idx;
                 });
 
-                require(partitions_->back()->idx == partitions_->size() - 1);
+                EXPECT(partitions_->back()->idx == partitions_->size() - 1);
         }
 
         const topic_partition *partition(const uint16_t idx) const {
@@ -579,7 +593,7 @@ struct topic
 
 // We could have used Switch::deque<> but let's just use something simpler
 // TODO: Maybe we should just use a linked list instead
-struct outgoing_queue {
+struct outgoing_queue final {
         struct content_file_range {
                 fd_handle *fdh;
                 range32_t  range;
@@ -809,15 +823,16 @@ struct outgoing_queue {
         }
 };
 
-struct connection {
+struct connection final {
         int       fd;
         IOBuffer *inB{nullptr};
 
-	uint32_t addr4;
+        uint32_t addr4;
 
         // May have an attached outgoing queue
         outgoing_queue *outQ{nullptr};
 
+        // all active wait_ctx's
         switch_dlist connectionsList, waitCtxList;
 
         // This is initialized to(0) for clients, but followers are expected to
@@ -859,12 +874,14 @@ class Service final {
                 Clustered
         } opMode{OperationMode::Standalone};
         Switch::vector<wait_ctx *>                                   waitCtxPool[255];
-        ska::flat_hash_map<strwlen8_t, Switch::shared_refptr<topic>> topics;
-        uint16_t                                                     selfBrokerId{1};
+        std::unordered_map<strwlen8_t, Switch::shared_refptr<topic>> topics;
         Switch::vector<IOBuffer *>                                   bufs;
         Switch::vector<connection *>                                 connsPool;
         Switch::vector<outgoing_queue *>                             outgoingQueuesPool;
-        switch_dlist                                                 allConnections, waitExpList;
+        switch_dlist                                                 allConnections;
+        eb_root  timers_ebtree_root;
+        uint64_t timers_ebtree_next;
+	eb64_node_ctx cleanup_tracker;
         // In the past, it was possible, however improbably, that
         // we 'd invoke destroy_wait_ctx() twice on the same context, or would otherwise
         // use or re-use the same context while it was either invalid, or was reused
@@ -881,10 +898,14 @@ class Service final {
         Switch::vector<wait_ctx *>        expiredCtxList, expiredCtxList2, expiredCtxList3, waitCtxDeferredGC;
         uint32_t                          nextDistinctPartitionId{0};
         int                               listenFd, prom_listen_fd{-1};
+        std::atomic<bool>                 sleeping alignas(64){false};
         EPoller                           poller;
+        pthread_t                         main_thread_id;
+        std::unique_ptr<std::thread>      sync_thread;
         Switch::vector<topic_partition *> deferList;
         range32_t                         patchList[1024];
         time_t                            curTime;
+        uint64_t                          now_ms;
 
       private:
         static void parse_partition_config(const char *, partition_config *);
@@ -968,6 +989,8 @@ class Service final {
                 return nullptr;
         }
 
+	bool process_load_conf(connection *, const uint8_t *, const size_t);
+
         bool process_consume(connection *const c, const uint8_t *p, const size_t len);
 
         bool process_replica_reg(connection *const c, const uint8_t *p, const size_t len);
@@ -977,15 +1000,28 @@ class Service final {
         bool process_create_topic(connection *const c, const uint8_t *p, const size_t len);
 
         wait_ctx *get_waitctx(const uint8_t totalPartitions) {
-                if (waitCtxPool[totalPartitions].size())
+                if (waitCtxPool[totalPartitions].size()) {
                         return waitCtxPool[totalPartitions].Pop();
-                else
-                        return (wait_ctx *)malloc(sizeof(wait_ctx) + totalPartitions * sizeof(wait_ctx_partition));
+                } else {
+                        return reinterpret_cast<wait_ctx *>(malloc(sizeof(wait_ctx) + totalPartitions * sizeof(wait_ctx_partition)));
+                }
         }
 
         void put_waitctx(wait_ctx *const ctx) {
                 waitCtxPool[ctx->partitionsCnt].push_back(ctx);
         }
+
+	bool process_pending_signals(uint64_t);
+
+	void drain_pubsub_queue();
+
+        void fire_timer(eb64_node_ctx *);
+
+        bool cancel_timer(eb64_node *);
+
+        void register_timer(eb64_node *);
+
+        void process_timers(const uint64_t);
 
         bool register_consumer_wait(connection *const c, const uint32_t requestId, const uint64_t maxWait, const uint32_t minBytes, topic_partition **const partitions, const uint32_t totalPartitions);
 
@@ -1008,8 +1044,9 @@ class Service final {
         bool try_send_ifnot_blocked(connection *const c) {
                 if (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail)))
                         return true;
-                else
+                else {
                         return try_send(c);
+                }
         }
 
         void poll_outavail(connection *);
@@ -1020,6 +1057,24 @@ class Service final {
 
         bool try_send(connection *const c);
 
+        int try_accept(int);
+
+        int try_accept_prom(int);
+
+        bool try_recv_prom(connection *);
+
+        bool try_recv_tank(connection *);
+
+        bool try_recv(connection *);
+
+        int process_io(const int);
+
+	void wakeup_reactor();
+
+        int reactor_main();
+	
+	int verify(char **, const int);
+
       protected:
         static void rebuild_index(int, int);
 
@@ -1027,10 +1082,21 @@ class Service final {
 
         static void verify_index(int, const bool);
 
+	public:
+	void maybe_wakeup_reactor();
+
+	void schedule_cleanup();
+
+      public:
+        static inline std::atomic<uint64_t> pending_signals{0};
+
       public:
         Service() {
                 switch_dlist_init(&allConnections);
-                switch_dlist_init(&waitExpList);
+
+                memset(&timers_ebtree_root, 0, sizeof(timers_ebtree_root));
+                timers_ebtree_next        = std::numeric_limits<uint64_t>::max();
+                cleanup_tracker.type      = eb64_node_ctx::ContainerType::CleanupTracker;
         }
 
         ~Service();

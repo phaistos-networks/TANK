@@ -152,7 +152,7 @@ int main(int argc, char *argv[]) {
                                 Print("-S bytes: set tank client's socket send buffer size\n");
                                 Print("-R bytes: set tank client's socket receive buffer size\n");
                                 Print("-v : enable verbose output\n");
-                                Print("Commands available: consume, produce, benchmark, discover_partitions, mirror, create_topic\n");
+                                Print("Commands available: consume, produce, benchmark, discover_partitions, mirror, create_topic, reload_config\n");
                                 return 0;
 
                         default:
@@ -824,6 +824,27 @@ int main(int argc, char *argv[]) {
                                                 pending.push_back(p);
                                         }
                                 }
+                        }
+                }
+
+                return 0;
+	} else if (cmd.BeginsWith(_S("reload_conf"))) {
+		const auto req_id= tankClient.reload_partition_conf(topicPartition.first, topicPartition.second);
+
+		if (!req_id) {
+			Print("Unable to schedule partition configuration reload request\n");
+			return 1;
+		}
+
+                while (tankClient.should_poll()) {
+                        tankClient.poll(1e3);
+
+                        for (const auto &it : tankClient.faults()) {
+                                consider_fault(it);
+                        }
+
+                        for (const auto &it : tankClient.reloaded_partition_configs()) {
+				Print("Reloaded configuration of ", it.topic, "/", it.partition, "\n");
                         }
                 }
 

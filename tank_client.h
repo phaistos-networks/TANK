@@ -2,7 +2,6 @@
 #include "common.h"
 #include <atomic>
 #include <compress.h>
-#include <ext/flat_hash_map.h>
 #include <network.h>
 #include <queue>
 #include <set>
@@ -12,6 +11,7 @@
 #include <switch_mallocators.h>
 #include <switch_vector.h>
 #include <vector>
+#include <unordered_map>
 
 // Tank, because its a large container of liquid or gas
 // and data flow (as in, liquid), and also, this is a Trinity character name
@@ -161,6 +161,12 @@ class TankClient final {
                 range_base<std::pair<uint64_t, uint64_t> *, uint16_t> watermarks;
         };
 
+        struct reload_conf_result final {
+		uint32_t client_req_id;
+                str_view8 topic;
+                uint16_t  partition;
+        };
+
         struct created_topic final {
                 uint32_t   clientReqId;
                 strwlen8_t topic;
@@ -219,13 +225,13 @@ class TankClient final {
                         InvalidReq,
                         SystemFail,
                         AlreadyExists,
-			NotAllowed,
+                        NotAllowed,
                 } type;
 
                 enum class Req : uint8_t {
                         Consume = 1,
                         Produce,
-                        Ctrl
+                        Ctrl,
                 } req;
 
                 strwlen8_t topic;
@@ -358,8 +364,8 @@ class TankClient final {
         uint64_t                                            nextInflightReqsTimeoutCheckTs{0};
         RetryStrategy                                       retryStrategy{RetryStrategy::RetryAlways};
         CompressionStrategy                                 compressionStrategy{CompressionStrategy::CompressIntelligently};
-        ska::flat_hash_map<Switch::endpoint, broker *>      bsMap;
-        ska::flat_hash_map<strwlen8_t, Switch::endpoint>    leadersMap;
+        std::unordered_map<Switch::endpoint, broker *>      bsMap;
+        std::unordered_map<strwlen8_t, Switch::endpoint>    leadersMap;
         Switch::endpoint                                    defaultLeader{};
         bool                                                allowStreamingConsumeResponses{false};
         int                                                 sndBufSize{128 * 1024}, rcvBufSize{1 * 1024 * 1024};
@@ -374,6 +380,7 @@ class TankClient final {
         Switch::vector<fault>                               capturedFaults;
         Switch::vector<produce_ack>                         produceAcks;
         Switch::vector<discovered_topic_partitions>         discoverPartitionsResults;
+        std::vector<reload_conf_result>                     reload_conf_results_v;
         Switch::vector<created_topic>                       createdTopicsResults;
         Switch::vector<consumed_msg>                        consumptionList;
         Switch::vector<consume_ctx>                         consumeOut;
@@ -446,6 +453,8 @@ class TankClient final {
         bool process_consume(connection *const c, const uint8_t *const content, const size_t len);
 
         bool process_discover_partitions(connection *const c, const uint8_t *const content, const size_t len);
+	
+	bool process_reload_conf(connection *, const uint8_t *, const size_t);
 
         bool process_create_topic(connection *const c, const uint8_t *const content, const size_t len);
 
@@ -553,6 +562,10 @@ class TankClient final {
                 return discoverPartitionsResults;
         }
 
+        const auto &reloaded_partition_configs() const noexcept {
+                return reload_conf_results_v;
+        }
+
         const auto &created_topics() const noexcept {
                 return createdTopicsResults;
         }
@@ -586,6 +599,8 @@ class TankClient final {
         [[ gnu::warn_unused_result, nodiscard ]] uint32_t consume_from(const topic_partition &from, const uint64_t seqNum, const uint32_t minFetchSize, const uint64_t maxWait, const uint32_t minSize);
 
         [[ gnu::warn_unused_result, nodiscard ]] uint32_t discover_partitions(const strwlen8_t topic);
+
+        [[ gnu::warn_unused_result, nodiscard ]] uint32_t reload_partition_conf(const strwlen8_t topic, const uint16_t partition);
 
         [[ gnu::warn_unused_result, nodiscard ]] uint32_t create_topic(const strwlen8_t topic, const uint16_t numPartitions, const strwlen32_t configuration);
 
