@@ -3169,6 +3169,16 @@ void track_shutdown(connection *const c, const size_t line, T &&... args) {
 #endif
 }
 
+// we need to keep this sane, we don't want to wake up too often
+// so we are just going to align this to 64ms
+static inline auto normalized_max_wait(const uint64_t v) {
+        static const uint64_t alignment = 64;
+
+        static_assert(0 == (alignment & 1));
+
+        return (v + alignment - 1) & -alignment;
+}
+
 bool Service::process_consume(connection *const c, const uint8_t *p, const size_t /*len*/) {
         try {
                 auto                        respHeader = get_buffer();
@@ -3178,7 +3188,8 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                 const auto                  requestId     = decode_pod<uint32_t>(p);
                 const strwlen8_t            clientId(reinterpret_cast<const char *>(p) + 1, *p);
                 p += clientId.size() + sizeof(uint8_t);
-                const auto maxWait   = decode_pod<uint64_t>(p);                                   // if we don't get any data within `maxWait`ms, we 'll return nothing for the requested partitions
+                // if we don't get any data within `maxWait`ms, we 'll return nothing for the requested partitions
+                const auto maxWait   = normalized_max_wait(decode_pod<uint64_t>(p));
                 const auto minBytes  = Min<uint32_t>(decode_pod<uint32_t>(p), 128 * 1024 * 1024); // keep it sane
                 const auto topicsCnt = *p++;
 
@@ -3629,7 +3640,11 @@ void Service::process_timers() {
         }
 }
 
-bool Service::register_consumer_wait(connection *const c, const uint32_t requestId, const uint64_t maxWait, const uint32_t minBytes, topic_partition **const partitions, const uint32_t totalPartitions) {
+bool Service::register_consumer_wait(connection *const       c,
+                                     const uint32_t          requestId,
+                                     const uint64_t          maxWait,
+                                     const uint32_t          minBytes,
+                                     topic_partition **const partitions, const uint32_t totalPartitions) {
         auto ctx = get_waitctx(totalPartitions);
 
         if (trace) {
