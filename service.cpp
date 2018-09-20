@@ -3319,8 +3319,9 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                                         if (range.stop() > res.fileOffsetCeiling) {
                                                                 range.SetEnd(res.fileOffsetCeiling);
 
-                                                                if (trace)
+                                                                if (trace) {
                                                                         SLog("Adjuted to ", range, "\n");
+								}
                                                         }
 
                                                         if (trace) {
@@ -5667,7 +5668,7 @@ void Service::maybe_wakeup_reactor() {
 }
 
 int Service::reactor_main() {
-        for (;;) {
+	for (uint64_t next_curtime_update{0};;) {
                 // Deferred , see waitCtxDeferredGC decl. comments
                 for (auto wctx : waitCtxDeferredGC) {
                         EXPECT(wctx->scheduledForDtor);
@@ -5679,20 +5680,26 @@ int Service::reactor_main() {
                 // determine how long to wait, account for the next timer/event timestamp
                 now_ms = Timings::Milliseconds::Tick();
 
-                auto wait_until = std::min(now_ms + 30 * 1000, timers_ebtree_next);
+                const auto wait_until = std::min(now_ms + 30 * 1000, timers_ebtree_next);
 
                 sleeping.store(true, std::memory_order_relaxed);
                 const auto                  r           = poller.poll(wait_until - now_ms);
                 [[maybe_unused]] const auto saved_errno = errno; // in case it's updated before we use it
                 sleeping.store(false, std::memory_order_relaxed);
 
-                now_ms  = Timings::Milliseconds::Tick();
-                curTime = time(nullptr);
+                now_ms = Timings::Milliseconds::Tick();
+                if (now_ms > next_curtime_update) {
+			// we can avoid excessive time() by
+			// checking updating every 500ms
+                        curTime             = time(nullptr);
+                        next_curtime_update = now_ms + 500;
+                }
 
                 drain_pubsub_queue();
 
-                if (auto mask = pending_signals.load(std::memory_order_relaxed)) {
+                if (const auto mask = pending_signals.load(std::memory_order_relaxed)) {
                         pending_signals.fetch_and(~mask, std::memory_order_relaxed);
+
                         if (!process_pending_signals(mask)) {
                                 break;
                         }
