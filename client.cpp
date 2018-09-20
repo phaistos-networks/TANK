@@ -1996,23 +1996,22 @@ bool TankClient::process(connection *const c, const uint8_t msg, const uint8_t *
 }
 
 bool TankClient::try_recv(connection *const c) {
-        int  n, r, fd = c->fd;
-        auto b = c->inB;
-
-        if (!b)
-                b = c->inB = get_buffer();
+        int         n, r, fd = c->fd;
+        auto *const b = c->inB ?: (c->inB = get_buffer());
 
         for (;;) {
-                if (unlikely(ioctl(fd, FIONREAD, &n) == -1))
+                if (unlikely(ioctl(fd, FIONREAD, &n) == -1)) {
                         throw Switch::system_error("ioctl() failed:", strerror(errno));
+		}
 
                 b->reserve(n);
                 r = read(fd, b->end(), b->capacity());
 
-                if (trace)
-                        SLog("Read ", r, "\n");
+                if (trace) {
+                        SLog("Read ", r, " (n = ", n, ")\n");
+		}
 
-                if (r == -1) {
+                if (-1 == r) {
                         if (errno == EINTR)
                                 continue;
                         else if (errno == EAGAIN)
@@ -2021,7 +2020,7 @@ bool TankClient::try_recv(connection *const c) {
                                 shutdown(c, __LINE__, true);
                                 return false;
                         }
-                } else if (!r) {
+                } else if (0 == r) {
                         shutdown(c, __LINE__, true);
                         return false;
                 } else {

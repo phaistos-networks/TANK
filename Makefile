@@ -4,7 +4,8 @@ ifeq ($(HOST), origin)
 # When building on our dev.system
 	include /home/system/Development/Switch/Makefile.dfl
 	CXXFLAGS:=$(CPPFLAGS_SANITY_RELEASE) #-fsanitize=address
-	LDFLAGS:=$(LDFLAGS_SANITY) -L$(SWITCH_BASE) -lswitch -lpthread -ldl -lcrypto -lz -lssl -ljemalloc  /home/system/Development/Switch/ext/ebtree/libtree.a
+	#LDFLAGS:=$(LDFLAGS_SANITY) -L$(SWITCH_BASE) -lswitch -lpthread -ldl -Wl,-Bstatic -lcrypto -lz -lssl -Wl,-Bdynamic -ljemalloc  /home/system/Development/Switch/ext/ebtree/libtree.a
+	LDFLAGS:=$(LDFLAGS_SANITY) -L$(SWITCH_BASE) -lswitch -lpthread -ldl /usr/lib/x86_64-linux-gnu/libssl.a /usr/lib/x86_64-linux-gnu/libcrypto.a  -lz -ljemalloc  /home/system/Development/Switch/ext/ebtree/libtree.a
 	SWITCH_LIB:=-lswitch
 	CXXFLAGS += -DTRACE_REACHABILITY_OVERSEER
 	#CXX:=scan-build clang++

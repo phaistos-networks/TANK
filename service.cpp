@@ -54,54 +54,63 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
         int           fd, indexFd;
         struct stat64 st;
 
-        if (trace)
-                SLog("New ro_segment(this = ", ptr_repr(this), ", baseSeqNum = ", baseSeqNum, ", lastAbsSeqNum = ", lastAbsSeqNum, ", createdTS = ", createdTS, ", haveWideEntries = ", haveWideEntries, "\n");
+        if (trace) {
+                SLog("New ro_segment(this = ", ptr_repr(this), ", baseSeqNum = ", baseSeqNum, ", lastAbsSeqNum = ", lastAbsSeqNum, ", createdTS = ", createdTS, ", haveWideEntries = ", haveWideEntries, " ", base, "/", absSeqNum, "\n");
+        }
 
-        require(lastAbsSeqNum >= baseSeqNum);
+        EXPECT(lastAbsSeqNum >= baseSeqNum);
 
         index.data = nullptr;
-        if (createdTS)
+        if (createdTS) {
                 fd = open(Buffer::build(base, "/", absSeqNum, "-", lastAbsSeqNum, "_", createdTS, ".ilog").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
-        else
+        } else {
                 fd = open(Buffer::build(base, "/", absSeqNum, "-", lastAbsSeqNum, ".ilog").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
+        }
 
-        if (fd == -1)
+        if (fd == -1) {
                 throw Switch::system_error("Failed to access log file:", strerror(errno));
+        }
 
         fdh.reset(new fd_handle(fd));
         Drequire(fdh.use_count() == 2);
         fdh->Release();
 
-        if (fstat64(fd, &st) == -1)
+        if (fstat64(fd, &st) == -1) {
                 throw Switch::system_error("Failed to fstat():", strerror(errno));
+        }
 
         auto size = st.st_size;
 
-        if (unlikely(size == (off64_t)-1))
+        if (unlikely(size == (off64_t)-1)) {
                 throw Switch::system_error("lseek64() failed: ", strerror(errno));
+        }
 
-        Drequire(size < std::numeric_limits<std::remove_reference<decltype(fileSize)>::type>::max());
+        EXPECT(size < std::numeric_limits<std::remove_reference<decltype(fileSize)>::type>::max());
 
         fileSize = size;
 
-        if (trace)
+        if (trace) {
                 SLog(ansifmt::bold, "fileSize = ", fileSize, ", createdTS = ", Date::ts_repr(creationTS), ansifmt::reset, "\n");
+        }
 
-        if (haveWideEntries)
+        if (haveWideEntries) {
                 indexFd = open(Buffer::build(base, "/", absSeqNum, "_64.index").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
-        else
+        } else {
                 indexFd = open(Buffer::build(base, "/", absSeqNum, ".index").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
+        }
 
         DEFER({ if (indexFd != -1) close(indexFd); });
 
         if (indexFd == -1) {
-                if (haveWideEntries)
+                if (haveWideEntries) {
                         indexFd = open(Buffer::build(base, "/", absSeqNum, "_64.index").data(), read_only ? O_RDONLY : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME), 0775);
-                else
+                } else {
                         indexFd = open(Buffer::build(base, "/", absSeqNum, ".index").data(), read_only ? O_RDONLY : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME), 0775);
+                }
 
-                if (indexFd == -1)
+                if (indexFd == -1) {
                         throw Switch::system_error("Failed to rebuild index file:", strerror(errno));
+                }
 
                 if (haveWideEntries) {
                         IMPLEMENT_ME();
@@ -112,10 +121,11 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
 
         size = lseek64(indexFd, 0, SEEK_END);
 
-        if (unlikely(size == (off64_t)-1))
+        if (unlikely(size == (off64_t)-1)) {
                 throw Switch::system_error("lseek64() failed: ", strerror(errno));
+        }
 
-        Drequire(size < std::numeric_limits<std::remove_reference<decltype(index.fileSize)>::type>::max());
+        EXPECT(size < std::numeric_limits<std::remove_reference<decltype(index.fileSize)>::type>::max());
 
         // TODO(markp): if (haveWideEntries), index.lastRecorded.relSeqNum should be a union, and we should
         // properly set index.lastRecorded here
@@ -127,8 +137,9 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
         if (size) {
                 auto data = mmap(nullptr, index.fileSize, PROT_READ, MAP_SHARED, indexFd, 0);
 
-                if (unlikely(data == MAP_FAILED))
-                        throw Switch::system_error("Failed to access the index file. mmap() failed:", strerror(errno));
+                if (unlikely(data == MAP_FAILED)) {
+                        throw Switch::system_error("Failed to access the index file. mmap() failed:", strerror(errno), " for ", size_repr(index.fileSize), " ", base, "/");
+                }
 
                 madvise(data, index.fileSize, MADV_DONTDUMP);
 
@@ -141,11 +152,13 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
                         index.lastRecorded.relSeqNum   = p[0];
                         index.lastRecorded.absPhysical = p[1];
 
-                        if (trace)
+                        if (trace) {
                                 SLog("lastRecorded = ", index.lastRecorded.relSeqNum, "(", index.lastRecorded.relSeqNum + baseSeqNum, "), ", index.lastRecorded.absPhysical, "\n");
+                        }
                 }
-        } else
+        } else {
                 index.data = nullptr;
+        }
 }
 
 std::pair<uint32_t, uint32_t> ro_segment::snapDown(const uint64_t absSeqNum) const {
@@ -173,8 +186,9 @@ std::pair<uint32_t, uint32_t> ro_segment::snapDown(const uint64_t absSeqNum) con
                 // no index record where record.relSeqNum <= relSeqNum
                 // that is, the first index record.relSeqNum > relSeqNum
                 return {0, 0};
-        } else
+        } else {
                 return {it->relSeqNum, it->absPhysical};
+        }
 }
 
 std::pair<uint32_t, uint32_t> ro_segment::snapUp(const uint64_t absSeqNum) const {
@@ -552,7 +566,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
         static constexpr uint64_t              ptrBit{uint64_t(1) << (sizeof(uintptr_t) * 8 - 1)};
 
         const auto compact = [&anyDropped](Switch::vector<msg> &msgs) {
-                std::sort(msgs.begin(), msgs.end(), [](const auto &a, const auto &b) {
+                std::sort(msgs.begin(), msgs.end(), [](const auto &a, const auto &b) noexcept {
                         return a.key.Cmp(b.key) < 0;
                 });
 
@@ -591,7 +605,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         // need to resize anyway
                         msgs.resize(n);
 
-                        std::sort(msgs.begin(), msgs.end(), [](const auto &a, const auto &b) {
+                        std::sort(msgs.begin(), msgs.end(), [](const auto &a, const auto &b) noexcept {
                                 return a.seqNum < b.seqNum;
                         });
                 }
@@ -1497,7 +1511,7 @@ void topic_partition_log::consider_ro_segments() {
         }
 
         uint64_t       sum{0};
-        const uint32_t nowTS = Timings::Seconds::SysTime();
+        const uint32_t nowTS = time(nullptr);
 
         if (trace)
                 SLog(ansifmt::bold, ansifmt::color_blue, "Considering segments sum=", sum, ", total = ", roSegments->size(), " limits { roSegmentsCnt ", config.roSegmentsCnt, ", roSegmentsSize ", config.roSegmentsSize, "}", ansifmt::reset, "\n");
@@ -1638,7 +1652,7 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
                 throw Switch::data_error("Unexpected absSeqNum(", absSeqNum, ") < cur.baseSeqNum(", cur.baseSeqNum, ") for ", partition->owner->name(), "/", partition->idx);
         }
 
-        Drequire(bundleMsgsCnt);
+        EXPECT(bundleMsgsCnt);
 
         if (lastMsgSeqNum) {
                 // Sparse bundle; last message seqNum encoded in the bundle header
@@ -1651,8 +1665,9 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
                 lastAssignedSeqNum += bundleMsgsCnt;
         }
 
-        if (trace)
+        if (trace) {
                 SLog("firstMsgSeqNum(", firstMsgSeqNum, "), lastMsgSeqNum(", lastMsgSeqNum, "), bundleMsgsCnt(", bundleMsgsCnt, ") => ", lastAssignedSeqNum, "\n");
+        }
 
         if (should_roll(now)) {
                 Buffer basePath;
@@ -1662,7 +1677,7 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
                 const auto basePathLen = basePath.size();
 
                 if (trace)
-                        SLog("Need to switch to another commit log (", cur.fileSize, "> ", config.maxSegmentSize, ") ", cur.index.skipList.size(), "\n");
+                        SLog("Need to switch to another commit log (", cur.fileSize, "> ", config.maxSegmentSize, ") ", cur.index.skipList.size(), " ", basePath, "\n");
 
                 if (cur.fileSize != UINT32_MAX) {
 // See ro_segment::createdTS declaration comments
@@ -1742,7 +1757,7 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
                 // It is very important than the first bundle's recorded immediately in the index
                 // so we set cur.sinceLastUpdate = UINT32_MAX to force that
                 cur.sinceLastUpdate       = UINT32_MAX;
-                cur.createdTS             = Timings::Seconds::SysTime();
+                cur.createdTS             = time(nullptr);
                 cur.nameEncodesTS         = true;
                 cur.index.haveWideEntries = false;
 
@@ -2633,6 +2648,8 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                 int                           fd;
                 auto                          l = new topic_partition_log();
                 bool                          processSwapped{true};
+                struct stat                   st;
+                char                          _base_path[PATH_MAX];
 
                 l->partition          = partition;
                 l->config             = partitionConf;
@@ -2647,6 +2664,9 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                 l->cur.index.haveWideEntries                 = false;
                 l->cur.index.ondisk.lastRecorded.relSeqNum   = 0;
                 l->cur.index.ondisk.lastRecorded.absPhysical = 0;
+
+                b.CopyTo(_base_path);
+                _base_path[b.size()] = '/';
 
                 for (auto &&name : DirectoryEntries(basePath)) {
                         if (*name.p == '.')
@@ -2733,40 +2753,59 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                 // the later encodes the creation timestamp in the path, which is useful because
                                 // we 'd like to know when this was created, when we restart the service and get to continue using the selected log
                                 if (const auto *const p = r.first.Search('_')) {
+                                        name.CopyTo(_base_path + b.size() + 1);
+
+                                        if (-1 == stat(_base_path, &st)) {
+                                                Print("Failed to stat ", _base_path, ": ", strerror(errno), "\n");
+                                                std::abort();
+                                        }
+
+                                        if (0 == st.st_size) {
+                                                // This is a stray - whatever the reason this is here, it needs to go
+                                                Print("Found a stray ", _base_path, ", deleting it\n");
+                                                unlink(_base_path);
+                                                continue;
+                                        }
+
                                         const auto seqRepr = r.first.PrefixUpto(p);
                                         const auto tsRepr  = r.first.SuffixFrom(p + 1);
 
-                                        if (!seqRepr.IsDigits() || !tsRepr.IsDigits())
+                                        if (!seqRepr.IsDigits() || !tsRepr.IsDigits()) {
                                                 throw Switch::system_error("Unexpected name ", name);
-                                        else {
+                                        } else {
                                                 const auto seq = seqRepr.AsUint64();
 
-                                                require(seq);
-                                                require(!curLogSeqNum);
+                                                EXPECT(seq);
+                                                EXPECT(!curLogSeqNum);
+
                                                 curLogSeqNum   = seq;
                                                 curLogCreateTS = tsRepr.AsUint32();
 
-                                                if (trace)
+                                                if (trace) {
                                                         SLog("curLogSeqNum = ", curLogSeqNum, ", curLogCreateTS = ", curLogCreateTS, " from ", r.first, "\n");
+                                                }
                                         }
                                 } else {
-                                        if (unlikely(!r.first.IsDigits()))
+                                        if (unlikely(!r.first.IsDigits())) {
                                                 throw Switch::system_error("Unexpected name ", name);
-                                        else {
+                                        } else {
                                                 const auto seq = r.first.AsUint64();
 
-                                                require(seq);
-                                                require(!curLogSeqNum);
+                                                EXPECT(seq);
+                                                EXPECT(!curLogSeqNum);
+
                                                 curLogSeqNum = seq;
                                         }
                                 }
-                        } else
+                        } else {
                                 Print("Unexpected name ", name, " in ", basePath, "\n");
+                        }
                 }
 
                 if (processSwapped == false) {
-                        if (trace)
-                                SLog("Cannoy process any swapped files\n");
+                        if (trace) {
+                                SLog("Cannot process any swapped files\n");
+                        }
 
                         while (!swapped.empty()) {
                                 auto it = swapped.back();
@@ -2777,19 +2816,22 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                 swapped.pop_back();
                         }
                 } else {
-                        if (trace)
+                        if (trace) {
                                 SLog("Can process swapped files\n");
+                        }
 
                         while (!swapped.empty()) {
                                 auto name = swapped.back();
 
                                 name.StripSuffix(STRLEN(".swap"));
 
-                                if (trace)
+                                if (trace) {
                                         SLog("Processing swapped ", name, "\n");
+                                }
 
-                                if (Rename(Buffer::build(basePath, "/", name, ".swap").data(), Buffer::build(basePath, "/", name).data()) == -1)
+                                if (Rename(Buffer::build(basePath, "/", name, ".swap").data(), Buffer::build(basePath, "/", name).data()) == -1) {
                                         throw Switch::system_error("Failed to rename swapped file:", strerror(errno));
+                                }
 
                                 const auto r = name.Divided('.');
 
@@ -2813,8 +2855,9 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                         const auto repr       = s.Divided('-');
                                         const auto baseSeqNum = repr.first.AsUint64(), lastAvailSeqNum = repr.second.AsUint64();
 
-                                        if (trace)
+                                        if (trace) {
                                                 SLog("(	", baseSeqNum, ", ", lastAvailSeqNum, ", ", creationTS, ") ", r.first, "\n");
+                                        }
 
                                         roLogs.push_back({baseSeqNum, lastAvailSeqNum, creationTS});
                                 }
@@ -2823,11 +2866,12 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         }
                 }
 
-                if (trace)
+                if (trace) {
                         SLog("roLogs.size() = ", roLogs.size(), ", curLogSeqNum = ", curLogSeqNum, ", curLogCreateTS = ", curLogCreateTS, "\n");
+                }
 
                 if (!roLogs.empty()) {
-                        std::sort(roLogs.begin(), roLogs.end(), [](const auto &a, const auto &b) {
+                        std::sort(roLogs.begin(), roLogs.end(), [](const auto &a, const auto &b) noexcept {
                                 return a.firstAvailableSeqNum < b.firstAvailableSeqNum;
                         });
 
@@ -2847,14 +2891,16 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
 
                 if (curLogSeqNum) {
                         // Have a current segment
-                        if (curLogCreateTS)
+                        if (curLogCreateTS) {
                                 Snprint(basePath, sizeof(basePath), b, curLogSeqNum, "_", curLogCreateTS, ".log");
-                        else
+                        } else {
                                 Snprint(basePath, sizeof(basePath), b, curLogSeqNum, ".log");
+                        }
 
                         fd = open(basePath, read_only ? O_RDONLY : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME), 0775);
-                        if (fd == -1)
+                        if (fd == -1) {
                                 throw Switch::system_error("open(", basePath, ") failed:", strerror(errno), ". Cannot open current segment log");
+                        }
 
                         l->cur.fdh.reset(new fd_handle(fd));
                         require(l->cur.fdh->use_count() == 2);
@@ -2867,13 +2913,15 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         Snprint(basePath, sizeof(basePath), b, curLogSeqNum, ".index");
                         fd = open(basePath, read_only ? O_RDWR : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND), 0775);
 
-                        if (trace)
+                        if (trace) {
                                 SLog("Considering ", basePath, "\n");
+                        }
 
-                        if (fd == -1)
+                        if (fd == -1) {
                                 throw Switch::system_error("open(", basePath_, ") failed:", strerror(errno), ". Cannot open current segment index");
-                        else if (lseek64(fd, 0, SEEK_END) == 0 && l->cur.fileSize)
+                        } else if (lseek64(fd, 0, SEEK_END) == 0 && l->cur.fileSize) {
                                 Service::rebuild_index(l->cur.fdh->fd, fd);
+                        }
 
                         l->cur.index.fd = fd;
                         // if this an empty commit log, need to update the index immediately
@@ -2885,8 +2933,9 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                 l->cur.index.ondisk.span = size;
                                 l->cur.index.ondisk.data = static_cast<const uint8_t *>(mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0));
 
-                                if (unlikely(l->cur.index.ondisk.data == MAP_FAILED))
+                                if (unlikely(l->cur.index.ondisk.data == MAP_FAILED)) {
                                         throw Switch::system_error("mmap() failed:", strerror(errno));
+                                }
 
                                 madvise((void *)l->cur.index.ondisk.data, size, MADV_DONTDUMP);
 
@@ -2900,16 +2949,17 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                 }
 
                                 if (trace) {
-                                        SLog("Have cur.index.ondisk.span = ", l->cur.index.ondisk.span, " lastRecorded =  ( relSeqNum = ", l->cur.index.ondisk.lastRecorded.relSeqNum, ", absPhysical = ", l->cur.index.ondisk.lastRecorded.absPhysical, ")\n");
+                                        SLog("Have cur.index.ondisk.span = ",
+                                             l->cur.index.ondisk.span, " lastRecorded =  ( relSeqNum = ",
+                                             l->cur.index.ondisk.lastRecorded.relSeqNum, ", absPhysical = ", l->cur.index.ondisk.lastRecorded.absPhysical, ")\n");
 
 #if 1
                                         if (l->cur.index.haveWideEntries) {
                                                 IMPLEMENT_ME();
                                         } else {
                                                 for (const auto *it = (uint32_t *)l->cur.index.ondisk.data, *const base = it, *const e = it + l->cur.index.ondisk.span / sizeof(uint32_t); it != e; it += 2) {
-                                                        //SLog(it[0], " => ", it[1], "\n");
                                                         if (it != base) {
-                                                                Drequire(it[0] != it[-2]);
+                                                                EXPECT(it[0] != it[-2]);
                                                         }
                                                 }
                                         }
@@ -2927,7 +2977,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                 // keeping track of offsets as we go.
                                 const auto span = s - o;
 
-                                Drequire(span);
+                                EXPECT(span);
 
                                 auto *const data = static_cast<uint8_t *>(malloc(span));
                                 // first message in the first bundle we 'll parse
@@ -2940,21 +2990,24 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                                         SLog("span = ", span, ", start from ", next, "\n");
                                 }
 
-                                if (unlikely(!data))
+                                if (unlikely(!data)) {
                                         throw Switch::system_error("malloc(", span, ") failed");
+                                }
 
                                 DEFER({ free(data); });
 
-                                Drequire(fd != -1);
+                                EXPECT(fd != -1);
 
                                 const auto     res = pread64(fd, data, span, o);
                                 const uint8_t *lastCheckpoint{data};
 
-                                if (trace)
+                                if (trace) {
                                         SLog("Attempting to read ", span, " bytes at ", o, ": ", res, "\n");
+                                }
 
-                                if (res != span)
+                                if (res != span) {
                                         throw Switch::system_error("pread64() failed:", strerror(errno));
+                                }
 
                                 for (const auto *p = data, *const e = p + span; p != e;) {
                                         const auto *      saved{p};
@@ -3045,14 +3098,19 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                         } else
                                 l->cur.rollJitterSecs = 0;
 
-                        const auto now = Timings::Seconds::SysTime();
+                        const auto now = time(nullptr);
 
                         l->cur.createdTS                    = curLogCreateTS ?: now;
                         l->cur.nameEncodesTS                = curLogCreateTS;
                         l->cur.flush_state.pendingFlushMsgs = 0;
                         l->cur.flush_state.nextFlushTS      = config.flushIntervalSecs ? now + config.flushIntervalSecs : UINT32_MAX;
 
-                        Drequire(l->lastAssignedSeqNum >= l->cur.baseSeqNum); // Added 10.01.2k17
+                        if (l->lastAssignedSeqNum >= l->cur.baseSeqNum) {
+                                // OK
+                        } else {
+                                Print("UNEXPECTED lastAssignedSeqNum(", l->lastAssignedSeqNum, ") baseSeqNum(", l->cur.baseSeqNum, ") for ", basePath_, "\n");
+                                std::abort();
+                        }
 
                         if (trace)
                                 SLog("createdTS(", l->cur.createdTS, ") nameEncodesTS(", l->cur.nameEncodesTS, ")\n");
@@ -3407,7 +3465,9 @@ void Service::register_timer(eb64_node *const node) {
         timers_ebtree_next = std::min<uint64_t>(node->key, timers_ebtree_next);
         eb64_insert(&timers_ebtree_root, node);
 
-        // SLog(ansifmt::color_brown, "Registered timer now ", timers_ebtree_next, ansifmt::reset, "\n");
+        if (trace) {
+                SLog(ansifmt::color_brown, "Registered timer now ", timers_ebtree_next, ansifmt::reset, "\n");
+        }
 }
 
 bool Service::cancel_timer(eb64_node *const node) {
@@ -3527,10 +3587,12 @@ void Service::fire_timer(eb64_node_ctx *const ctx) {
         }
 }
 
-void Service::process_timers(const uint64_t now_ms) {
+void Service::process_timers() {
         eb64_node *it;
 
-        // SLog(ansifmt::color_brown, "Processing timers, empty root:",  eb_is_empty(&timers_ebtree_root), ansifmt::reset, "\n");
+        if (trace) {
+                SLog(ansifmt::color_brown, "Processing timers, empty root:", eb_is_empty(&timers_ebtree_root), ansifmt::reset, "\n");
+        }
 
         goto l1;
         for (;;) {
@@ -3575,7 +3637,7 @@ bool Service::register_consumer_wait(connection *const c, const uint32_t request
         }
 
         if (maxWait) {
-                ctx->exp_tree_node.node.key = Timings::Milliseconds::Tick() + maxWait;
+                ctx->exp_tree_node.node.key = now_ms + maxWait;
                 ctx->exp_tree_node.type     = eb64_node_ctx::ContainerType::WaitCtx;
                 register_timer(&ctx->exp_tree_node.node);
         } else {
@@ -3904,7 +3966,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                 return shutdown(c, __LINE__);
         }
 
-        const uint64_t              processBegin  = trace ? Timings::Microseconds::Tick() : 0;
+        const uint64_t              processBegin  = trace ? now_ms : 0;
         auto *const                 respHeader    = get_buffer();
         auto                        q             = c->outQ;
         [[maybe_unused]] const auto clientVersion = decode_pod<uint16_t>(p);
@@ -4522,7 +4584,7 @@ void Service::cleanup_connection(connection *const c) {
 
 bool Service::shutdown(connection *const c, const uint32_t ref) {
         if (trace) {
-                SLog("SHUTDOWN at ", ref, " ", Timings::Microseconds::SysTime(), "\n");
+                SLog("SHUTDOWN at ", ref, " ", time(nullptr), "\n");
         }
 
         EXPECT(c->fd != -1);
@@ -4656,7 +4718,7 @@ bool Service::try_send(connection *const c) {
         const auto   fd{c->fd};
         auto         q{c->outQ};
         bool         haveCork{false};
-        struct iovec iov[512];
+        struct iovec iov[1024];
         uint32_t     iovCnt{0};
 
         if (c->state.flags & (1u << uint8_t(connection::State::Flags::PendingIntro)))
@@ -4689,8 +4751,8 @@ bool Service::try_send(connection *const c) {
                         if (trace)
                                 SLog("payload holds buffer {", ptr_repr(it.buf), ", ", it.iovCnt, "}\n");
 
-                        require(it.iovCnt);
-                        require(it.iovIdx < it.iovCnt);
+                        EXPECT(it.iovCnt);
+                        EXPECT(it.iovIdx < it.iovCnt);
 
                         memcpy(iov + iovCnt, it.iov + it.iovIdx, sizeof(struct iovec) * n);
                         iovCnt += n;
@@ -4706,21 +4768,24 @@ bool Service::try_send(connection *const c) {
                                         Switch::SetTCPCork(fd, 1);
                                 }
 
-                                if (!flush_iov(c, iov, iovCnt, haveCork))
+                                if (!flush_iov(c, iov, iovCnt, haveCork)) {
                                         return false;
-                                else
+                                } else {
                                         iovCnt = 0;
+                                }
                         }
                 } else {
-                        if (trace)
+                        if (trace) {
                                 SLog("payload holds content range (iovCnt = ", iovCnt, ")\n");
+                        }
 
                         if (iovCnt) {
                                 if (!haveCork) {
                                         // we really need to cork here
                                         // because we have pending iovecs to stream before we stream the file range
-                                        if (trace)
+                                        if (trace) {
                                                 SLog("Activating Cork\n");
+                                        }
 
                                         haveCork = true;
                                         Switch::SetTCPCork(fd, 1);
@@ -4845,8 +4910,9 @@ bool Service::try_send(connection *const c) {
                                         range.len -= r;
                                         range.offset += r;
 
-                                        if (it.tracker.since)
+                                        if (it.tracker.since) {
                                                 it.tracker.src_topic->metrics.bytes_out += r;
+                                        }
 
                                         if (0 == range.len) {
                                                 if (trace)
@@ -4934,9 +5000,9 @@ bool Service::try_send(connection *const c) {
                                 SLog("r = ", r, " for ", iovCnt, "\n");
 
                         if (r == -1) {
-                                if (errno == EINTR)
+                                if (errno == EINTR) {
                                         continue;
-                                else if (errno == EAGAIN) {
+                                } else if (errno == EAGAIN) {
                                         if (haveCork) {
                                                 if (trace)
                                                         SLog("Deactivating Cork\n");
@@ -5562,7 +5628,7 @@ int Service::reactor_main() {
                 sleeping.store(false, std::memory_order_relaxed);
 
                 now_ms  = Timings::Milliseconds::Tick();
-                curTime = Timings::Milliseconds::ToSeconds(now_ms);
+                curTime = time(nullptr);
 
                 drain_pubsub_queue();
 
@@ -5573,7 +5639,7 @@ int Service::reactor_main() {
                         }
                 }
 
-                if (r == -1) {
+                if (-1 == r) {
                         if (errno != EINTR && errno != EAGAIN) {
                                 IMPLEMENT_ME();
                         }
@@ -5584,7 +5650,7 @@ int Service::reactor_main() {
                 }
 
                 if (now_ms >= timers_ebtree_next) {
-                        process_timers(now_ms);
+                        process_timers();
                 }
         }
 
@@ -5919,7 +5985,7 @@ int Service::start(int argc, char **argv) {
                                 if (trace)
                                         SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " for all partitions\n");
 
-                                std::sort(list.begin(), list.end(), [](const auto &a, const auto &b) {
+                                std::sort(list.begin(), list.end(), [](const auto &a, const auto &b) noexcept {
                                         return uintptr_t(a.first) < uintptr_t(b.first);
                                 });
 

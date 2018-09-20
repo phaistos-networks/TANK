@@ -594,7 +594,7 @@ struct topic
 // We could have used Switch::deque<> but let's just use something simpler
 // TODO: Maybe we should just use a linked list instead
 struct outgoing_queue final {
-        struct content_file_range {
+        struct content_file_range final {
                 fd_handle *fdh;
                 range32_t  range;
 
@@ -615,7 +615,7 @@ struct outgoing_queue final {
                 }
         };
 
-        struct payload {
+        struct payload final {
                 bool payloadBuf;
 
                 struct
@@ -631,9 +631,11 @@ struct outgoing_queue final {
 
                                 struct
                                 {
-                                        struct iovec iov[250]; // https://github.com/phaistos-networks/TANK/issues/12
-                                        uint8_t      iovIdx;
-                                        uint8_t      iovCnt;
+                                        struct iovec iov[512]; // https://github.com/phaistos-networks/TANK/issues/12
+                                        uint16_t      iovIdx;
+                                        uint16_t      iovCnt;
+					
+					static_assert(0 == (sizeof_array(iov) & 1));
                                 };
                         };
 
@@ -709,8 +711,8 @@ struct outgoing_queue final {
         using reference       = payload &;
         using reference_const = const payload &;
 
-        payload                 A[128]; // fixed size
-        uint8_t                 backIdx{0}, frontIdx{0}, size_{0};
+        payload                 A[256]; // fixed size
+        uint16_t                backIdx{0}, frontIdx{0}, size_{0};
         static constexpr size_t capacity{sizeof_array(A)};
 
         inline uint32_t prev(const uint32_t idx) const noexcept {
@@ -1021,7 +1023,7 @@ class Service final {
 
         void register_timer(eb64_node *);
 
-        void process_timers(const uint64_t);
+        void process_timers();
 
         bool register_consumer_wait(connection *const c, const uint32_t requestId, const uint64_t maxWait, const uint32_t minBytes, topic_partition **const partitions, const uint32_t totalPartitions);
 
