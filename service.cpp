@@ -5667,15 +5667,32 @@ void Service::maybe_wakeup_reactor() {
         }
 }
 
+void Service::gc_waitctx_deferred() {
+        // Deferred , see waitCtxDeferredGC decl. comments
+        for (auto wctx : waitCtxDeferredGC) {
+                EXPECT(wctx->scheduledForDtor);
+
+                put_waitctx(wctx);
+        }
+        waitCtxDeferredGC.clear();
+}
+
+void Service::tear_down() {
+        // notify the thread to exit so that we can join()
+        mboxLock.lock();
+        mbox.emplace_back(-1, 1);
+        mboxLock.unlock();
+        mbox_cv.notify_one();
+
+        if (auto t = sync_thread.release()) {
+                t->join();
+                delete t;
+        }
+}
+
 int Service::reactor_main() {
 	for (uint64_t next_curtime_update{0};;) {
-                // Deferred , see waitCtxDeferredGC decl. comments
-                for (auto wctx : waitCtxDeferredGC) {
-                        EXPECT(wctx->scheduledForDtor);
-
-                        put_waitctx(wctx);
-                }
-                waitCtxDeferredGC.clear();
+		gc_waitctx_deferred();
 
                 // determine how long to wait, account for the next timer/event timestamp
                 now_ms = Timings::Milliseconds::Tick();
@@ -5719,17 +5736,8 @@ int Service::reactor_main() {
                         process_timers();
                 }
         }
-
-        // notify the thread to exit so that we can join()
-        mboxLock.lock();
-        mbox.emplace_back(-1, 1);
-        mboxLock.unlock();
-        mbox_cv.notify_one();
-
-        if (auto t = sync_thread.release()) {
-                t->join();
-                delete t;
-        }
+	
+	tear_down();
 
         Print("TANK terminated\n");
         return 0;

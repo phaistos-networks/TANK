@@ -991,6 +991,10 @@ class Service final {
                 return nullptr;
         }
 
+	void gc_waitctx_deferred();
+
+	void tear_down();
+
 	bool process_load_conf(connection *, const uint8_t *, const size_t);
 
         bool process_consume(connection *const c, const uint8_t *p, const size_t len);
