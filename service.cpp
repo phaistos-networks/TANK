@@ -24,6 +24,7 @@
 // The glibc sendfile() wrapper function transparently deals with the kernel differences.
 #define HAVE_SENDFILE64 1
 
+static constexpr bool trace_idle{false};
 static constexpr bool trace{false};
 
 static Service *                          this_service;
@@ -61,10 +62,11 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
         EXPECT(lastAbsSeqNum >= baseSeqNum);
 
         index.data = nullptr;
+
         if (createdTS) {
-                fd = open(Buffer::build(base, "/", absSeqNum, "-", lastAbsSeqNum, "_", createdTS, ".ilog").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
+                fd = this_service->safe_open(Buffer::build(base, "/", absSeqNum, "-", lastAbsSeqNum, "_", createdTS, ".ilog").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
         } else {
-                fd = open(Buffer::build(base, "/", absSeqNum, "-", lastAbsSeqNum, ".ilog").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
+                fd = this_service->safe_open(Buffer::build(base, "/", absSeqNum, "-", lastAbsSeqNum, ".ilog").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
         }
 
         if (fd == -1) {
@@ -72,7 +74,7 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
         }
 
         fdh.reset(new fd_handle(fd));
-        Drequire(fdh.use_count() == 2);
+        EXPECT(fdh.use_count() == 2);
         fdh->Release();
 
         if (fstat64(fd, &st) == -1) {
@@ -94,18 +96,18 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
         }
 
         if (haveWideEntries) {
-                indexFd = open(Buffer::build(base, "/", absSeqNum, "_64.index").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
+                indexFd = this_service->safe_open(Buffer::build(base, "/", absSeqNum, "_64.index").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
         } else {
-                indexFd = open(Buffer::build(base, "/", absSeqNum, ".index").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
+                indexFd = this_service->safe_open(Buffer::build(base, "/", absSeqNum, ".index").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
         }
 
         DEFER({ if (indexFd != -1) close(indexFd); });
 
         if (indexFd == -1) {
                 if (haveWideEntries) {
-                        indexFd = open(Buffer::build(base, "/", absSeqNum, "_64.index").data(), read_only ? O_RDONLY : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME), 0775);
+                        indexFd = this_service->safe_open(Buffer::build(base, "/", absSeqNum, "_64.index").data(), read_only ? O_RDONLY : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME), 0775);
                 } else {
-                        indexFd = open(Buffer::build(base, "/", absSeqNum, ".index").data(), read_only ? O_RDONLY : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME), 0775);
+                        indexFd = this_service->safe_open(Buffer::build(base, "/", absSeqNum, ".index").data(), read_only ? O_RDONLY : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME), 0775);
                 }
 
                 if (indexFd == -1) {
@@ -1679,6 +1681,7 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
 
         if (should_roll(now)) {
                 Buffer basePath;
+                int    fd;
 
                 basePath.append(basePath_, "/", partition->owner->name(), "/", partition->idx, "/");
 
@@ -1703,7 +1706,8 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
                         auto       newROFile  = std::make_unique<ro_segment>(cur.baseSeqNum, savedLastAssignedSeqNum, freezeTs);
                         const auto n          = cur.fdh.use_count();
 
-                        require(n >= 1);
+                        EXPECT(n >= 1);
+
                         newROFile->fdh = cur.fdh;
                         require(cur.fdh.use_count() == n + 1);
                         newROFile->fileSize = cur.fileSize;
@@ -1781,20 +1785,27 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
 
                 basePath.append(cur.baseSeqNum, "_", cur.createdTS, ".log");
 
-                cur.fdh.reset(new fd_handle(open(basePath.data(), read_only ? O_RDONLY : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND), 0775)));
-                require(cur.fdh->use_count() == 2);
-                cur.fdh->Release();
+                fd = this_service->safe_open(basePath.c_str(), read_only ? O_RDONLY : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND), 0775);
 
-                if (cur.fdh->fd == -1)
+                if (-1 == fd) {
                         throw Switch::system_error("open(", basePath, ") failed:", strerror(errno), ". Cannot load segment log");
+                }
+
+                cur.fdh.reset(new fd_handle(fd));
+                EXPECT(cur.fdh->use_count() == 2);
+                cur.fdh->Release();
 
                 basePath.resize(basePathLen);
                 basePath.append(cur.baseSeqNum, ".index");
-                cur.index.fd = open(basePath.data(), read_only ? O_RDWR : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND), 0775);
-                basePath.resize(basePathLen);
 
-                if (cur.index.fd == -1)
+                fd = this_service->open(basePath.c_str(), read_only ? O_RDWR : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND), 0775);
+
+                if (-1 == fd) {
                         throw Switch::system_error("open(", basePath, ") failed:", strerror(errno), ". Cannot load segment index");
+                }
+
+                cur.index.fd = fd;
+                basePath.resize(basePathLen);
 
                 if (const uint32_t max = config.maxRollJitterSecs) {
                         std::random_device                      dev;
@@ -1802,8 +1813,9 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
                         std::uniform_int_distribution<uint32_t> distr(0, max);
 
                         cur.rollJitterSecs = distr(rng);
-                } else
+                } else {
                         cur.rollJitterSecs = 0;
+                }
 
                 cur.flush_state.pendingFlushMsgs = 0;
                 cur.flush_state.nextFlushTS      = config.flushIntervalSecs ? now + config.flushIntervalSecs : UINT32_MAX;
@@ -1862,8 +1874,9 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
                 lastAssignedSeqNum = savedLastAssignedSeqNum;
                 return {nullptr, {}, {}};
         } else {
-                if (trace)
+                if (trace) {
                         SLog("writev() took ", duration_repr(Timings::Microseconds::Since(b)), "\n");
+                }
 
                 // Even if we fail to update the index, that's not a big deal because
                 // 1. we can always rebuild the index 2. we use the index to locate the closest bundle to the target sequence number
@@ -1896,17 +1909,20 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
 
                 cur.flush_state.pendingFlushMsgs += bundleMsgsCnt;
 
-                if (trace)
+                if (trace) {
                         SLog("cur.flush_state.pendingFlushMsgs = ", cur.flush_state.pendingFlushMsgs, ", config.flushIntervalMsgs = ", config.flushIntervalMsgs, ", config.flushIntervalMsgs = ", config.flushIntervalMsgs, "\n");
+                }
 
                 if (config.flushIntervalMsgs && cur.flush_state.pendingFlushMsgs >= config.flushIntervalMsgs) {
-                        if (trace)
+                        if (trace) {
                                 SLog("Scheduling flush\n");
+                        }
 
                         schedule_flush(now);
                 } else if (now >= cur.flush_state.nextFlushTS) {
-                        if (trace)
+                        if (trace) {
                                 SLog("Scheduling flush\n");
+                        }
 
                         schedule_flush(now);
                 }
@@ -2329,18 +2345,21 @@ void Service::parse_partition_config(const strwlen32_t contents, partition_confi
 }
 
 void Service::parse_partition_config(const char *const path, partition_config *const l) {
-        int fd = open(path, O_RDONLY | O_LARGEFILE | O_NOATIME);
+        int fd = this_service->safe_open(path, O_RDONLY | O_LARGEFILE | O_NOATIME);
 
-        if (fd == -1)
+        if (-1 == fd) {
                 throw Switch::system_error("Failed to access topic/partition config file(", path, "):", strerror(errno));
-        else if (const auto fileSize = lseek64(fd, 0, SEEK_END)) {
-                require(fileSize != off64_t(-1));
+        }
+
+        if (const auto fileSize = lseek64(fd, 0, SEEK_END)) {
+                EXPECT(fileSize != off64_t(-1));
 
                 auto fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, fd, 0);
 
                 close(fd);
-                if (fileData == MAP_FAILED)
+                if (fileData == MAP_FAILED) {
                         throw Switch::system_error("Failed to access topic/partition config file(", path, ") of size ", fileSize, ":", strerror(errno));
+                }
 
                 madvise(fileData, fileSize, MADV_SEQUENTIAL | MADV_DONTDUMP);
                 DEFER({ munmap(fileData, fileSize); });
@@ -3203,7 +3222,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
 
                 if (trace) {
                         SLog(ansifmt::bold, ansifmt::color_magenta, "New COSNUME request for topicsCnt = ", topicsCnt, ansifmt::reset, "\n");
-		}
+                }
 
                 respHeader->Serialize(uint8_t(TankAPIMsgType::Consume));
                 const auto sizeOffset = respHeader->size();
@@ -3236,7 +3255,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
 
                         if (trace) {
                                 SLog("topic [", topicName, "]\n");
-			}
+                        }
 
                         respHeader->Serialize(topicName.len);
                         respHeader->Serialize(topicName.p, topicName.len);
@@ -3245,7 +3264,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                         if (!topic) {
                                 if (trace) {
                                         SLog("Unknown topic [", topicName, "]\n");
-				}
+                                }
 
                                 p += (sizeof(uint16_t) + sizeof(uint64_t) + sizeof(uint32_t)) * partitionsCnt;
                                 // Absuse scheme so that we won't have another field for this fault
@@ -3257,7 +3276,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
 
                         if (trace) {
                                 SLog(partitionsCnt, " for topic [", topicName, "]\n");
-			}
+                        }
 
                         for (uint32_t k{0}; k != partitionsCnt; ++k) {
                                 const auto partitionId = decode_pod<uint16_t>(p);
@@ -3275,7 +3294,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                 if (!partition) {
                                         if (trace) {
                                                 SLog("Undefined partition ", partitionId, "\n");
-					}	
+                                        }
 
                                         respHeader->Serialize(uint8_t(0xff));
                                         respondNow = true;
@@ -3283,9 +3302,9 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                 }
 
                                 if (trace) {
-                                        SLog("> REQUEST FOR partition ", partitionId, ", absSeqNum ", absSeqNum, 
-						", fetchSize ", fetchSize, " firstAvailableSeqNum = ", partition->log_->firstAvailableSeqNum, ", lastAssignedSeqNum = ", partition->log_->lastAssignedSeqNum, "\n");
-				}
+                                        SLog("> REQUEST FOR partition ", partitionId, ", absSeqNum ", absSeqNum,
+                                             ", fetchSize ", fetchSize, " firstAvailableSeqNum = ", partition->log_->firstAvailableSeqNum, ", lastAssignedSeqNum = ", partition->log_->lastAssignedSeqNum, "\n");
+                                }
 
                                 if (absSeqNum == UINT64_MAX) {
                                         // Fetch starting from whatever bundles are commited from now on
@@ -3321,12 +3340,12 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
 
                                                                 if (trace) {
                                                                         SLog("Adjuted to ", range, "\n");
-								}
+                                                                }
                                                         }
 
                                                         if (trace) {
                                                                 SLog(ansifmt::bold, "Response:(baseSeqNum = ", res.absBaseSeqNum, ", range ", range, ", firstBundleIsSparse = ", firstBundleIsSparse, ")", ansifmt::reset, "\n");
-							}
+                                                        }
 
                                                         if (firstBundleIsSparse) {
                                                                 // Set special errorOrFlags to let the client know that we are not going to encode here the seq.num of the first msg of the first bundle, because
@@ -3336,7 +3355,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
 
                                                                 if (trace) {
                                                                         SLog("Setting errorOrFlags to 0xfe\n");
-								}
+                                                                }
 
                                                         } else {
                                                                 respHeader->Serialize(uint8_t(0));        // errorOrFlags
@@ -3370,7 +3389,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
 
                                                                 if (trace) {
                                                                         SLog("Took ", duration_repr(Timings::Microseconds::Since(b)), " for readahead(", range, ") ", size_repr(range.len), "\n");
-								}
+                                                                }
                                                         }
 #endif
 
@@ -3385,7 +3404,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                                                 case lookup_res::Fault::AtEOF: {
                                                         if (trace) {
                                                                 SLog("Got AtEOF; will wait\n");
-							}
+                                                        }
 
                                                         const auto l = respHeader->size();
 
@@ -3445,7 +3464,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
 
                         if (trace) {
                                 SLog("Responding now, n = ", deferList.size(), "\n");
-			}
+                        }
 
                         patchList[patchListSize++].SetEnd(respHeader->size());
 
@@ -3468,7 +3487,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
 
                         if (trace) {
                                 SLog("respHeader.length = ", respHeader->size(), " ", *(uint32_t *)respHeader->At(sizeOffset), "\n");
-			}
+                        }
 
                         headerPayload->set_iov(patchList, patchListSize);
                         return try_send_ifnot_blocked(c);
@@ -3478,20 +3497,20 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
 
                         if (trace) {
                                 SLog("Cannot respond yet (", q->size(), ", ", qSize, ")\n");
-			}
+                        }
 
                         while (q->size() != qSize) {
                                 auto &p = q->back();
 
                                 if (trace) {
                                         SLog("Dropping payload ", p.payloadBuf, "\n");
-				}
+                                }
 
                                 if (p.payloadBuf) {
                                         put_buffer(p.buf);
-				} else {
+                                } else {
                                         p.file_range.fdh->Release();
-				}
+                                }
 
                                 q->pop_back();
                         }
@@ -3499,7 +3518,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
                         if (q->empty()) {
                                 if (trace) {
                                         SLog("No longer needed outQ\n");
-				}
+                                }
 
                                 put_outgoing_queue(q);
                                 c->outQ = nullptr;
@@ -3510,7 +3529,7 @@ bool Service::process_consume(connection *const c, const uint8_t *p, const size_
         } catch (const std::exception &e) {
                 if (trace) {
                         SLog("Cought exception:", e.what(), "\n");
-		}
+                }
 
                 track_shutdown(c, __LINE__, "Exception thrown:", e.what(), "\n");
                 return shutdown(c, __LINE__);
@@ -3621,16 +3640,19 @@ void Service::fire_timer(eb64_node_ctx *const ctx) {
                                         b.Serialize<uint64_t>(it->lastCleanupMaxSeqNum);
                                 }
 
-                                fd = open(Buffer::build(basePath_, "/.cleanup.log.int").data(), O_WRONLY | O_TRUNC | O_CREAT, 0775);
-                                if (fd == -1)
+                                fd = safe_open(Buffer::build(basePath_, "/.cleanup.log.int").data(), O_WRONLY | O_TRUNC | O_CREAT, 0775);
+
+                                if (fd == -1) {
                                         Print("Failed to update cleanup log:", strerror(errno), "\n");
-                                else if (write(fd, b.data(), b.size()) != b.size()) {
+                                } else if (write(fd, b.data(), b.size()) != b.size()) {
                                         Print("Failed to update cleanup log:", strerror(errno), "\n");
                                         close(fd);
                                 } else {
                                         close(fd);
-                                        if (Rename(Buffer::build(basePath_, "/.cleanup.log.int").data(), Buffer::build(basePath_, "/.cleanup.log").data()) == -1)
+
+                                        if (Rename(Buffer::build(basePath_, "/.cleanup.log.int").data(), Buffer::build(basePath_, "/.cleanup.log").data()) == -1) {
                                                 Print("Failed to update cleanup log:", strerror(errno));
+                                        }
                                 }
 
                                 cleanupTrackerIsDirty = false;
@@ -3812,7 +3834,7 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
                                         int fd;
 
                                         strcpy(topicPath + topicPathLen, "config");
-                                        fd = open(topicPath, O_WRONLY | O_CREAT | O_LARGEFILE, 0775);
+                                        fd = safe_open(topicPath, O_WRONLY | O_CREAT | O_LARGEFILE, 0775);
                                         if (fd == -1) {
                                                 resp->Serialize<uint8_t>(2);
                                                 goto l1;
@@ -3897,7 +3919,7 @@ bool Service::process_load_conf(connection *const c, const uint8_t *p, const siz
                         resp->pack(static_cast<uint8_t>(10));
                 } else {
                         auto path = Buffer::build(basePath_.as_s32(), '/', topic->name_, '/', partition_id, "/config"_s32);
-                        int  fd   = open(path.c_str(), O_RDONLY);
+                        int  fd   = safe_open(path.c_str(), O_RDONLY);
 
                         if (-1 == fd) {
                                 resp->pack(static_cast<uint8_t>(2));
@@ -4616,6 +4638,9 @@ void Service::cleanup_connection(connection *const c) {
         close(c->fd);
         c->fd = -1;
 
+        // remove from idle connections if it's tracked there already
+        make_active(c);
+
         if (!prom_connection) {
                 // For simplicity, place in a vector and drain it instead
                 expiredCtxList.clear();
@@ -4781,19 +4806,23 @@ bool Service::try_send(connection *const c) {
         struct iovec iov[1024];
         uint32_t     iovCnt{0};
 
-        if (c->state.flags & (1u << uint8_t(connection::State::Flags::PendingIntro)))
+        if (c->state.flags & (1u << uint8_t(connection::State::Flags::PendingIntro))) {
                 introduce_self(c, haveCork);
+        }
 
         if (!q) {
-                if (trace)
+                if (trace) {
                         SLog("Nothing to send\n");
+                }
 
                 stop_poll_outavail(c);
+                try_make_idle(c);
                 return true;
         }
 
-        if (trace)
+        if (trace) {
                 SLog("Attempting to send ", q->size(), " payloads\n");
+        }
 
         const auto                   end{q->backIdx};
         [[maybe_unused]] std::size_t transmitted { 0 };
@@ -4859,8 +4888,9 @@ bool Service::try_send(connection *const c) {
                                                 if (errno == EINTR)
                                                         continue;
                                                 else if (errno == EAGAIN) {
-                                                        if (trace)
+                                                        if (trace) {
                                                                 SLog("Deactivating Cork\n");
+                                                        }
 
                                                         Switch::SetTCPCork(fd, 0);
                                                         poll_outavail(c);
@@ -4890,15 +4920,17 @@ bool Service::try_send(connection *const c) {
                                                                         // flushed data for next payload
                                                                         goto next;
                                                                 }
-                                                        } else
+                                                        } else {
                                                                 ++ptr;
+                                                        }
                                                 }
 
                                                 ptr->iov_base = reinterpret_cast<char *>(ptr->iov_base) + r;
                                                 ptr->iov_len -= r;
 
-                                                if (trace)
+                                                if (trace) {
                                                         SLog("Deactivating Cork\n");
+                                                }
 
                                                 Switch::SetTCPCork(fd, 0);
                                                 poll_outavail(c);
@@ -4947,15 +4979,17 @@ bool Service::try_send(connection *const c) {
                                 }
 
                                 if (r == -1) {
-                                        if (errno == EINTR)
+                                        if (errno == EINTR) {
                                                 continue;
-                                        else if (errno == EAGAIN) {
-                                                if (trace)
+                                        } else if (errno == EAGAIN) {
+                                                if (trace) {
                                                         SLog("EAGAIN (haveCork = ", haveCork, ", needOutAvail = ", (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))), ")\n");
+                                                }
 
                                                 if (haveCork) {
-                                                        if (trace)
+                                                        if (trace) {
                                                                 SLog("Deactivating Cork\n");
+                                                        }
 
                                                         Switch::SetTCPCork(fd, 0);
                                                 }
@@ -4975,15 +5009,17 @@ bool Service::try_send(connection *const c) {
                                         }
 
                                         if (0 == range.len) {
-                                                if (trace)
+                                                if (trace) {
                                                         SLog("SENT-releasing ", ansifmt::bold, ansifmt::color_blue, ptr_repr(it.file_range.fdh), " ", it.file_range.fdh->use_count(), ansifmt::reset, "\n");
+                                                }
 
                                                 if (const auto since = it.tracker.since) {
                                                         const auto delta = Timings::Microseconds::ToMillis(Timings::Microseconds::Since(since));
                                                         auto       topic{it.tracker.src_topic};
 
-                                                        if (trace)
+                                                        if (trace) {
                                                                 SLog("Took ", duration_repr(delta), " to send\n");
+                                                        }
 
                                                         require(topic);
                                                         topic->metrics.latency.reg_sample(delta);
@@ -4994,8 +5030,9 @@ bool Service::try_send(connection *const c) {
                                                 break;
                                         }
 
-                                        if (trace)
+                                        if (trace) {
                                                 SLog("r = ", r, ", outLen = ", outLen, "\n");
+                                        }
 
                                         if (r != outLen) {
                                                 // if we didn't get to sendfile() all the data we wanted to write
@@ -5004,8 +5041,9 @@ bool Service::try_send(connection *const c) {
                                                 // get EAGAIN.
                                                 // So we 'll just consider the socket buffer full now and execute the EAGAIN logic
                                                 if (haveCork) {
-                                                        if (trace)
+                                                        if (trace) {
                                                                 SLog("Deactivating Cork\n");
+                                                        }
 
                                                         Switch::SetTCPCork(fd, 0);
                                                 }
@@ -5021,8 +5059,9 @@ bool Service::try_send(connection *const c) {
                                                 // so, give readhead() a fair chance to work for us, and return control to the loop so that other
                                                 // clients and their connections can be served.
                                                 // https://github.com/phaistos-networks/TANK/issues/14#issuecomment-301442619
-                                                if (trace)
+                                                if (trace) {
                                                         SLog("Bailing, transmitted ", transmitted, " but spent ", sum, " ", duration_repr(sum), "\n");
+                                                }
 
                                                 goto l2;
                                         }
@@ -5036,8 +5075,9 @@ bool Service::try_send(connection *const c) {
                                         // https://github.com/phaistos-networks/TANK/issues/14#issuecomment-301000261
                                         l2:
                                                 if (haveCork) {
-                                                        if (trace)
+                                                        if (trace) {
                                                                 SLog("Deactivating cork\n");
+                                                        }
                                                         Switch::SetTCPCork(fd, 0);
                                                 }
 
@@ -5050,22 +5090,25 @@ bool Service::try_send(connection *const c) {
         }
 
         if (iovCnt) {
-                if (trace)
+                if (trace) {
                         SLog("Sending pending outgoing iov[] ", iovCnt, "\n");
+                }
 
                 for (;;) {
                         auto r = writev(fd, iov, iovCnt);
 
-                        if (trace)
+                        if (trace) {
                                 SLog("r = ", r, " for ", iovCnt, "\n");
+                        }
 
                         if (r == -1) {
                                 if (errno == EINTR) {
                                         continue;
                                 } else if (errno == EAGAIN) {
                                         if (haveCork) {
-                                                if (trace)
+                                                if (trace) {
                                                         SLog("Deactivating Cork\n");
+                                                }
 
                                                 Switch::SetTCPCork(fd, 0);
                                         }
@@ -5083,8 +5126,9 @@ bool Service::try_send(connection *const c) {
                                 auto &it  = q->front();
                                 auto  ptr = it.iov + it.iovIdx;
 
-                                if (trace)
+                                if (trace) {
                                         SLog("Payload iovIdx = ", it.iovIdx, " ", it.iovCnt, "\n");
+                                }
 
                                 while (r >= ptr->iov_len) {
                                         r -= ptr->iov_len;
@@ -5093,27 +5137,31 @@ bool Service::try_send(connection *const c) {
                                                 put_buffer(it.buf);
                                                 q->pop_front();
 
-                                                if (trace)
+                                                if (trace) {
                                                         SLog("done with payload, r now = ", r, ", close on flush = ", c->close_on_flush(), ", haveCork = ", haveCork, "\n");
+                                                }
 
                                                 if (!r) {
                                                         // done with all data we we need to flush for the buffers
                                                         require(q->empty()); // sanity check
 
                                                         if (haveCork) {
-                                                                if (trace)
+                                                                if (trace) {
                                                                         SLog("Deactivating cork\n");
+                                                                }
 
                                                                 Switch::SetTCPCork(fd, 0);
                                                                 haveCork = false;
                                                         }
 
-                                                        if (trace)
+                                                        if (trace) {
                                                                 SLog("Drained queue\n");
+                                                        }
 
                                                         if (c->close_on_flush()) {
-                                                                if (trace)
+                                                                if (trace) {
                                                                         SLog("Drained\n");
+                                                                }
 
                                                                 return shutdown(c, __LINE__);
                                                         } else {
@@ -5132,8 +5180,9 @@ bool Service::try_send(connection *const c) {
                                 ptr->iov_len -= r;
 
                                 if (haveCork) {
-                                        if (trace)
+                                        if (trace) {
                                                 SLog("Deactivating Cork\n");
+                                        }
 
                                         Switch::SetTCPCork(fd, 0);
                                 }
@@ -5160,6 +5209,7 @@ l150:
         c->outQ = nullptr;
 
         stop_poll_outavail(c);
+        try_make_idle(c);
         return true;
 }
 
@@ -5205,20 +5255,27 @@ Service::~Service() {
 int Service::try_accept(int fd) {
         sockaddr_in sa;
         socklen_t   saLen = sizeof(sa);
-        int         newFd = accept4(fd, reinterpret_cast<sockaddr *>(&sa), &saLen, SOCK_NONBLOCK | SOCK_CLOEXEC);
+        int         newFd;
+
+_accept:
+        newFd = accept4(fd, reinterpret_cast<sockaddr *>(&sa), &saLen, SOCK_NONBLOCK | SOCK_CLOEXEC);
 
         if (newFd == -1) {
                 if (errno == EMFILE || errno == ENFILE) {
-                        // TODO(markp): Ideally, we 'd poller.erase(listenFd);
-                        // set listening = false; and if a connection's closed, check
-                        // if (listening == false)  { poller.insert(listenFd, POLLIN, &listenFd); listening  = true; }
-                        // so that we won't waste any cycles attempting to accept4() only to fail because of this here reason
-                        // This would probably be useful in case someone puprosely tried to harm the service, or some badly written client(s)
-                        // are acting up.
-                        //
-                        // For now, just do nothing
-                        // Reported @by @rkrambovitis
-                        return 0;
+                        if (try_shutdown_idle(1)) {
+                                goto _accept;
+                        } else {
+                                // TODO(markp): Ideally, we 'd poller.erase(listenFd);
+                                // set listening = false; and if a connection's closed, check
+                                // if (listening == false)  { poller.insert(listenFd, POLLIN, &listenFd); listening  = true; }
+                                // so that we won't waste any cycles attempting to accept4() only to fail because of this here reason
+                                // This would probably be useful in case someone puprosely tried to harm the service, or some badly written client(s)
+                                // are acting up.
+                                //
+                                // For now, just do nothing
+                                // Reported @by @rkrambovitis
+                                return 0;
+                        }
                 } else if (errno != EINTR && errno != EAGAIN) {
                         RFLog("accept4(): ", strerror(errno), "\n");
                         return 1;
@@ -5257,6 +5314,9 @@ int Service::try_accept(int fd) {
                 // but we can't write(fd, ..) now; so we 'll need to wait for POLLOUT and then ping
                 c->state.flags = (1u << uint8_t(connection::State::Flags::PendingIntro)) | (1u << uint8_t(connection::State::Flags::NeedOutAvail));
                 poller.insert(c->fd, POLLIN | POLLOUT, c);
+
+                // start as idle
+                make_idle(c);
         }
 
         return 0;
@@ -5264,14 +5324,20 @@ int Service::try_accept(int fd) {
 
 int Service::try_accept_prom(int fd) {
         sockaddr_in sa;
-        socklen_t   len    = sizeof(sa);
-        auto        new_fd = accept4(fd, reinterpret_cast<sockaddr *>(&sa), &len, SOCK_NONBLOCK | SOCK_CLOEXEC);
+        socklen_t   len = sizeof(sa);
+        int         new_fd;
+
+_accept:
+        new_fd = accept4(fd, reinterpret_cast<sockaddr *>(&sa), &len, SOCK_NONBLOCK | SOCK_CLOEXEC);
 
         if (new_fd == -1) {
                 if (errno == EMFILE || errno == ENFILE) {
-                        // TODO(markp): do something appropriate
-                        // shutdown idle connections, and try accept4() again
-                        return 0;
+                        if (try_shutdown_idle(1)) {
+                                goto _accept;
+                        } else {
+                                // ran out of FDs and we can't do much abot it
+                                return 0;
+                        }
                 } else if (errno != EINTR && errno != EAGAIN) {
                         Print("accept4() failed:", strerror(errno), "\n");
                         return 1;
@@ -5288,6 +5354,9 @@ int Service::try_accept_prom(int fd) {
                 switch_dlist_insert_after(&allConnections, &c->connectionsList);
 
                 poller.insert(c->fd, POLLIN, c);
+
+                // start as idle
+                make_idle(c);
         }
 
         return 0;
@@ -5584,6 +5653,8 @@ bool Service::try_recv(connection *const c) {
                 c->state.lastInputTS = now_ms;
         }
 
+        make_active(c);
+
         if (c->src_prometheus()) {
                 if (!try_recv_prom(c)) {
                         return false;
@@ -5598,6 +5669,9 @@ bool Service::try_recv(connection *const c) {
                 if (b->offset() == b->size()) {
                         put_buffer(b);
                         c->inB = nullptr;
+
+                        // if we have no pending outgoing data, make it idle
+                        try_make_idle(c);
                 } else if (b->offset() > 4 * 1024 * 1024) {
                         b->DeleteChunk(0, b->offset());
                         b->SetOffset(uint64_t(0));
@@ -5690,14 +5764,140 @@ void Service::tear_down() {
         }
 }
 
+void Service::consider_idle_conns() {
+        // in reverse so that we consider the oldest idle connections before we consider the most recent ones
+        if (trace_idle) {
+                SLog("Considering ", idle_connections_count,  " idle connections\n");
+	}
+
+        while (!idle_connections.empty()) {
+                auto c = switch_list_entry(connection, idle.idle_conns_ll, idle_connections.prev);
+
+                if (trace_idle) {
+                        SLog("Connection ", ptr_repr(c), " idle for ", now_ms - c->idle.since, "\n");
+		}
+
+                if (now_ms - c->idle.since < idle_connection_ttl) {
+                        // hasn't been idle for that long
+                        break;
+                }
+
+                shutdown(c, __LINE__);
+        }
+
+        if (idle_connections.empty()) {
+                next_idle_check_ts = std::numeric_limits<uint64_t>::max();
+        } else {
+                const auto c         = switch_list_entry(connection, idle.idle_conns_ll, idle_connections.prev);
+                const auto idle_time = now_ms - c->idle.since;
+
+                next_idle_check_ts = now_ms + (idle_connection_ttl - idle_time);
+        }
+
+        if (trace_idle) {
+                SLog("next_idle_check_ts = ", next_idle_check_ts, "\n");
+	}
+}
+
+void Service::try_make_idle(connection *const c) {
+        // TODO: we still need to track connections where we
+        // have read 1+ bytes from the request, but it's been too long since then and we still
+        // haven't gotten around to parsing in the whole request.
+        //
+        // This can be an important defense against agents that look to abuse the service
+        if (!c->inB && !c->outQ) {
+                make_idle(c);
+        }
+}
+
+void Service::make_idle(connection *const c) {
+        if (c->idle.idle_conns_ll.empty()) {
+                if (trace_idle) {
+                        SLog("Connection ", ptr_repr(c), " now idle, total idle connections ", idle_connections_count, "\n");
+                }
+
+                if (idle_connections.empty()) {
+                        // first idle connection
+                        next_idle_check_ts = now_ms + idle_connection_ttl;
+
+                        if (trace_idle) {
+                                SLog("Set next_idle_check_ts to ", next_idle_check_ts, "\n");
+                        }
+                }
+
+                idle_connections.push_back(&c->idle.idle_conns_ll);
+                c->idle.since = now_ms;
+                ++idle_connections_count;
+        }
+
+        // TODO: configurable
+        while (idle_connections_count > 128) {
+                auto c = switch_list_entry(connection, idle.idle_conns_ll, idle_connections.prev);
+
+                shutdown(c, __LINE__);
+        }
+}
+
+void Service::make_active(connection *const c) {
+        if (!c->idle.idle_conns_ll.empty()) {
+                if (trace_idle)
+                        SLog("Connection ", ptr_repr(c), " is now active, total idle connections ", idle_connections.size(), "\n");
+
+                c->idle.idle_conns_ll.detach_and_reset();
+		--idle_connections_count;
+
+                if (idle_connections.empty()) {
+                        // No longer care for idle connections checks
+                        next_idle_check_ts = std::numeric_limits<uint64_t>::max();
+
+                        if (trace_idle)
+                                SLog("Set next_idle_check_ts to ", next_idle_check_ts, "\n");
+                }
+        }
+}
+
+int Service::safe_open(const char *path, int flags, mode_t mode) {
+        for (int fd;;) {
+                fd = open(path, flags, mode);
+
+                if (-1 == fd) {
+                        if ((ENFILE == errno || EMFILE == errno) && try_shutdown_idle(1)) {
+                                continue;
+                        } else if (EINTR == errno) {
+                                continue;
+                        } else {
+                                return -1;
+                        }
+                } else {
+                        return fd;
+                }
+        }
+}
+
+// attempt to shutdown upto `n` connections in order
+// to reclaim resources, especially FDs
+size_t Service::try_shutdown_idle(size_t n) {
+        const auto b = n;
+
+        while (n && !idle_connections.empty()) {
+                auto c = switch_list_entry(connection, idle.idle_conns_ll, idle_connections.prev);
+
+                shutdown(c, __LINE__);
+                --n;
+        }
+
+        return b - n;
+}
+
 int Service::reactor_main() {
-	for (uint64_t next_curtime_update{0};;) {
-		gc_waitctx_deferred();
+        for (uint64_t next_curtime_update{0};;) {
+                gc_waitctx_deferred();
 
                 // determine how long to wait, account for the next timer/event timestamp
                 now_ms = Timings::Milliseconds::Tick();
 
-                const auto wait_until = std::min(now_ms + 30 * 1000, timers_ebtree_next);
+                const auto wait_until = std::min(now_ms + 30 * 1000,
+                                                 std::min(next_idle_check_ts, timers_ebtree_next));
 
                 sleeping.store(true, std::memory_order_relaxed);
                 const auto                  r           = poller.poll(wait_until - now_ms);
@@ -5706,8 +5906,8 @@ int Service::reactor_main() {
 
                 now_ms = Timings::Milliseconds::Tick();
                 if (now_ms > next_curtime_update) {
-			// we can avoid excessive time() by
-			// checking updating every 500ms
+                        // we can avoid excessive time() by
+                        // checking updating every 500ms
                         curTime             = time(nullptr);
                         next_curtime_update = now_ms + 500;
                 }
@@ -5735,9 +5935,13 @@ int Service::reactor_main() {
                 if (now_ms >= timers_ebtree_next) {
                         process_timers();
                 }
+
+                if (now_ms >= next_idle_check_ts) {
+                        consider_idle_conns();
+                }
         }
-	
-	tear_down();
+
+        tear_down();
 
         Print("TANK terminated\n");
         return 0;
@@ -6110,7 +6314,7 @@ int Service::start(int argc, char **argv) {
                 IMPLEMENT_ME();
         }
 
-        Print(ansifmt::bold, "<=TANK=>", ansifmt::reset, " v", TANK_VERSION / 100, ".", TANK_VERSION % 100, " ", dotnotation_repr(topics.size()), " topics registered, ", dotnotation_repr(totalPartitions), " partitions; will listen for new connections at ", listenAddr, "\n");
+        Print(ansifmt::bold, "<=TANK=>", ansifmt::reset, " v", TANK_VERSION / 100, ".", TANK_VERSION % 100, " | ", dotnotation_repr(topics.size()), " topics registered, ", dotnotation_repr(totalPartitions), " partitions; will listen for new connections at ", listenAddr, "\n");
         if (prom_endpoint)
                 Print("> Prometheus Exporter enabled, will respond to http://", prom_endpoint, "/metrics\n");
         if (read_only)

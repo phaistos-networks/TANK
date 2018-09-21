@@ -837,6 +837,11 @@ struct connection final {
         // all active wait_ctx's
         switch_dlist connectionsList, waitCtxList;
 
+	struct { 
+		uint64_t since;
+		switch_dlist idle_conns_ll;
+	} idle;
+
         // This is initialized to(0) for clients, but followers are expected to
         // issue an REPLICA_ID request as soon as they connect
         uint16_t replicaId;
@@ -871,6 +876,7 @@ class Service final {
         friend struct ro_segment;
 
       private:
+        static constexpr size_t idle_connection_ttl{16 * 1000};
         enum class OperationMode : uint8_t {
                 Standalone = 0,
                 Clustered
@@ -880,7 +886,9 @@ class Service final {
         Switch::vector<IOBuffer *>                                   bufs;
         Switch::vector<connection *>                                 connsPool;
         Switch::vector<outgoing_queue *>                             outgoingQueuesPool;
-        switch_dlist                                                 allConnections;
+        switch_dlist                                                 allConnections, idle_connections{&idle_connections, &idle_connections};
+	size_t idle_connections_count{0};
+	uint64_t next_idle_check_ts{std::numeric_limits<uint64_t>::max()};
         eb_root  timers_ebtree_root;
         uint64_t timers_ebtree_next;
 	eb64_node_ctx cleanup_tracker;
@@ -944,7 +952,10 @@ class Service final {
         }
 
         auto get_connection() {
-                return connsPool.size() ? connsPool.Pop() : new connection();
+                auto c = connsPool.size() ? connsPool.Pop() : new connection();
+
+                c->idle.idle_conns_ll.reset();
+                return c;
         }
 
         void put_connection(connection *const c) {
@@ -993,7 +1004,17 @@ class Service final {
 
 	void gc_waitctx_deferred();
 
+	void consider_idle_conns();
+
+	size_t try_shutdown_idle(size_t);
+
 	void tear_down();
+
+	void make_idle(connection *);
+
+	void try_make_idle(connection *);
+
+	void make_active(connection *);
 
 	bool process_load_conf(connection *, const uint8_t *, const size_t);
 
@@ -1092,6 +1113,8 @@ class Service final {
 	void maybe_wakeup_reactor();
 
 	void schedule_cleanup();
+
+	int safe_open(const char *path, int flags, mode_t mode = 0);
 
       public:
         static inline std::atomic<uint64_t> pending_signals{0};
