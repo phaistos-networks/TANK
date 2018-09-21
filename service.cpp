@@ -5826,7 +5826,11 @@ void Service::make_idle(connection *const c) {
                 }
 
                 idle_connections.push_back(&c->idle.idle_conns_ll);
-                c->idle.since = now_ms;
+
+                // we will align down to 128ms
+                // so that we be checking for idle connections less frequently, even if we potentially
+                // need to shutdown a connection 100ms earlier
+                c->idle.since = now_ms & (-128);
                 ++idle_connections_count;
         }
 
@@ -5840,8 +5844,9 @@ void Service::make_idle(connection *const c) {
 
 void Service::make_active(connection *const c) {
         if (!c->idle.idle_conns_ll.empty()) {
-                if (trace_idle)
+                if (trace_idle) {
                         SLog("Connection ", ptr_repr(c), " is now active, total idle connections ", idle_connections.size(), "\n");
+		}
 
                 c->idle.idle_conns_ll.detach_and_reset();
 		--idle_connections_count;
@@ -5850,8 +5855,9 @@ void Service::make_active(connection *const c) {
                         // No longer care for idle connections checks
                         next_idle_check_ts = std::numeric_limits<uint64_t>::max();
 
-                        if (trace_idle)
+                        if (trace_idle) {
                                 SLog("Set next_idle_check_ts to ", next_idle_check_ts, "\n");
+			}
                 }
         }
 }
