@@ -1798,7 +1798,7 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
                 basePath.resize(basePathLen);
                 basePath.append(cur.baseSeqNum, ".index");
 
-                fd = this_service->open(basePath.c_str(), read_only ? O_RDWR : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND), 0775);
+                fd = this_service->safe_open(basePath.c_str(), read_only ? O_RDWR : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND), 0775);
 
                 if (-1 == fd) {
                         throw Switch::system_error("open(", basePath, ") failed:", strerror(errno), ". Cannot load segment index");
