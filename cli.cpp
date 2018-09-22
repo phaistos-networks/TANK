@@ -8,6 +8,9 @@
 #include <sysexits.h>
 #include <text.h>
 #include <unordered_map>
+//#ifdef SWITCH_PHAISTOS
+#include <text_table.h>
+//#endif
 
 static uint64_t parse_timestamp(strwlen32_t s) {
         strwlen32_t c;
@@ -866,12 +869,26 @@ int main(int argc, char *argv[]) {
                         for (const auto &it : tankClient.discovered_partitions()) {
                                 uint16_t i{0};
 
-                                require(it.clientReqId == reqId);
+                                EXPECT(it.clientReqId == reqId);
+
+
+#if defined(SWITCH_PHAISTOS) || 1
+                                text_table tt;
+
+				tt.set_headers("Partition", "First Available", "Last Assigned");
+				for (const auto wm : it.watermarks) {
+					tt.add_row(i++, wm->first, wm->second);
+				}
+
+				Print(tt.draw());
+#else
                                 Print(dotnotation_repr(it.watermarks.len), " partitions for '", topicPartition.first, "'\n");
 
                                 Print(ansifmt::bold, "Partition", ansifmt::set_col(10), "First Available", ansifmt::set_col(30), "Last Assigned", ansifmt::reset, "\n");
                                 for (const auto wm : it.watermarks)
                                         Print(ansifmt::bold, i++, ansifmt::reset, ansifmt::set_col(10), dotnotation_repr(wm->first), ansifmt::set_col(30), dotnotation_repr(wm->second), "\n");
+#endif
+
                         }
                 }
 

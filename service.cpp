@@ -5800,11 +5800,6 @@ void Service::consider_idle_conns() {
 }
 
 void Service::try_make_idle(connection *const c) {
-        // TODO: we still need to track connections where we
-        // have read 1+ bytes from the request, but it's been too long since then and we still
-        // haven't gotten around to parsing in the whole request.
-        //
-        // This can be an important defense against agents that look to abuse the service
         if (!c->inB && !c->outQ) {
                 make_idle(c);
         }
@@ -5843,6 +5838,14 @@ void Service::make_idle(connection *const c) {
 }
 
 void Service::make_active(connection *const c) {
+        // TODO: we still need to track connections where we
+        // have read 1+ bytes from the request, but it's been too long since then and we still
+        // haven't gotten around to parsing in the whole request.
+        //
+        // This can be an important defense against agents that look to abuse the service
+	//
+	// We just need to track all active connections(like we track all inactive connections)
+	// and periodically check if they have been active for too long and (connection::outQ == nullptr)
         if (!c->idle.idle_conns_ll.empty()) {
                 if (trace_idle) {
                         SLog("Connection ", ptr_repr(c), " is now active, total idle connections ", idle_connections.size(), "\n");
