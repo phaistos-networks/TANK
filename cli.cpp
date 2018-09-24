@@ -460,7 +460,6 @@ int main(int argc, char *argv[]) {
                 }
 
                 size_t     totalMsgs{0}, sumBytes{0};
-                const auto b            = Timings::Microseconds::Tick();
                 auto       minFetchSize = defaultMinFetchSize;
 
                 if (const auto seek_ts = time_range.offset) {
@@ -619,6 +618,8 @@ int main(int argc, char *argv[]) {
                         }
                 }
 
+                const auto b = Timings::Microseconds::Tick();
+
                 for (const auto time_range_end = time_range.offset + time_range.size();;) {
                         if (!pendingResp) {
                                 if (verbose) {
@@ -669,25 +670,35 @@ int main(int argc, char *argv[]) {
                                 }
 
                                 if (statsOnly) {
-                                        Print(it.msgs.len, " messages\n");
+                                        Print(">> ", dotnotation_repr(it.msgs.size()), " messages\n");
                                         totalMsgs += it.msgs.size();
 
-                                        if (!time_range.offset) {
+                                        if (time_range.offset) {
+                                        	bool   should_abort{false};
+
                                                 if (verbose) {
                                                         for (const auto m : it.msgs) {
                                                                 if (time_range.Contains(m->ts)) {
                                                                         Print(m->seqNum, ": ", size_repr(m->content.size()), "\n");
                                                                         sumBytes += m->content.len + m->key.len + sizeof(uint64_t);
-                                                                }
+                                                                } else if (m->ts >= time_range_end) {
+									should_abort = true;
+								}
                                                         }
 
                                                 } else {
                                                         for (const auto m : it.msgs) {
                                                                 if (time_range.Contains(m->ts)) {
                                                                         sumBytes += m->content.len + m->key.len + sizeof(uint64_t);
-                                                                }
+                                                                } else if (m->ts >= time_range_end) {
+									should_abort = true;
+								}
                                                         }
                                                 }
+
+						if (should_abort) {
+							goto out;
+						}
 
                                         } else {
                                                 if (verbose) {
@@ -723,7 +734,7 @@ int main(int argc, char *argv[]) {
                                         buf.clear();
                                         buf.reserve(sum);
                                         for (const auto m : it.msgs) {
-                                                if (m->seqNum > endSeqNum || m->ts > time_range_end) {
+                                                if (m->seqNum > endSeqNum || m->ts >= time_range_end) {
                                                         should_abort = true;
                                                         break;
                                                 } else if (time_range.Contains(m->ts)) {
@@ -772,8 +783,9 @@ int main(int argc, char *argv[]) {
 
         out:
                 if (statsOnly) {
-                        Print(dotnotation_repr(totalMsgs), " messages consumed in ", duration_repr(Timings::Microseconds::Since(b)), ", ", size_repr(sumBytes), " bytes consumed\n");
+                        Print(dotnotation_repr(totalMsgs), " messages consumed in ", duration_repr(Timings::Microseconds::Since(b)), ", ", size_repr(sumBytes), " consumed\n");
 		}
+
         } else if (cmd.Eq(_S("create_topic"))) {
                 Buffer config;
 
