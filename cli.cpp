@@ -277,10 +277,15 @@ int main(int argc, char *argv[]) {
                 range64_t time_range{0, UINT64_MAX};
                 bool      drainAndExit{false};
                 uint64_t  endSeqNum{UINT64_MAX};
+		str_view32 filter;
 
                 optind = 0;
-                while ((r = getopt(argc, argv, "+SF:hBT:KdE:s:")) != -1) {
+                while ((r = getopt(argc, argv, "+SF:hBT:KdE:s:f:")) != -1) {
                         switch (r) {
+				case 'f':
+					filter.set(optarg);
+					break;
+
                                 case 'E':
                                         endSeqNum = strwlen32_t(optarg).AsUint64();
                                         break;
@@ -414,6 +419,7 @@ int main(int argc, char *argv[]) {
                                         Print("Options include:\n");
                                         Print("-F display format: Specify a ',' separated list of message properties to be displayed. Properties include: \"seqnum\", \"key\", \"content\", \"ts\". By default, only the content is displayed\n");
                                         Print("-S: statistics only\n");
+					Print("-f string: filter messages by string, i.e only considers messages where their content includes that string\n");
                                         Print("-E seqNum: Stop at sequence number specified\n");
                                         Print("-d: drain and exit. As soon as all available messages have been consumed, exit (i.e do not tail)\n");
                                         Print("-T: optionally, filter all consumes messages by specifying a time range\n");
@@ -671,43 +677,62 @@ int main(int argc, char *argv[]) {
 
                                 if (statsOnly) {
                                         Print(">> ", dotnotation_repr(it.msgs.size()), " messages\n");
-                                        totalMsgs += it.msgs.size();
 
                                         if (time_range.offset) {
-                                        	bool   should_abort{false};
+                                                bool should_abort{false};
 
                                                 if (verbose) {
                                                         for (const auto m : it.msgs) {
                                                                 if (time_range.Contains(m->ts)) {
+                                                                        if (filter && !m->content.Search(filter.data(), filter.size())) {
+                                                                                continue;
+                                                                        }
+
                                                                         Print(m->seqNum, ": ", size_repr(m->content.size()), "\n");
                                                                         sumBytes += m->content.len + m->key.len + sizeof(uint64_t);
+                                                                        ++totalMsgs;
                                                                 } else if (m->ts >= time_range_end) {
-									should_abort = true;
-								}
+                                                                        should_abort = true;
+                                                                }
                                                         }
 
                                                 } else {
                                                         for (const auto m : it.msgs) {
                                                                 if (time_range.Contains(m->ts)) {
+                                                                        if (filter && !m->content.Search(filter.data(), filter.size())) {
+                                                                                continue;
+                                                                        }
+
                                                                         sumBytes += m->content.len + m->key.len + sizeof(uint64_t);
+                                                                        ++totalMsgs;
                                                                 } else if (m->ts >= time_range_end) {
-									should_abort = true;
-								}
+                                                                        should_abort = true;
+                                                                }
                                                         }
                                                 }
 
-						if (should_abort) {
-							goto out;
-						}
+                                                if (should_abort) {
+                                                        goto out;
+                                                }
 
                                         } else {
+                                                totalMsgs += it.msgs.size();
+
                                                 if (verbose) {
                                                         for (const auto m : it.msgs) {
+								if (filter && !m->content.Search(filter.data(), filter.size())) {
+									continue;
+								}
+
                                                                 Print(m->seqNum, ": ", size_repr(m->content.size()), "\n");
                                                                 sumBytes += m->content.len + m->key.len + sizeof(uint64_t);
                                                         }
                                                 } else {
                                                         for (const auto m : it.msgs) {
+								if (filter && !m->content.Search(filter.data(), filter.size())) {
+									continue;
+								}
+
                                                                 sumBytes += m->content.len + m->key.len + sizeof(uint64_t);
                                                         }
                                                 }
@@ -718,6 +743,10 @@ int main(int argc, char *argv[]) {
 
                                         if (!time_range.offset) {
                                                 for (const auto m : it.msgs) {
+                                                        if (filter && !m->content.Search(filter.data(), filter.size())) {
+                                                                continue;
+                                                        }
+
                                                         sum += m->content.size();
                                                 }
 
@@ -725,6 +754,10 @@ int main(int argc, char *argv[]) {
                                         } else {
                                                 for (const auto m : it.msgs) {
                                                         if (time_range.Contains(m->ts)) {
+                                                                if (filter && !m->content.Search(filter.data(), filter.size())) {
+                                                                        continue;
+                                                                }
+
                                                                 sum += m->content.size();
                                                                 sum += 2;
                                                         }
@@ -738,6 +771,10 @@ int main(int argc, char *argv[]) {
                                                         should_abort = true;
                                                         break;
                                                 } else if (time_range.Contains(m->ts)) {
+                                                        if (filter && !m->content.Search(filter.data(), filter.size())) {
+                                                                continue;
+                                                        }
+
                                                         if (asKV) {
                                                                 buf.append(m->seqNum, " [", m->key, "] = [", m->content, "]");
                                                         } else if (displayFields) {
