@@ -16,8 +16,38 @@ static uint64_t parse_timestamp(strwlen32_t s) {
         strwlen32_t c;
         struct tm   tm;
 
+        if (s.StripPrefix(_S("T-"))) {
+                const char *p = s.data(), *const e = p + s.size();
+
+                if (p == e || !isdigit(*p)) {
+                        return 0;
+                }
+
+                uint32_t v{0};
+
+                do {
+                        v = v * 10 + (*(p++) - '0');
+                } while (p < e && isdigit(*p));
+
+                if (p < e) {
+                        if (*p == 's' || *p == 'S') {
+                                // seconds
+                        } else if (*p == 'm' || *p == 'M') {
+                                v *= 60;
+                        } else if (*p == 'h' || *p == 'H') {
+                                v *= 3600;
+                        } else if (*p == 'd' || *p == 'D') {
+                                v *= 86400;
+                        }
+                }
+
+                return Timings::Seconds::ToMillis(time(nullptr) - v);
+        }
+
         // for now, YYYYMMDDHH:MM:SS
         // Eventually, will support more date/timeformats
+
+
         if (s.size() != 16) {
                 return 0;
 	}
@@ -276,16 +306,30 @@ int main(int argc, char *argv[]) {
                                         const char *p = s.data(), *const e = p + s.size();
                                         char c = 0;
 
+                                        if (p + "T-"_len < e) {
+                                                p += "T-"_len;
+                                        }
+
                                         while (p < e) {
                                                 if (*p == '-' || *p == ',') {
                                                         s2 = s.SuffixFrom(p + 1);
                                                         s.set_end(p);
-                                                        c  = '-';
+                                                        c = '-';
+                                                        break;
+                                                } else if (*p == '.') {
+                                                        const auto _p = p;
+
+                                                        for (++p; p < e && *p == '.'; ++p) {
+                                                                // as many dots as you want
+                                                        }
+                                                        s2 = s.SuffixFrom(p);
+                                                        s.set_end(_p);
+                                                        c = '-';
                                                         break;
                                                 } else if (*p == '+') {
                                                         s2 = s.SuffixFrom(p + 1);
                                                         s.set_end(p);
-                                                        c  = '+';
+                                                        c = '+';
                                                         break;
                                                 } else {
                                                         ++p;
@@ -319,7 +363,7 @@ int main(int argc, char *argv[]) {
 
                                                 do {
                                                         v = v * 10 + (*(p++) - '0');
-                                                } while (++p < e && isdigit(*p));
+                                                } while (p < e && isdigit(*p));
 
                                                 if (p < e) {
                                                         if (*p == 's' || *p == 'S') {
@@ -378,7 +422,8 @@ int main(int argc, char *argv[]) {
 					Print("    -T 2018090115:20:30 : The first message's timestamp will >= that time\n");
 					Print("    -T 2018090115:20:30-2018090520:10:30 : The first message's timestamp will >= that time, and the last message's timestamp will be < the second timestamp\n");
 					Print("    -T 2018090100:00:00-24h : Will read all messages in 24 hours starting from that timesamp\n");
-					Print("  Currently, the only supported timestamp format notation is YYYYMMDDHH:MM:SS. More formats may be supported in the future\n");
+					Print("    -T T-1h+2m : Will read the first 2 minutes worth of messages starting from 1 hour ago\n");
+					Print("  Currently, the only supported timestamp format notations are YYYYMMDDHH:MM:SS and T-n(S|H|M|D). More formats may be supported in the future\n");
 					Print("  tank-cli will use binary search to quickly determine the appropriate sequence number\n");
                                         Print("\"from\" specifies the first message we are interested in.\n");
                                         Print("If from is \"beginning\" or \"start\","
