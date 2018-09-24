@@ -966,6 +966,10 @@ struct strwithlen {
                 len = e - p;
         }
 
+        constexpr void set_end(const CT *const e) {
+                len = e - p;
+        }
+
         void SetEndTo(const CT c) {
                 if (const auto *const res = Search(c))
                         SetEnd(res);

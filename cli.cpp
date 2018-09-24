@@ -18,8 +18,9 @@ static uint64_t parse_timestamp(strwlen32_t s) {
 
         // for now, YYYYMMDDHH:MM:SS
         // Eventually, will support more date/timeformats
-        if (s.len != 16)
+        if (s.size() != 16) {
                 return 0;
+	}
 
         c = s.Prefix(4);
         s.StripPrefix(4);
@@ -47,12 +48,11 @@ static uint64_t parse_timestamp(strwlen32_t s) {
 
         tm.tm_isdst = -1;
 
-        const auto res = mktime(&tm);
-
-        if (res == -1)
+        if (const auto res = mktime(&tm); - 1 == res) {
                 return 0;
-        else
+        } else {
                 return Timings::Seconds::ToMillis(res);
+        }
 }
 
 static uint64_t lcrng(const uint64_t state) noexcept {
@@ -63,28 +63,28 @@ int main(int argc, char *argv[]) {
         Buffer            topic, endpoint;
         uint16_t          partition{0};
         int               r;
-        TankClient        tankClient;
+        TankClient        tank_client;
         const char *const app = argv[0];
         bool              verbose{false}, retry{false};
 
         if (argc == 1)
                 goto help;
 
-        tankClient.set_retry_strategy(TankClient::RetryStrategy::RetryNever);
+        tank_client.set_retry_strategy(TankClient::RetryStrategy::RetryNever);
         while ((r = getopt(argc, argv, "+vb:t:p:hrS:R:")) != -1) // see GETOPT(3) for '+' initial character semantics
         {
                 switch (r) {
                         case 'S':
-                                tankClient.set_sock_sndbuf_size(strwlen32_t(optarg).AsUint32());
+                                tank_client.set_sock_sndbuf_size(strwlen32_t(optarg).AsUint32());
                                 break;
 
                         case 'R':
-                                tankClient.set_sock_rcvbuf_size(strwlen32_t(optarg).AsUint32());
+                                tank_client.set_sock_rcvbuf_size(strwlen32_t(optarg).AsUint32());
                                 break;
 
                         case 'r':
                                 retry = true;
-                                tankClient.set_retry_strategy(TankClient::RetryStrategy::RetryAlways);
+                                tank_client.set_retry_strategy(TankClient::RetryStrategy::RetryAlways);
                                 break;
 
                         case 'v':
@@ -174,10 +174,10 @@ int main(int argc, char *argv[]) {
 
         try {
                 if (endpoint.size())
-                        tankClient.set_default_leader(endpoint.AsS32());
+                        tank_client.set_default_leader(endpoint.AsS32());
                 else {
                         // By default, access local instance
-                        tankClient.set_default_leader(":11011"_s32);
+                        tank_client.set_default_leader(":11011"_s32);
                 }
         } catch (const std::exception &e) {
                 Print("Invalid broker endpoint specified '", endpoint, "':", e.what(), "\n");
@@ -244,7 +244,7 @@ int main(int argc, char *argv[]) {
                 uint32_t  pendingResp{0};
                 bool      statsOnly{false}, asKV{false};
                 IOBuffer  buf;
-                range64_t timeRange{0, UINT64_MAX};
+                range64_t time_range{0, UINT64_MAX};
                 bool      drainAndExit{false};
                 uint64_t  endSeqNum{UINT64_MAX};
 
@@ -272,25 +272,71 @@ int main(int argc, char *argv[]) {
                                         break;
 
                                 case 'T': {
-                                        const auto r = strwlen32_t(optarg).Divided(',');
+                                        str_view32  s(optarg), s2;
+                                        const char *p = s.data(), *const e = p + s.size();
+                                        char c = 0;
 
-                                        timeRange.offset = parse_timestamp(r.first);
-                                        //Print(Date::ts_repr(timeRange.offset / 1000), "\n");
-                                        if (!timeRange.offset) {
-                                                Print("Failed to parse ", r.first, "\n");
+                                        while (p < e) {
+                                                if (*p == '-' || *p == ',') {
+                                                        s2 = s.SuffixFrom(p + 1);
+                                                        s.set_end(p);
+                                                        c  = '-';
+                                                        break;
+                                                } else if (*p == '+') {
+                                                        s2 = s.SuffixFrom(p + 1);
+                                                        s.set_end(p);
+                                                        c  = '+';
+                                                        break;
+                                                } else {
+                                                        ++p;
+                                                }
+                                        }
+
+                                        time_range.offset = parse_timestamp(s);
+                                        if (!time_range.offset) {
+                                                Print("Failed to parse ", s, "\n");
                                                 return 1;
                                         }
 
-                                        if (r.second) {
-                                                const auto end = parse_timestamp(r.second);
+                                        if (c == '-') {
+                                                if (const auto end = parse_timestamp(s2); !end) {
+                                                        Print("Failed to parse ", s2, "\n");
 
-                                                if (!end) {
-                                                        Print("Failed to parse ", r.second, "\n");
                                                         return 1;
-                                                } else
-                                                        timeRange.SetEnd(end + 1);
-                                        } else
-                                                timeRange.len = UINT64_MAX - timeRange.offset;
+                                                } else {
+                                                        time_range.SetEnd(end + 1);
+                                                }
+
+                                        } else if (c == '+') {
+                                                const char *p = s2.data(), *const e = p + s2.size();
+
+                                                if (p == e || !isdigit(*p)) {
+                                                        Print("Unexpected offset\n");
+                                                        return 1;
+                                                }
+
+                                                uint32_t v{0};
+
+                                                do {
+                                                        v = v * 10 + (*(p++) - '0');
+                                                } while (++p < e && isdigit(*p));
+
+                                                if (p < e) {
+                                                        if (*p == 's' || *p == 'S') {
+                                                                // seconds
+                                                        } else if (*p == 'm' || *p == 'M') {
+                                                                v *= 60;
+                                                        } else if (*p == 'h' || *p == 'H') {
+                                                                v *= 3600;
+                                                        } else if (*p == 'd' || *p == 'D') {
+                                                                v *= 86400;
+                                                        }
+                                                }
+
+                                                time_range.len = v * 1000;
+                                        } else {
+                                                time_range.len = UINT64_MAX - time_range.offset;
+                                        }
                                 } break;
 
                                 case 'S':
@@ -318,14 +364,22 @@ int main(int argc, char *argv[]) {
                                         break;
 
                                 case 'h':
-                                        Print("CONSUME [options] from\n");
+                                        Print("CONSUME [options] [from]\n");
                                         Print("Consumes/retrieves messages from Tank\n");
+					Print("From(sequence number) is required unless -T is used\n");
                                         Print("Options include:\n");
                                         Print("-F display format: Specify a ',' separated list of message properties to be displayed. Properties include: \"seqnum\", \"key\", \"content\", \"ts\". By default, only the content is displayed\n");
                                         Print("-S: statistics only\n");
                                         Print("-E seqNum: Stop at sequence number specified\n");
                                         Print("-d: drain and exit. As soon as all available messages have been consumed, exit (i.e do not tail)\n");
-                                        Print("-T: optionally, filter all consumes messages by specifying a time range in either (from,to) or (from) format, where the first allows to specify a start and an end date/time and the later a start time and no end time. Currently, only one date-time format is supported (YYYMMDDHH:MM:SS)\n");
+                                        Print("-T: optionally, filter all consumes messages by specifying a time range\n");
+					Print("  You can use -T to select an absolute timestamp, using `-T timestamp`, a time range using `-T start-end`, or a start time and an offset using `-T start+span`, where span is a number followed by either S(for seconds), M(for minutes), H(for hours), or D(for days).\n");
+					Print("  Examples:\n");
+					Print("    -T 2018090115:20:30 : The first message's timestamp will >= that time\n");
+					Print("    -T 2018090115:20:30-2018090520:10:30 : The first message's timestamp will >= that time, and the last message's timestamp will be < the second timestamp\n");
+					Print("    -T 2018090100:00:00-24h : Will read all messages in 24 hours starting from that timesamp\n");
+					Print("  Currently, the only supported timestamp format notation is YYYYMMDDHH:MM:SS. More formats may be supported in the future\n");
+					Print("  tank-cli will use binary search to quickly determine the appropriate sequence number\n");
                                         Print("\"from\" specifies the first message we are interested in.\n");
                                         Print("If from is \"beginning\" or \"start\","
                                               " it will start consuming from the first available message in the selected topic. If it is \"eof\" or \"end\", it will "
@@ -340,7 +394,10 @@ int main(int argc, char *argv[]) {
                 argc -= optind;
                 argv += optind;
 
-                if (!argc) {
+		if (time_range.offset) {
+			// not required, we 'll determine it based on binary search triangulation
+			next = 0;
+		} else if (!argc) {
                         Print("Expected sequence number to begin consuming from. Please see ", app, " consume -h\n");
                         return 1;
                 } else {
@@ -361,12 +418,169 @@ int main(int argc, char *argv[]) {
                 const auto b            = Timings::Microseconds::Tick();
                 auto       minFetchSize = defaultMinFetchSize;
 
-                for (;;) {
-                        if (!pendingResp) {
-                                if (verbose)
-                                        Print("Requesting from ", next, "\n");
+                if (const auto seek_ts = time_range.offset) {
+                        // @robert's idea
+                        // we 'll just binary search against the available messages space
+                        // in order to determine an appropriate start offset.
+                        // we 'll read a single message at the time in order to figure out the sequence number we need based
+                        // on it's timestamp
+                        static constexpr bool          trace{false};
+                        const auto                     before = Timings::Microseconds::Tick();
+                        const auto                     r      = tank_client.discover_partitions(topicPartition.first);
+                        range_base<uint64_t, uint64_t> offsets_space;
+                        bool                           have_offsets_space{false};
+                        size_t                         iterations{0};
 
-                                pendingResp = tankClient.consume({{topicPartition, {next, minFetchSize}}}, drainAndExit ? 0 : 8e3, 0);
+                        if (!r) {
+                                Print("Failed to discover partitions of '", topicPartition.first, "'\n");
+                                return 1;
+                        }
+
+                        if (trace) {
+                                SLog("Determining space for '", topicPartition.first, "'\n");
+                        }
+
+                        while (tank_client.should_poll()) {
+                                try {
+                                        tank_client.poll(1e3);
+                                } catch (const std::exception &e) {
+                                        Print("Failed to discover partitions:", e.what(), "\n");
+                                        return 1;
+                                }
+
+                                if (!tank_client.discovered_partitions().empty()) {
+                                        const auto &it = tank_client.discovered_partitions().front();
+
+                                        EXPECT(tank_client.discovered_partitions().size() == 1);
+                                        EXPECT(it.topic == topicPartition.first);
+
+                                        if (topicPartition.second >= it.watermarks.size()) {
+                                                Print("Partition of '", topicPartition.first, "' is not defined\n");
+                                                return 1;
+                                        }
+
+                                        offsets_space      = it.watermarks.offset[topicPartition.second];
+                                        have_offsets_space = true;
+                                        break;
+                                }
+                        }
+
+                        if (!have_offsets_space) {
+                                Print("Unable to determine messages space for '", topicPartition.first, "'\n");
+                                return 1;
+                        } else if (0 == offsets_space.size()) {
+                                Print("Partition ", topicPartition.first, "/", topicPartition.second, " is empty\n");
+                                return 0;
+                        } else {
+                                // Use binary search to determine the appropriate base_seq_num
+                                const auto cut_off      = seek_ts - (5 * 60 * 100);
+                                uint64_t   low          = offsets_space.offset;
+                                uint64_t   high         = low + offsets_space.size() - 1;
+                                uint64_t   base_seq_num = low;
+
+                                if (trace) {
+                                        SLog("OK have ", offsets_space, ", looking for the first for ", Date::ts_repr(seek_ts / 1000), "\n");
+                                }
+
+                                while (low <= high) {
+                                        // we will need to avoid overflow here
+                                        uint64_t msg_ts;
+                                        auto     mid = low + ((high - low) / 2);
+
+                                        // Figure out the timestamp of the first message with (seq_num >= mid)
+                                        ++iterations;
+                                        for (uint32_t req_id{0}, fetch_size{32 * 1024};;) {
+                                                if (!req_id) {
+							if (trace) {
+								SLog("At ", mid, " ", fetch_size, "\n");
+							}
+
+                                                        req_id = tank_client.consume_from(topicPartition, mid, fetch_size, 0, 0);
+                                                        if (!req_id) {
+                                                                tank_client.reset();
+                                                                continue;
+                                                        }
+                                                }
+
+                                                try {
+                                                        tank_client.poll(100);
+                                                } catch (const std::exception &e) {
+                                                        Print("Failed to poll():", e.what(), "\n");
+                                                        return 1;
+                                                }
+
+                                                if (!tank_client.faults().empty()) {
+                                                        for (const auto &it : tank_client.faults()) {
+                                                                if (it.type == TankClient::fault::Type::BoundaryCheck) {
+                                                                        // this is weird, but sure, we 'll play along
+                                                                        mid = it.adjust_seqnum_by_boundaries(mid);
+
+                                                                        if (trace) {
+                                                                                SLog("Adjusted to ", mid, "\n");
+                                                                        }
+                                                                } else {
+                                                                        Print("Failed to access message\n");
+                                                                        return 1;
+                                                                }
+                                                        }
+
+                                                        req_id = 0;
+                                                }
+
+                                                if (tank_client.consumed().empty()) {
+                                                        continue;
+                                                }
+
+                                                EXPECT(tank_client.consumed().size() == 1);
+
+                                                const auto &it = tank_client.consumed().front();
+
+                                                req_id = 0;
+                                                if (!it.msgs.empty()) {
+                                                        msg_ts = it.msgs.offset->ts;
+                                                        break;
+                                                } else {
+                                                        fetch_size = std::max<uint32_t>(fetch_size, it.next.minFetchSize);
+                                                        mid        = it.next.seqNum;
+                                                }
+                                        }
+
+                                        if (msg_ts < seek_ts && msg_ts >= cut_off) {
+                                                // optimization: save some iterations by
+                                                // aborting early if we are not far from our target message
+                                                if (trace) {
+                                                        SLog("got cut_off at ", Date::ts_repr(msg_ts / 1000), ", stopping\n");
+                                                }
+                                                break;
+                                        }
+
+                                        if (seek_ts < msg_ts) {
+                                                high = mid - 1;
+                                        } else {
+                                                base_seq_num = mid;
+                                                low          = mid + 1;
+                                        }
+
+                                        if (trace) {
+                                                SLog("For ", mid, " ", msg_ts, " ", Date::ts_repr(msg_ts / 1000), " seek ", Date::ts_repr(seek_ts / 1000), "\n");
+                                        }
+                                }
+
+                                if (trace) {
+                                        SLog("DONE, took ", duration_repr(Timings::Microseconds::Since(before)), " to determine base sequence number, ", dotnotation_repr(iterations), " iterations\n");
+                                }
+
+                                next = base_seq_num;
+                        }
+                }
+
+                for (const auto time_range_end = time_range.offset + time_range.size();;) {
+                        if (!pendingResp) {
+                                if (verbose) {
+                                        Print("Requesting from ", next, "\n");
+				}
+
+                                pendingResp = tank_client.consume({{topicPartition, {next, minFetchSize}}}, drainAndExit ? 0 : 8e3, 0);
 
                                 if (!pendingResp) {
                                         Print("Unable to issue consume request. Will abort\n");
@@ -375,21 +589,33 @@ int main(int argc, char *argv[]) {
                         }
 
                         try {
-                                tankClient.poll(1e3);
-                        } catch (...) {
+                                tank_client.poll(1e3);
+                        } catch (const std::exception &e) {
+                                tank_client.reset();
+                                Timings::Seconds::Sleep(1);
+                                pendingResp = 0;
                                 continue;
                         }
 
-                        for (const auto &it : tankClient.faults()) {
+                        for (const auto &it : tank_client.faults()) {
                                 consider_fault(it);
+
                                 if (retry && it.type == TankClient::fault::Type::Network) {
                                         Timings::Milliseconds::Sleep(400);
-                                        pendingResp = 0;
-                                } else
+                                } else {
                                         return 1;
+                                }
+
+                                pendingResp = 0;
                         }
 
-                        for (const auto &it : tankClient.consumed()) {
+			if (tank_client.consumed().empty()) {
+				continue;
+			}
+
+
+			pendingResp = 0;
+                        for (const auto &it : tank_client.consumed()) {
                                 if (drainAndExit && it.msgs.empty() && minFetchSize >= it.next.minFetchSize) {
                                         // Drained if we got no message in the response, and if the size we specified
                                         // is <= next.minFetchSize. This is important because we could get no messages
@@ -401,32 +627,64 @@ int main(int argc, char *argv[]) {
                                         Print(it.msgs.len, " messages\n");
                                         totalMsgs += it.msgs.size();
 
-                                        if (verbose) {
-                                                for (const auto m : it.msgs) {
-                                                        Print(m->seqNum, ": ", size_repr(m->content.size()), "\n");
-                                                        sumBytes += m->content.len + m->key.len + sizeof(uint64_t);
+                                        if (!time_range.offset) {
+                                                if (verbose) {
+                                                        for (const auto m : it.msgs) {
+                                                                if (time_range.Contains(m->ts)) {
+                                                                        Print(m->seqNum, ": ", size_repr(m->content.size()), "\n");
+                                                                        sumBytes += m->content.len + m->key.len + sizeof(uint64_t);
+                                                                }
+                                                        }
+
+                                                } else {
+                                                        for (const auto m : it.msgs) {
+                                                                if (time_range.Contains(m->ts)) {
+                                                                        sumBytes += m->content.len + m->key.len + sizeof(uint64_t);
+                                                                }
+                                                        }
                                                 }
+
                                         } else {
-                                                for (const auto m : it.msgs)
-                                                        sumBytes += m->content.len + m->key.len + sizeof(uint64_t);
+                                                if (verbose) {
+                                                        for (const auto m : it.msgs) {
+                                                                Print(m->seqNum, ": ", size_repr(m->content.size()), "\n");
+                                                                sumBytes += m->content.len + m->key.len + sizeof(uint64_t);
+                                                        }
+                                                } else {
+                                                        for (const auto m : it.msgs) {
+                                                                sumBytes += m->content.len + m->key.len + sizeof(uint64_t);
+                                                        }
+                                                }
                                         }
                                 } else {
                                         size_t sum{0};
+                                        bool   should_abort{false};
 
-                                        for (const auto m : it.msgs)
-                                                sum += m->content.len;
-                                        sum += it.msgs.len * 2;
+                                        if (!time_range.offset) {
+                                                for (const auto m : it.msgs) {
+                                                        sum += m->content.size();
+                                                }
+
+                                                sum += it.msgs.size() * 2;
+                                        } else {
+                                                for (const auto m : it.msgs) {
+                                                        if (time_range.Contains(m->ts)) {
+                                                                sum += m->content.size();
+                                                                sum += 2;
+                                                        }
+                                                }
+                                        }
 
                                         buf.clear();
                                         buf.reserve(sum);
                                         for (const auto m : it.msgs) {
-                                                if (m->seqNum > endSeqNum)
+                                                if (m->seqNum > endSeqNum || m->ts > time_range_end) {
+                                                        should_abort = true;
                                                         break;
-
-                                                if (timeRange.Contains(m->ts)) {
-                                                        if (asKV)
+                                                } else if (time_range.Contains(m->ts)) {
+                                                        if (asKV) {
                                                                 buf.append(m->seqNum, " [", m->key, "] = [", m->content, "]");
-                                                        else if (displayFields) {
+                                                        } else if (displayFields) {
                                                                 if (displayFields & (1u << uint8_t(Fields::TS)))
                                                                         buf.append(Date::ts_repr(Timings::Milliseconds::ToSeconds(m->ts)), ':');
                                                                 if (displayFields & (1u << uint8_t(Fields::SeqNum)))
@@ -435,39 +693,42 @@ int main(int argc, char *argv[]) {
                                                                         buf.append("size=", m->content.size(), ':');
                                                                 if (displayFields & (1u << uint8_t(Fields::Content)))
                                                                         buf.append(m->content);
-                                                        } else
+                                                        } else {
                                                                 buf.append(m->content);
+                                                        }
 
                                                         buf.append('\n');
                                                 }
                                         }
 
-                                        if (auto s = buf.AsS32()) {
+                                        if (auto s = buf.as_s32()) {
                                                 do {
-                                                        const auto r = write(STDOUT_FILENO, s.p, s.len);
+                                                        const auto r = write(STDOUT_FILENO, s.data(), s.size());
 
                                                         if (r == -1) {
                                                                 Print("(Failed to output data to stdout:", strerror(errno), ". Exiting\n");
                                                                 return 1;
-                                                        } else
-                                                                s.StripPrefix(r);
+                                                        } else {
+                                                                s.strip_prefix(r);
+                                                        }
 
                                                 } while (s);
+                                        }
+
+                                        if (should_abort) {
+                                                goto out;
                                         }
                                 }
 
                                 minFetchSize = Max<size_t>(it.next.minFetchSize, defaultMinFetchSize);
                                 next         = it.next.seqNum;
-                                pendingResp  = 0;
-
-                                if (next > endSeqNum)
-                                        exit(0);
                         }
                 }
 
         out:
-                if (statsOnly)
+                if (statsOnly) {
                         Print(dotnotation_repr(totalMsgs), " messages consumed in ", duration_repr(Timings::Microseconds::Since(b)), ", ", size_repr(sumBytes), " bytes consumed\n");
+		}
         } else if (cmd.Eq(_S("create_topic"))) {
                 Buffer config;
 
@@ -514,20 +775,20 @@ int main(int argc, char *argv[]) {
                         return 1;
                 }
 
-                const auto reqId = tankClient.create_topic(topicPartition.first, s.AsUint32(), config.AsS32());
+                const auto reqId = tank_client.create_topic(topicPartition.first, s.AsUint32(), config.AsS32());
 
                 if (!reqId) {
                         Print("Unable to schedule create topic request\n");
                         return 1;
                 }
 
-                while (tankClient.should_poll()) {
-                        tankClient.poll(1e3);
+                while (tank_client.should_poll()) {
+                        tank_client.poll(1e3);
 
-                        for (const auto &it : tankClient.faults())
+                        for (const auto &it : tank_client.faults())
                                 consider_fault(it);
 
-                        for (const auto &it : tankClient.created_topics()) {
+                        for (const auto &it : tank_client.created_topics()) {
                                 require(it.clientReqId == reqId);
                                 Print("Created topic ", ansifmt::bold, it.topic, ansifmt::reset, "\n");
                         }
@@ -600,7 +861,7 @@ int main(int argc, char *argv[]) {
                         Print("Discovering partitions\n");
 
                 // Discover partitions first
-                reqId1 = tankClient.discover_partitions(topicPartition.first);
+                reqId1 = tank_client.discover_partitions(topicPartition.first);
                 if (!reqId1) {
                         Print("Unable to schedule discover request to source\n");
                         return 1;
@@ -628,16 +889,16 @@ int main(int argc, char *argv[]) {
                 std::vector<std::pair<TankClient::topic_partition, std::pair<uint64_t, std::vector<TankClient::msg>>>> outputsForBase;
                 std::vector<uint8_t>                                                                                   outputsOrder;
 
-                while (tankClient.should_poll()) {
-                        tankClient.poll(1e3);
+                while (tank_client.should_poll()) {
+                        tank_client.poll(1e3);
 
-                        for (const auto &it : tankClient.faults()) {
+                        for (const auto &it : tank_client.faults()) {
                                 consider_fault(it);
                                 return 1;
                         }
 
-                        if (tankClient.discovered_partitions().size()) {
-                                const auto &v = tankClient.discovered_partitions().front();
+                        if (tank_client.discovered_partitions().size()) {
+                                const auto &v = tank_client.discovered_partitions().front();
 
                                 require(v.clientReqId == reqId1);
                                 srcPartitionsCnt = v.watermarks.len;
@@ -699,7 +960,7 @@ int main(int argc, char *argv[]) {
                                         inputs.push_back({{topicPartition.first, it->id}, {it->next, 4 * 1024 * 1024}});
                                 }
 
-                                reqId1 = tankClient.consume(inputs, 4e3, 1);
+                                reqId1 = tank_client.consume(inputs, 4e3, 1);
                                 if (!reqId1) {
                                         Print("Failed to issue consume request\n");
                                         return 1;
@@ -708,22 +969,22 @@ int main(int argc, char *argv[]) {
                                 pending.clear();
                         }
 
-                        if (tankClient.should_poll()) {
-                                tankClient.poll(1e2);
+                        if (tank_client.should_poll()) {
+                                tank_client.poll(1e2);
 
-                                if (tankClient.faults().size()) {
-                                        for (const auto &it : tankClient.faults())
+                                if (tank_client.faults().size()) {
+                                        for (const auto &it : tank_client.faults())
                                                 consider_fault(it);
 
                                         return 1;
                                 }
 
-                                if (tankClient.consumed().size()) {
+                                if (tank_client.consumed().size()) {
                                         outputs.clear();
                                         outputsForBase.clear();
                                         outputsOrder.clear();
 
-                                        for (const auto &it : tankClient.consumed()) {
+                                        for (const auto &it : tank_client.consumed()) {
                                                 auto partition = map[it.partition];
 
                                                 if (it.msgs.len) {
@@ -832,41 +1093,41 @@ int main(int argc, char *argv[]) {
 
                 return 0;
 	} else if (cmd.BeginsWith(_S("reload_conf"))) {
-		const auto req_id= tankClient.reload_partition_conf(topicPartition.first, topicPartition.second);
+		const auto req_id= tank_client.reload_partition_conf(topicPartition.first, topicPartition.second);
 
 		if (!req_id) {
 			Print("Unable to schedule partition configuration reload request\n");
 			return 1;
 		}
 
-                while (tankClient.should_poll()) {
-                        tankClient.poll(1e3);
+                while (tank_client.should_poll()) {
+                        tank_client.poll(1e3);
 
-                        for (const auto &it : tankClient.faults()) {
+                        for (const auto &it : tank_client.faults()) {
                                 consider_fault(it);
                         }
 
-                        for (const auto &it : tankClient.reloaded_partition_configs()) {
+                        for (const auto &it : tank_client.reloaded_partition_configs()) {
 				Print("Reloaded configuration of ", it.topic, "/", it.partition, "\n");
                         }
                 }
 
                 return 0;
         } else if (cmd.Eq(_S("discover_partitions"))) {
-                const auto reqId = tankClient.discover_partitions(topicPartition.first);
+                const auto reqId = tank_client.discover_partitions(topicPartition.first);
 
                 if (!reqId) {
                         Print("Unable to schedule discover partition request\n");
                         return 1;
                 }
 
-                while (tankClient.should_poll()) {
-                        tankClient.poll(1e3);
+                while (tank_client.should_poll()) {
+                        tank_client.poll(1e3);
 
-                        for (const auto &it : tankClient.faults())
+                        for (const auto &it : tank_client.faults())
                                 consider_fault(it);
 
-                        for (const auto &it : tankClient.discovered_partitions()) {
+                        for (const auto &it : tank_client.discovered_partitions()) {
                                 uint16_t i{0};
 
                                 EXPECT(it.clientReqId == reqId);
@@ -952,9 +1213,9 @@ int main(int argc, char *argv[]) {
                 size_t                       pendingAckAcnt{0};
                 std::set<uint32_t>           pendingResps;
                 const auto                   poll = [&]() {
-                        tankClient.poll(8e2);
+                        tank_client.poll(8e2);
 
-                        for (const auto &it : tankClient.faults()) {
+                        for (const auto &it : tank_client.faults()) {
                                 consider_fault(it);
                                 if (retry && it.type == TankClient::fault::Type::Network) {
                                         Timings::Milliseconds::Sleep(400);
@@ -963,7 +1224,7 @@ int main(int argc, char *argv[]) {
                                         return false;
                         }
 
-                        for (const auto &it : tankClient.produce_acks())
+                        for (const auto &it : tank_client.produce_acks())
                                 pendingResps.erase(it.clientReqId);
 
                         return true;
@@ -975,10 +1236,10 @@ int main(int argc, char *argv[]) {
                                 Print("Publishing ", msgs.size(), " messages\n");
 
                         if (baseSeqNum) {
-                                reqId      = tankClient.produce_with_base({{topicPartition, {baseSeqNum, msgs}}});
+                                reqId      = tank_client.produce_with_base({{topicPartition, {baseSeqNum, msgs}}});
                                 baseSeqNum = 0;
                         } else {
-                                reqId = tankClient.produce({{topicPartition, msgs}});
+                                reqId = tank_client.produce({{topicPartition, msgs}});
                         }
 
                         if (!reqId) {
@@ -990,7 +1251,7 @@ int main(int argc, char *argv[]) {
                         pendingAckAcnt += msgs.size();
 
                         if (pendingAckAcnt >= pollInterval) {
-                                while (tankClient.should_poll()) {
+                                while (tank_client.should_poll()) {
                                         if (!poll())
                                                 return false;
                                 }
@@ -1097,7 +1358,7 @@ int main(int argc, char *argv[]) {
 
                                 msgs.push_back({content.AsS32(), Timings::Milliseconds::SysTime(), {}});
 
-                                const auto reqId = tankClient.produce(
+                                const auto reqId = tank_client.produce(
                                     {{topicPartition, msgs}});
 
                                 if (!reqId) {
@@ -1126,7 +1387,7 @@ int main(int argc, char *argv[]) {
                                         return 1;
                         }
 
-                        while (tankClient.should_poll()) {
+                        while (tank_client.should_poll()) {
                                 if (!poll())
                                         return 1;
                         }
@@ -1158,7 +1419,7 @@ int main(int argc, char *argv[]) {
                                 msgs.clear();
                         }
 
-                        while (tankClient.should_poll()) {
+                        while (tank_client.should_poll()) {
                                 if (!poll())
                                         return 1;
                         }
@@ -1200,7 +1461,7 @@ int main(int argc, char *argv[]) {
                         while ((r = getopt(argc, argv, "+hc:s:RB:")) != -1) {
                                 switch (r) {
                                         case 'R':
-                                                tankClient.set_compression_strategy(TankClient::CompressionStrategy::CompressNever);
+                                                tank_client.set_compression_strategy(TankClient::CompressionStrategy::CompressNever);
                                                 break;
 
                                         case 'c':
@@ -1242,7 +1503,7 @@ int main(int argc, char *argv[]) {
                         const strwlen32_t            content(p, size);
                         std::vector<TankClient::msg> msgs;
 
-                        if (tankClient.consume({{topicPartition, {UINT64_MAX, 1e4}}}, 10e3, 0) == 0) {
+                        if (tank_client.consume({{topicPartition, {UINT64_MAX, 1e4}}}, 10e3, 0) == 0) {
                                 Print("Unable to schedule consumer request\n");
                                 return 1;
                         }
@@ -1262,7 +1523,7 @@ int main(int argc, char *argv[]) {
 
                         const auto start{Timings::Microseconds::Tick()};
 
-                        if (tankClient.produce(
+                        if (tank_client.produce(
                                 {{
                                     topicPartition,
                                     msgs,
@@ -1271,15 +1532,15 @@ int main(int argc, char *argv[]) {
                                 return 1;
                         }
 
-                        while (tankClient.should_poll()) {
-                                tankClient.poll(1e3);
+                        while (tank_client.should_poll()) {
+                                tank_client.poll(1e3);
 
-                                for (const auto &it : tankClient.faults()) {
+                                for (const auto &it : tank_client.faults()) {
                                         consider_fault(it);
                                         return 1;
                                 }
 
-                                if (tankClient.consumed().size()) {
+                                if (tank_client.consumed().size()) {
                                         Print("Got data after publishing ", dotnotation_repr(cnt), " message(s) of size ", size_repr(content.len), " (", size_repr(cnt * content.len), "), took ", duration_repr(Timings::Microseconds::Since(start)), "\n");
                                         return 0;
                                 }
@@ -1298,7 +1559,7 @@ int main(int argc, char *argv[]) {
 
                                         case 'R':
                                                 compressionDisabled = true;
-                                                tankClient.set_compression_strategy(TankClient::CompressionStrategy::CompressNever);
+                                                tank_client.set_compression_strategy(TankClient::CompressionStrategy::CompressNever);
                                                 break;
 
                                         case 'c':
@@ -1354,20 +1615,20 @@ int main(int argc, char *argv[]) {
 
                         const auto start{Timings::Microseconds::Tick()};
 
-                        if (0 == tankClient.produce(batch)) {
+                        if (0 == tank_client.produce(batch)) {
                                 Print("Unable to schedule publisher request\n");
                                 return 1;
                         }
 
-                        while (tankClient.should_poll()) {
-                                tankClient.poll(1e3);
+                        while (tank_client.should_poll()) {
+                                tank_client.poll(1e3);
 
-                                for (const auto &it : tankClient.faults()) {
+                                for (const auto &it : tank_client.faults()) {
                                         consider_fault(it);
                                         return 1;
                                 }
 
-                                if (tankClient.produce_acks().size()) {
+                                if (tank_client.produce_acks().size()) {
                                         Print("Got ACK after publishing ", dotnotation_repr(cnt), " message(s) of size ", size_repr(content.len), " (", size_repr(cnt * content.len), "), took ", duration_repr(Timings::Microseconds::Since(start)), "\n");
                                         return 0;
                                 }
