@@ -1482,14 +1482,12 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
         // Response header length (i.e excluding actual batches content) is encoded in the response
         // so that we can quickly jump to the beginning of the bundles
         // the bundles content is streamed right after the response header
-        const auto respHeaderLen = *(uint32_t *)p;
-        p += sizeof(uint32_t);
+        const auto  respHeaderLen = decode_pod<uint32_t>(p);
         const auto *bundles = p + respHeaderLen, *const bundlesBase = bundles;
-        const auto reqId = *(uint32_t *)p;
+        const auto reqId = decode_pod<uint32_t>(p);
 
         c->state.flags |= (1u << uint8_t(connection::State::Flags::LockedInputBuffer));
 
-        p += sizeof(uint32_t);
         const auto        topicsCnt   = *p++;
         const auto        res         = pendingConsumeReqs.detach(reqId);
         auto              reqInfo     = res.value();
@@ -1503,26 +1501,29 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
         // if broker reports that it is no longer the leader for (topic, broker), we need to retain
         // reqInfo.payload and reqInfo.ctx, and retry with that node instead
         ack_payload(bs, reqInfo.reqPayload);
-        Defer({ free(reqInfo.seqNums); });
+        DEFER({ free(reqInfo.seqNums); });
 
         bs->reqs_tracker.pendingConsume.erase(reqId);
         forget_inflight_req(reqId, TankAPIMsgType::Consume);
 
-        if (trace)
+        if (trace) {
                 SLog(ansifmt::color_green, "Processing consume response for ", reqId, ", of length ", len, ", topicsCnt = ", topicsCnt, ", clientReqId = ", clientReqId, ansifmt::reset, "\n");
+        }
 
         for (size_t i{0}; i != topicsCnt; ++i) {
-                const strwlen8_t topicName((char *)p + 1, *p);
-                p += topicName.len + sizeof(uint8_t);
+                const strwlen8_t topicName(reinterpret_cast<const char *>(p) + 1, *p);
+                p += topicName.size() + sizeof(uint8_t);
                 const auto partitionsCnt = *p++;
 
-                if (trace)
+                if (trace) {
                         SLog("Topic [", topicName, "] ", partitionsCnt, "\n");
+                }
 
                 if (*(uint16_t *)p == UINT16_MAX) {
                         // Unknown topic
-                        if (trace)
+                        if (trace) {
                                 SLog("Unknown topic [", topicName, "]\n");
+                        }
                         capturedFaults.push_back({clientReqId, fault::Type::UnknownTopic, fault::Req::Consume, topicName, 0});
 
                         reqOffsetIdx += partitionsCnt;
@@ -1531,14 +1532,14 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                 }
 
                 for (uint8_t k{0}; k != partitionsCnt; ++k) {
-                        const auto partitionId = *(uint16_t *)p;
-                        p += sizeof(uint16_t);
+                        const auto partitionId  = decode_pod<uint16_t>(p);
                         const auto errorOrFlags = *p++;
                         size_t     totalSeenBundles{0};
 
                         if (errorOrFlags == 0xff) {
-                                if (trace)
+                                if (trace) {
                                         SLog("Undefined partition ", topicName, ".", partitionId, "\n");
+                                }
 
                                 capturedFaults.push_back({clientReqId, fault::Type::UnknownPartition, fault::Req::Consume, topicName, partitionId});
                                 continue;
@@ -1550,27 +1551,27 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 // I understand all those variosu encoding semantics are complicating the parsing process, but
                                 // we this is one of those case where doing that in favor of tighter encoding and better performance is worth it
                                 // (you only need to build the client/broker once, but you 'll reap the benefits forever)
-                                if (trace)
+                                if (trace) {
                                         SLog("Base seq.num of first msg in the bundle ", ansifmt::bold, "_not provided here_", ansifmt::reset, "; bundle's sparse bit is set - will get it from there\n");
+                                }
+
                                 logBaseSeqNum = 0;
                         } else {
                                 // base absolute sequence number of the first message in the first bundle in the chunk streamed
-                                logBaseSeqNum = *(uint64_t *)p;
-                                p += sizeof(uint64_t);
+                                logBaseSeqNum = decode_pod<uint64_t>(p);
 
-                                if (trace)
+                                if (trace) {
                                         SLog("Base seq.num of first msg in the bundle provided as ", logBaseSeqNum, "\n");
+                                }
                         }
 
                         // last committed sequence number for this (topic, partition).
                         // we should check if the *last* parsed absolute sequence number < highWaterMark, and if so, it means
                         // there's more content and we should request it starting from  *last* parsed absolute sequence number + 1
-                        const auto highWaterMark = *(uint64_t *)p;
-                        p += sizeof(uint64_t);
+                        const auto highWaterMark = decode_pod<uint64_t>(p);
 
                         // bytes streamed from the commit log (may contain a partial bundle)
-                        const auto len = *(uint32_t *)p;
-                        p += sizeof(uint32_t);
+                        const auto len = decode_pod<uint32_t>(p);
 
                         // Original fetch request absolute sequence number requested
                         // Special values:
@@ -1578,23 +1579,25 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                         // 0 		: fetch fromt the first available sequence number
                         const auto requestedSeqNum = reqSeqNums[reqOffsetIdx++];
 
-                        if (trace)
+                        if (trace) {
                                 SLog("logBaseSeqNum = ", logBaseSeqNum, ", highWaterMark = ", highWaterMark, ", len = ", len, "(bytes streamed from the commit log; may be partial), requestedSeqNum(", requestedSeqNum, ") for ", reqOffsetIdx - 1, ", for partition ", partitionId, ", errorOrFlags = ", errorOrFlags, "\n");
+                        }
 
                         if (errorOrFlags == 0x1) {
                                 // A BoundaryCheck fault
                                 // server has serialized the first available sequence number here
-                                const auto firstAvailSeqNum = *(uint64_t *)p;
-                                p += sizeof(uint64_t);
+                                const auto firstAvailSeqNum = decode_pod<uint64_t>(p);
 
-                                if (trace)
+                                if (trace) {
                                         SLog("firstAvailSeqNum = ", firstAvailSeqNum, "\n");
+                                }
 
                                 capturedFaults.push_back({clientReqId, fault::Type::BoundaryCheck, fault::Req::Consume, topicName, partitionId, {{firstAvailSeqNum, highWaterMark}}});
                                 continue;
                         } else if (errorOrFlags && errorOrFlags < 0xfe) {
-                                if (trace)
+                                if (trace) {
                                         SLog("Have FAULT: ", errorOrFlags, "\n");
+                                }
 
                                 capturedFaults.push_back({clientReqId, fault::Type::Access, fault::Req::Consume, topicName, partitionId});
                                 continue;
@@ -1602,9 +1605,10 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                         const auto bundlesForThisTopicPartition = bundles;
                         uint32_t   lastPartialMsgMinFetchSize{128};
+                        const auto consumption_list_base = consumptionList.size();
 
                         bundles += len; // Skip bundles for this (topic, partition), i.e the chunk stream for that partition
-                        consumptionList.clear();
+	
 
                         // Process all bundles in the chunk
                         for (const auto *p = bundlesForThisTopicPartition, *const chunkEnd = p + len; p < chunkEnd;) {
@@ -1614,14 +1618,16 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                 // length of the bundle
                                 if (!Compression::UnpackUInt32Check(p, chunkEnd)) {
-                                        if (trace)
+                                        if (trace) {
                                                 SLog("boundaries\n");
+                                        }
 
                                         break;
                                 }
 
-                                if (trace)
+                                if (trace) {
                                         SLog("NEW bundle at offset:", p - bundlesBase, "(", consumptionList.size(), ") seen bundles:", ++totalSeenBundles, "\n");
+                                }
 
                                 const auto        bundleLen = Compression::UnpackUInt32(p);
                                 const auto *const bundleEnd = p + bundleLen;
@@ -1634,8 +1640,9 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 if (p >= chunkEnd) {
                                         lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - bundlesBase);
 
-                                        if (trace)
+                                        if (trace) {
                                                 SLog("boundaries\n");
+                                        }
 
                                         break;
                                 }
@@ -1648,12 +1655,14 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 uint32_t                            msgsSetSize = (bundleFlags >> 2) & 0xf;
 
                                 if (!msgsSetSize) {
-                                        if (trace)
+                                        if (trace) {
                                                 SLog("msgSetEnd not packed into flags\n");
+                                        }
 
                                         if (unlikely(!Compression::UnpackUInt32Check(p, chunkEnd))) {
-                                                if (trace)
+                                                if (trace) {
                                                         SLog("boundaries\n");
+                                                }
 
                                                 break;
                                         } else {
@@ -1663,23 +1672,25 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                 if (sparseBundleBitSet) {
                                         // See tank_encoding.md
-                                        if (trace)
+                                        if (trace) {
                                                 SLog("sparseBundleBitSet is set\n");
+                                        }
 
                                         if (p + sizeof(uint64_t) >= chunkEnd) {
-                                                if (trace)
+                                                if (trace) {
                                                         SLog("boundaries\n");
+                                                }
 
                                                 break;
                                         }
 
-                                        firstMsgSeqNum = *(uint64_t *)p;
-                                        p += sizeof(uint64_t);
+                                        firstMsgSeqNum = decode_pod<uint64_t>(p);
 
                                         if (msgsSetSize != 1) {
                                                 if (unlikely(!Compression::UnpackUInt32Check(p, chunkEnd))) {
-                                                        if (trace)
+                                                        if (trace) {
                                                                 SLog("boundaries\n");
+                                                        }
 
                                                         break;
                                                 }
@@ -1692,20 +1703,23 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         logBaseSeqNum = firstMsgSeqNum;
                                         msgSetEnd     = lastMsgSeqNum + 1;
 
-                                        if (trace)
+                                        if (trace) {
                                                 SLog("firstMsgSeqNum = ", firstMsgSeqNum, ", lastMsgSeqNum = ", lastMsgSeqNum, "\n");
+                                        }
                                 } else {
                                         msgSetEnd = logBaseSeqNum + msgsSetSize;
                                 }
                                 // END: bundle header
 
-                                if (trace)
+                                if (trace) {
                                         SLog("bundleFlags = ", bundleFlags, ", codec = ", codec, ", msgsSetSize = ", msgsSetSize, ", bundleLen = ", bundleLen, "\n");
+                                }
 
                                 if (requestedSeqNum < UINT64_MAX && requestedSeqNum >= msgSetEnd) {
                                         // Optimization: can skip this bundle altogether
-                                        if (trace)
+                                        if (trace) {
                                                 SLog("Skipping bundle:", requestedSeqNum, ">= ", msgSetEnd, ", ", chunkEnd - bundleEnd, "\n");
+                                        }
 
                                         p = bundleEnd;
 
@@ -1713,8 +1727,9 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                 // past the chunk?
                                                 lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - bundlesBase);
 
-                                                if (trace)
+                                                if (trace) {
                                                         SLog("Past the chunk, lastPartialMsgMinFetchSize now = ", lastPartialMsgMinFetchSize, " (requestedSeqNum = ", requestedSeqNum, ")\n");
+                                                }
                                         }
 
                                         logBaseSeqNum = msgSetEnd;
@@ -1727,13 +1742,15 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         if (bundleEnd > chunkEnd) {
                                                 lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - bundlesBase);
 
-                                                if (trace)
+                                                if (trace) {
                                                         SLog("compresssed, didn't get the whole messages set. Boundaries check\n");
+                                                }
                                                 break;
                                         }
 
-                                        if (trace)
+                                        if (trace) {
                                                 SLog("Compressed, need to decompress messages set ", bundleEnd - p, " (", size_repr(bundleEnd - p), ")\n");
+                                        }
 
                                         auto rawData = get_buffer();
 
@@ -1741,14 +1758,16 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         switch (codec) {
                                                 case 1:
                                                         if (unlikely(!Compression::UnCompress(Compression::Algo::SNAPPY, p, bundleEnd - p, rawData))) {
-                                                                if (trace)
+                                                                if (trace) {
                                                                         SLog("Failed ", chunkEnd - bundleEnd, "\n");
+                                                                }
 
                                                                 throw Switch::data_error("Failed to decompress bundle message set");
                                                         }
 
-                                                        if (trace)
+                                                        if (trace) {
                                                                 SLog("Decompressed ", size_repr(bundleEnd - p), " => ", size_repr(rawData->size()), "\n");
+                                                        }
                                                         break;
 
                                                 default:
@@ -1758,27 +1777,29 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                         msgSetContent.Set(reinterpret_cast<const uint8_t *>(rawData->data()), rawData->size());
                                         usedBufs.push_back(rawData);
-                                } else
+                                } else {
                                         msgSetContent.Set(p, Min<size_t>(chunkEnd - p, bundleEnd - p));
+                                }
 
                                 p = bundleEnd;
 
                                 uint64_t   ts{0};
-                                const auto _saved = consumptionList.size();
                                 uint32_t   msgIdx{0};
 
                                 // Parse the bundle's message set
                                 // if this a compressed messages set, the boundary checks are not necessary
-				if (trace)
-					SLog("msgSetContent.size = ", msgSetContent.size(), "\n");
+                                if (trace) {
+                                        SLog("msgSetContent.size = ", msgSetContent.size(), "\n");
+                                }
 
                                 for (const auto *p = msgSetContent.offset, *const endOfMsgSet = p + msgSetContent.len;; ++msgIdx, ++logBaseSeqNum) {
                                         // parse next bundle message
                                         if (p + sizeof(uint8_t) > endOfMsgSet) {
                                                 lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - bundlesBase);
 
-                                                if (trace)
-                                                        SLog("Boundaries, total parsed ", consumptionList.size() - _saved, " ", msgsSetSize, "\n");
+                                                if (trace) {
+                                                        SLog("Boundaries, total parsed ", consumptionList.size() - consumption_list_base, " ", msgsSetSize, "\n");
+                                                }
                                                 break;
                                         }
 
@@ -1796,15 +1817,17 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                         if (unlikely(!Compression::UnpackUInt32Check(p, endOfMsgSet))) {
                                                                 lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - bundlesBase);
 
-                                                                if (trace)
+                                                                if (trace) {
                                                                         SLog("boundaries\n");
+                                                                }
                                                                 break;
                                                         }
 
                                                         const auto delta = Compression::UnpackUInt32(p);
 
-                                                        if (trace)
+                                                        if (trace) {
                                                                 SLog("Delta ", delta, "\n");
+                                                        }
 
                                                         logBaseSeqNum += delta;
                                                 }
@@ -1812,41 +1835,46 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                         const auto msgAbsSeqNum = logBaseSeqNum;
 
-                                        if (trace)
+                                        if (trace) {
                                                 SLog("Message ", msgIdx, ", msgFlags = ", msgFlags, " for seq.num = ", msgAbsSeqNum, "\n");
+                                        }
 
                                         if (msgFlags & uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS)) {
                                                 // Using the timestamp of the last message that had a specified timestamp in this bundle
                                                 // This is very useful; if all messages in a bundle have the same timestamp, then
                                                 // we only need to encode the timestamp once
-                                                if (trace)
+                                                if (trace) {
                                                         SLog("Using last specified TS\n");
+                                                }
                                         } else {
                                                 if (p + sizeof(uint64_t) > endOfMsgSet) {
                                                         lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - bundlesBase);
 
-                                                        if (trace)
+                                                        if (trace) {
                                                                 SLog("Boundaries\n");
+                                                        }
 
                                                         goto nextPartition;
                                                 }
 
-                                                ts = *(uint64_t *)p; // msg.timestamp
-                                                p += sizeof(uint64_t);
+                                                ts = decode_pod<uint64_t>(p); // msg.timestamp
 
-                                                if (trace)
+                                                if (trace) {
                                                         SLog("Specifying ts = ", ts, "\n");
+                                                }
                                         }
 
                                         if (msgFlags & uint8_t(TankFlags::BundleMsgFlags::HaveKey)) {
-                                                if (trace)
+                                                if (trace) {
                                                         SLog("Message have key\n");
+                                                }
 
                                                 if (p + sizeof(uint8_t) > endOfMsgSet || (p + (*p) + sizeof(uint8_t) > endOfMsgSet)) {
                                                         lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - bundlesBase);
 
-                                                        if (trace)
+                                                        if (trace) {
                                                                 SLog("Boundaries\n");
+                                                        }
 
                                                         goto nextPartition;
                                                 } else {
@@ -1855,51 +1883,58 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                         if (p + keyLen > endOfMsgSet) {
                                                                 lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - bundlesBase);
 
-                                                                if (trace)
+                                                                if (trace) {
                                                                         SLog("Boundaries\n");
+                                                                }
 
                                                                 goto nextPartition;
                                                         } else {
-                                                                key.Set((char *)p, keyLen);
+                                                                key.Set(reinterpret_cast<const char *>(p), keyLen);
                                                                 p += keyLen;
                                                         }
                                                 }
-                                        } else
+                                        } else {
                                                 key.reset();
+                                        }
 
                                         if (!Compression::UnpackUInt32Check(p, endOfMsgSet)) {
                                                 lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - bundlesBase);
 
-                                                if (trace)
+                                                if (trace) {
                                                         SLog("Boundaries ", lastPartialMsgMinFetchSize, " ", boundaryCheckTarget - bundlesBase, " (expected to parse u32 in ", endOfMsgSet - p, " bytes)\n");
+                                                }
 
                                                 goto nextPartition;
                                         }
 
                                         const auto len = Compression::UnpackUInt32(p); // message.length
 
-                                        if (trace)
+                                        if (trace) {
                                                 SLog("message length = ", len, ", ts = ", ts, "(", Date::ts_repr(Timings::Milliseconds::ToSeconds(ts)), " for (", msgAbsSeqNum, ")\n");
+                                        }
 
                                         if (p + len > endOfMsgSet) {
                                                 lastPartialMsgMinFetchSize = std::max<size_t>(lastPartialMsgMinFetchSize, boundaryCheckTarget - bundlesBase);
 
-                                                if (trace)
+                                                if (trace) {
                                                         SLog("Boundaries(msgLength = ", len, " => ", lastPartialMsgMinFetchSize, ")\n");
+                                                }
 
                                                 goto nextPartition;
                                         }
 
                                         if (msgAbsSeqNum > highWaterMark) {
-                                                if (trace)
+                                                if (trace) {
                                                         SLog("Reached past high water mark(last assigned sequence number) ", msgAbsSeqNum, " > ", highWaterMark, "\n");
+                                                }
 
                                                 goto nextPartition;
                                         } else if (requestedSeqNum == UINT64_MAX || msgAbsSeqNum >= requestedSeqNum) {
-                                                const strwlen32_t content((char *)p, len); // message content
+                                                const strwlen32_t content(reinterpret_cast<const char *>(p), len); // message content
 
-                                                if (trace)
+                                                if (trace) {
                                                         SLog("( flags = ", msgFlags, ", ts = ", ts, ", len = ", len, ", msgAbsSeqNum = ", msgAbsSeqNum, " [requestedSeqNum = ", requestedSeqNum, "] ", consumptionList.size(), ")\n");
+                                                }
 
                                                 consumptionList.push_back({msgAbsSeqNum, ts, key, content});
                                         } else {
@@ -1916,8 +1951,9 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                 // The broker strategy doesn't really matter much all things considered, as long as we are able to properly filter
                                                 // bundles and messages here, which we should always do
 
-                                                if (trace)
+                                                if (trace) {
                                                         SLog("Skipping, msgAbsSeqNum(", msgAbsSeqNum, ") < requestedSeqNum(", requestedSeqNum, ")\n");
+                                                }
                                         }
 
                                         p += len;
@@ -1927,31 +1963,34 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                 nextPartition:
                         // It's possible that next is what we requested already, if
                         // we couldn't parse a single message from any bundle for this (topic, partition)  - i.e consumptionsList.empty() == true
-                        const auto next = !consumptionList.empty()
-                                              ? requestedSeqNum == UINT64_MAX ? consumptionList.back().seqNum + 1 : Max(requestedSeqNum, consumptionList.back().seqNum + 1)
-                                              : requestedSeqNum == UINT64_MAX ? highWaterMark + 1 : requestedSeqNum;
+                        const auto consumed_cnt = consumptionList.size() - consumption_list_base;
+                        const auto next         = (consumed_cnt
+                                               ? requestedSeqNum == UINT64_MAX ? consumptionList.back().seqNum + 1 : Max(requestedSeqNum, consumptionList.back().seqNum + 1)
+                                               : requestedSeqNum == UINT64_MAX ? highWaterMark + 1 : requestedSeqNum);
 
-                        if (trace)
-                                SLog("NEXTPARTITION:consumptionList.size = ", consumptionList.size(), ", requestedSeqNum = ", requestedSeqNum, ", highWaterMark = ", highWaterMark, "\n");
+                        if (trace) {
+                                SLog("NEXTPARTITION:consumptionList.size = ", consumptionList.size(), ", requestedSeqNum = ", requestedSeqNum, ", highWaterMark = ", highWaterMark, ", consumed_cnt = ", consumed_cnt, "\n");
+                        }
 
-                        if (const uint32_t cnt = consumptionList.size()) {
+			if (consumed_cnt) {
                                 if (i == topicsCnt - 1 && k == partitionsCnt - 1) {
                                         // optimization
-                                        consumedPartitionContent.push_back({clientReqId, topicName, partitionId, {consumptionList.data(), cnt}, true, {next, lastPartialMsgMinFetchSize}});
+                                        consumedPartitionContent.push_back({clientReqId, topicName, partitionId, {consumptionList.data() + consumption_list_base, consumed_cnt}, true, {next, lastPartialMsgMinFetchSize}});
                                 } else {
                                         consumed_msg *p;
-                                        const size_t  s = sizeof(consumed_msg) * consumptionList.size();
+                                        const size_t  s = sizeof(consumed_msg) * consumed_cnt;
 
                                         if (s >= 2 * 1024 * 1024) {
                                                 // large allocation; can't/shouldn't satisfy from the allocator
                                                 p = static_cast<consumed_msg *>(malloc(s));
-                                                memcpy(p, consumptionList.data(), s);
+                                                memcpy(p, consumptionList.data() + consumption_list_base, s);
                                                 resultsAllocations.push_back(p);
-                                        } else
-                                                p = resultsAllocator.CopyOf(consumptionList.data(), cnt);
+                                        } else {
+                                                p = resultsAllocator.CopyOf(consumptionList.data() + consumption_list_base, consumed_cnt);
+                                        }
 
-                                        consumedPartitionContent.push_back({clientReqId, topicName, partitionId, {p, cnt}, true, {next, lastPartialMsgMinFetchSize}});
-                                        consumptionList.clear();
+                                        consumedPartitionContent.push_back({clientReqId, topicName, partitionId, {p, consumed_cnt}, true, {next, lastPartialMsgMinFetchSize}});
+					consumptionList.resize(consumption_list_base);
                                 }
                         } else {
                                 // We may still get an empty list of messages for a (topic, partition)
@@ -2282,8 +2321,8 @@ void TankClient::poll(uint32_t timeoutMS) {
                 auto c = it.first;
                 auto b = it.second;
 
-                if (c->inB == b) // make sure they are still paired together
-                {
+                if (c->inB == b) {
+                        // make sure they are still paired together
                         if (b->IsAtEnd()) {
                                 put_buffer(b);
                                 c->inB = nullptr;
@@ -2303,11 +2342,14 @@ void TankClient::poll(uint32_t timeoutMS) {
 
         // Reset prior to reschedule_any() not after we have called it
         // because it may push to capturedFaults[] so we don't want to clear it after we called it
-        if (trace)
+        if (trace) {
                 SLog("POLLING, timeoutMS = ", timeoutMS, ", resetting consumedPartitionContent.size = ", consumedPartitionContent.size(), ": pendingConsumeReqs.size = ", pendingConsumeReqs.size(), "\n");
+	}
 
-        for (auto ptr : resultsAllocations)
+        for (auto ptr : resultsAllocations) {
                 ::free(ptr);
+	}
+
         resultsAllocations.clear();
         resultsAllocator.reuse();
         consumedPartitionContent.clear();
@@ -2316,6 +2358,7 @@ void TankClient::poll(uint32_t timeoutMS) {
         discoverPartitionsResults.clear();
 	reload_conf_results_v.clear();
         createdTopicsResults.clear();
+	consumptionList.clear();
 
         // it is important that we update_time_cache() here before we invoke reschedule_any() and right after Poll()
         update_time_cache();
