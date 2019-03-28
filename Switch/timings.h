@@ -172,10 +172,6 @@ namespace Timings
                         {
                                 abort();
                         }
-                        else if (unlikely(tv.tv_sec < 1451982426u))
-                        {
-                                abort();
-                        }
                         else
                                 return ((tv.tv_sec * 1000000000ULL) + (tv.tv_usec * 1000ULL)) / asNanoseconds;
                 }
