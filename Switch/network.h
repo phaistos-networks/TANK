@@ -299,3 +299,26 @@ static inline void PrintImpl(Buffer &v, const Switch::endpoint &e) {
         v.AppendFmt("%u.%u.%u.%u:%u", octets[0], octets[1], octets[2], octets[3], e.port);
 }
 
+struct ip4addr_repr final {
+        const uint32_t addr;
+
+        // address must be in network byte order (e.g created using IP4Addr() or using ntohl())
+        explicit ip4addr_repr(const uint32_t address)
+            : addr(address) {
+        }
+
+        strwlen8_t Get(char *const out) const {
+                const uint8_t *const octets = (uint8_t *)&addr;
+
+                return strwlen8_t(out, sprintf(out, "%u.%u.%u.%u", octets[0], octets[1], octets[2], octets[3]));
+        }
+};
+
+// e.g Print(ip4addr_repr(myAddress), "\n");
+static inline void PrintImpl(Buffer &out, const ip4addr_repr &r) {
+        const uint8_t *const octets = (uint8_t *)&r.addr;
+
+        out.AppendFmt("%u.%u.%u.%u", octets[0], octets[1], octets[2], octets[3]);
+}
+
+

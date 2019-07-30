@@ -1,24 +1,80 @@
+// Tank, because its a large container of liquid or gas
+// and data flow (as in, liquid), and also, this is a Trinity character name
 #pragma once
 #include "common.h"
 #include <atomic>
 #include <compress.h>
 #include <network.h>
 #include <queue>
-#include <set>
+#include <vector>
+#include <unordered_map>
 #include <switch.h>
-#include <switch_dictionary.h>
 #include <switch_ll.h>
 #include <switch_mallocators.h>
 #include <switch_vector.h>
-#include <vector>
-#include <unordered_map>
+#include "client_common.h"
+#include <ext/ebtree/eb64tree.h>
+#include <unordered_set>
 
-// Tank, because its a large container of liquid or gas
-// and data flow (as in, liquid), and also, this is a Trinity character name
-class TankClient final {
-      private:
-        struct broker;
+// XXX: experimental, see TODO
+// this does seem to work, although the performance improvement is rather small
+// it's definitely not ready yet, but once it is, we should be able to better understand the performance delta
+//
+// the idea is that by interleaving parsing of partitions/messages with network packets collection (i.e
+// packets arriving from peer and stored in the socket's queue) we can produce responses faster because
+// while the CPU is busy parsing the messages, packets are accumulated, and when its done parsing, we  'll have
+// more-fresh packets to process
+//#define TANK_CLIENT_FAST_CONSUME 1
 
+
+// The problem we want to solve is how to *reliably* abort broker requests
+//
+// We need to abort a broker request if:
+// 	- the broker request times-out
+// 	- the api request is aborted(times-out? etc), and we subsequently wish to abort all associated broker requests
+//
+// Once a broker request is associated with a broker:
+//	- its payload may not be materialized yet
+// 	- its payload may be scheduled for transfer, in full
+//	- its payload may be scheduled for transfer, in part
+//
+// Problems include:
+// 	- If we generate a timeout for a (request, topic, partition) but the payload of that request is transmitted anyway, then
+// what we report to the client(failure) is misleading.
+//
+// Important to consider:
+// 	- Once we have scheduled for transmission via writev() 1+ bytes of a materialized request payload, we can't abort it
+//	without closing the connection and migrating (broker, etc) to another connection, because of TCP semantics
+// 	- We need to be able to quickly figure out if there is a payload for a specific broker request so that we can
+//	remove it from the broker's outgoing_content list (iff we haven't transferred any bytes yet, see above).
+//	We can just scan the outgoing_content list for that (we associate the broker_requests with the payload so
+//	that's easy), but because the search is linear, this could potentially take too long.
+//	- if the broker's connection is closed, we can trivially abort everything
+
+//#define HAVE_NETIO_THROTTLE 1
+
+// specialize here otherwise compiler will fail (leaders)
+namespace std {
+        template <>
+        struct hash<std::pair<str_view8, uint16_t>> {
+                using argument_type = std::pair<str_view8, uint16_t>;
+                using result_type   = std::size_t;
+
+                inline result_type operator()(const argument_type &v) const {
+                        size_t hash{2166136261U};
+
+                        for (const auto c : v.first) {
+                                hash = (hash * 16777619) ^ c;
+                        }
+
+                        hash ^= std::hash<uint16_t>{}(v.second) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+                        return hash;
+                }
+        };
+} // namespace std
+
+// TankClient is not marked as final, because we need to use TEST_CASE_METHOD() (see catch2)
+class TankClient {
       public:
         enum class ProduceFlags : uint8_t {
 
@@ -42,42 +98,6 @@ class TankClient final {
         };
 
         using topic_partition = std::pair<strwlen8_t, uint16_t>;
-
-        // there is one such payload per request
-        // we are going to keep them around even after we have dispatched them
-        // in case we want to retry them; that is the purprose of the pendingRespList and RetainForAck flag
-        struct outgoing_payload final {
-                outgoing_payload *next;
-                switch_dlist      pendingRespList;
-                IOBuffer *        b, *b2;
-                struct iovec      iov[250];
-                uint8_t           iovCnt;
-                uint8_t           iovIdx;
-
-                enum class Flags : uint8_t {
-                        // if set, it means the payload must be retained if it has been sent via writev(), until the response for the request of this payload is received
-                        // That is, after we write() to the socket buffer, we can't know if the broker has gotten the chance to process the request or not, so retrying it
-                        // may lead to problems. If this is set, it means rescheduling, even if the original request was processes, won't affect state
-                        ReqIsIdempotent = 0,
-
-                        // If the broker report it is no longer the leader for a (topic, partition), we may need to retry the same request
-                        // XXX: However, a request may include multiple distinct (topic, partition)s, so we may not
-                        // be able to reschedule it as-is, and so we 'd need to account for that - that is, we should either set ReqMaybeRetried and
-                        // track it in pendingConsumeReqs and pendingProduceReqs iff number of partitions involved in the request == 1, or we should
-                        // set another flag, set another flag, and when we are told to try another node, either unpack the tracked payload to send
-                        // the data to where we need to send them, or do something else.
-                        ReqMaybeRetried = 1
-                };
-                uint8_t  flags;
-                uint32_t __id;
-
-                // If the payload is tracked by reqs_tracker.pendingConsume or reqs_tracker.pendingProduce or another reqs_tracker tracker, then
-                // we shouldn't try to put_payload() if it's registered with outgoing_content (either in pendingRespList or in outgoing payloads list)
-                constexpr bool tracked_by_reqs_tracker() const noexcept {
-                        return flags & ((1u << uint8_t(Flags::ReqIsIdempotent)) | (1u << uint8_t(Flags::ReqMaybeRetried)));
-                }
-        };
-
         struct consume_ctx final {
                 Switch::endpoint leader;
                 strwlen8_t       topic;
@@ -95,74 +115,21 @@ class TankClient final {
                 size_t           msgsCnt;
         };
 
-        struct connection final {
-                int          fd{-1};
-                switch_dlist list;
-                IOBuffer *   inB{nullptr};
-                broker *     bs{nullptr};
-
-                enum class Type : uint8_t {
-                        Tank
-                } type{Type::Tank};
-
-                struct State final {
-                        enum class Flags : uint8_t {
-                                ConnectionAttempt = 0,
-                                NeedOutAvail,
-                                RetryingConnection,
-                                ConsideredReqHeader,
-
-                                // Consume responses, produce acks, and errors almost all derefence the connection input buffer data.
-                                // Once we dereference it, we can't reallocate the buffer internal memory, so this is set.
-                                //
-                                // This flag is unset when we read data, and may be set by various process_() methods, and considered
-                                // when we process the ingested input
-                                LockedInputBuffer
-                        };
-
-                        uint8_t  flags;
-                        uint64_t lastInputTS, lastOutputTS;
-                } state;
-
-                connection() {
-                        switch_dlist_init(&list);
-                }
-        };
-
+#if 0
         void deregister_connection_attempt(connection *const c) {
                 connectionAttempts.RemoveByValue(c);
         }
 
-        struct active_consume_req final {
-                uint32_t          clientReqId;
-                outgoing_payload *reqPayload;
-                uint64_t          ts;
-                uint64_t *        seqNums;
-                uint8_t           seqNumsCnt;
-        };
-
-        struct active_ctrl_req final {
-                uint32_t          clientReqId;
-                outgoing_payload *reqPayload;
-                uint64_t          ts;
-        };
-
-        struct active_produce_req final {
-                uint32_t          clientReqId;
-                outgoing_payload *reqPayload;
-                uint64_t          ts;
-                uint8_t *         ctx;
-                uint32_t          ctxLen;
-        };
-
+#endif
         struct discovered_topic_partitions final {
-                uint32_t                                              clientReqId;
+                uint32_t clientReqId;
+
                 strwlen8_t                                            topic;
                 range_base<std::pair<uint64_t, uint64_t> *, uint16_t> watermarks;
         };
 
         struct reload_conf_result final {
-		uint32_t client_req_id;
+                uint32_t  clientReqId;
                 str_view8 topic;
                 uint16_t  partition;
         };
@@ -185,6 +152,19 @@ class TankClient final {
                 strwlen32_t content;
         };
 
+        struct srv_status final {
+                struct {
+                        uint32_t topics;
+                        uint32_t partitions;
+                        uint32_t nodes;
+                } counts;
+
+                struct {
+                        char    data[64];
+                        uint8_t len;
+                } cluster_name;
+        };
+
         struct partition_content final {
                 uint32_t                             clientReqId;
                 strwlen8_t                           topic;
@@ -198,6 +178,12 @@ class TankClient final {
                 // See TankClient::set_allow_streaming_consume_responses();
                 bool respComplete;
 
+                // NEW:
+                // set to true if there was no content returned
+                // regardless of the minFetchSize
+                // this is the reliable way to check if the partition has been drained
+                bool drained;
+
                 // We can't rely on msgs.back().seqNum + 1 to compute the next sequence number
                 // to consume from, because if no message at all can be parsed because
                 // of the request fetch size, msgs will be empty().
@@ -208,8 +194,15 @@ class TankClient final {
                         // to get more messages
                         // consume from (topic, partition) starting from seqNum,
                         // and set fetchSize to be at least minFetchSize
-                        uint64_t seqNum;
-                        uint32_t minFetchSize;
+                        union {
+                                uint64_t seqNum;
+                                uint64_t seq_num;
+                        };
+
+                        union {
+                                uint32_t minFetchSize;
+                                uint32_t min_fetch_size;
+                        };
                 } next;
         };
 
@@ -226,6 +219,9 @@ class TankClient final {
                         SystemFail,
                         AlreadyExists,
                         NotAllowed,
+                        Timeout,
+                        UnsupportedReq,
+                        InsufficientReplicas,
                 } type;
 
                 enum class Req : uint8_t {
@@ -244,442 +240,810 @@ class TankClient final {
                                 uint64_t firstAvailSeqNum;
                                 uint64_t highWaterMark;
                         };
+
+                        // for
+                        uint64_t seq_num;
                 } ctx;
 
                 // handy utility function if type == Type::BoundaryCheck
                 // adjusts sequence number to be within [firstAvailSeqNum, highWaterMark + 1]
                 uint64_t adjust_seqnum_by_boundaries(uint64_t seqNum) const {
-                        require(type == Type::BoundaryCheck);
+                        TANK_EXPECT(type == Type::BoundaryCheck);
 
-                        if (seqNum < ctx.firstAvailSeqNum)
+                        if (seqNum < ctx.firstAvailSeqNum) {
                                 seqNum = ctx.firstAvailSeqNum;
-                        else if (seqNum > ctx.highWaterMark)
+                        } else if (seqNum > ctx.highWaterMark) {
                                 seqNum = ctx.highWaterMark + 1;
+                        }
 
                         return seqNum;
                 }
         };
 
-      private:
-        struct
-        {
-                struct
-                {
-                        uint32_t next{1};
-                } client;
+      protected:
+        struct timer final {
+                enum class Type : uint8_t {
+                        TrackedResponseExpiration = 0,
+                } type;
 
-                struct
-                {
-                        uint32_t next{1};
-                } leader_reqs;
-        } ids_tracker;
+                eb64_node node;
+
+                void reset() {
+                        node.node.leaf_p = nullptr;
+                }
+
+                bool is_linked() const noexcept {
+                        return node.node.leaf_p;
+                }
+        };
+
+        struct connection;
+        struct broker;
+        struct connection_handle final {
+                connection *c_{nullptr};
+                uint64_t    c_gen;
+
+                void reset() {
+                        c_gen = std::numeric_limits<uint64_t>::max();
+                        c_    = nullptr;
+                }
+
+                inline void set(connection *const c) noexcept;
+
+                inline connection *get() noexcept;
+
+                inline const connection *get() const noexcept;
+        };
+
+        struct request_partition_ctx final {
+                str_view8 topic;
+                // for some types of requests, partition is not used
+                uint16_t     partition;
+                switch_dlist partitions_list_ll;
+
+		// for no_leader, retry chaining where it makes sense
+		request_partition_ctx *_next;
+
+                union Op final {
+                        struct {
+                                uint64_t seq_num;
+                                uint32_t min_fetch_size;
+
+                                struct {
+                                        struct {
+                                                uint64_t seq_num;
+                                                size_t   min_size;
+                                        } next;
+
+                                        struct {
+                                                IOBuffer **data;
+                                                uint32_t   size;
+                                        } used_buffers;
+
+                                        struct {
+                                                uint32_t cnt;
+
+                                                union {
+                                                        consumed_msg  small[8];
+                                                        consumed_msg *large; // if (cnt >= sizeof_array(small)) we are going to be allocating
+                                                } list;
+                                        } msgs;
+
+                                        bool drained;
+                                } response;
+                        } consume;
+
+                        struct {
+                                struct {
+                                        // we will sort them when we construct the response
+                                        std::vector<std::pair<uint16_t, std::pair<uint64_t, uint64_t>>> *all;
+                                } response;
+                        } discover_partitions;
+
+                        struct {
+                                struct {
+                                        uint8_t *data;
+                                        uint32_t size;
+                                } payload;
+
+                                // for ProduceWithBase requests
+                                uint64_t first_msg_seqnum;
+                        } produce;
+
+			struct {
+				struct {
+					uint32_t nodes;
+					uint32_t topics;
+					uint32_t partitions;
+				} counts;
+
+				struct {
+					char data[64];
+					uint8_t len; // 0 if not cluster aware
+				} cluster_name;
+			} srv_status;
+                } as_op;
+
+                void reset() {
+                        partitions_list_ll.reset();
+			_next = nullptr;
+                        as_op.discover_partitions.response.all = nullptr;
+                }
+        };
+
+        struct api_request;
+        struct retry_bundle final {
+                switch_dlist           retry_bundles_ll;
+                uint64_t               expiration;
+                api_request *          api_req;
+                eb64_node              node;
+                uint16_t               size;
+                request_partition_ctx *data[0];
+        };
+
+        // a request to a specific broker, for 1+ partitions
+        // this is managed in a fan-out/coordinator fashion by an api_request
+        //
+        // each partition involved with this broker request has a request specific configuration
+        struct broker_api_request final {
+                broker *     br;
+                api_request *api_req;
+
+                // we need a distinct id for every such request, and that's encoded
+                // in the broker_outgoing_payload we generate and stream to the broker
+                // because we need to to encode it in the payload so that
+                // when the broker responds, its response will include
+                // this request ID and we can look up the payload by that id (see payloads_map)
+                uint32_t     id;
+                switch_dlist partitions_list;         // tracks request_partition_ctx's
+                switch_dlist broker_requests_list_ll; // tracked by the api_request via this ll
+
+                // when we deliver (in full) a payload to a broker via writev()
+                // we need to track them, so that if the broker fails, we 'll know which requests those were
+                switch_dlist pending_responses_list_ll;
+
+                bool have_payload;
+
+                // Some requests, e.g discover_partitions
+                // are not associated with any partitions, so we could just include request-state here
+                // in a union - but for simplicity reasons, we 'll just use a request_partition_ctx as well, where the partititon doesn't really matter
+
+                void reset() {
+                        partitions_list.reset();
+                        broker_requests_list_ll.reset();
+                        pending_responses_list_ll.reset();
+                        api_req      = nullptr;
+                        br           = nullptr;
+                        id           = 0;
+                        have_payload = false;
+                }
+        };
+
+        struct msgs_bucket final {
+                consumed_msg data[512];
+                msgs_bucket *next;
+        };
+
+        // coordinates(fan-out) 1+ broker_api_request's
+        struct managed_buf;
+        struct api_request final {
+                enum class Type : uint8_t {
+                        Consume = 0,
+                        Produce,
+                        ProduceWithSeqnum,
+                        DiscoverPartitions,
+                        CreateTopic,
+                        ReloadConfig,
+			SrvStatus,
+                } type;
+                uint32_t request_id; // client request ID
+
+#ifdef TANK_RUNTIME_CHECKS 
+		uint64_t init_ms;
+#endif
+                eb64_node api_reqs_expirations_tree_node;
+
+                switch_dlist broker_requests_list;
+                // those are migrated from broker_api_request to api_request
+                // when we get a response for them
+                switch_dlist               ready_partitions_list;
+                switch_dlist               retry_bundles_list;
+                std::vector<managed_buf *> managed_bufs;
+                bool                       _failed;
+
+                bool ready() const noexcept {
+                        return retry_bundles_list.empty() && broker_requests_list.empty();
+                }
+
+                void set_failed() noexcept {
+                        _failed = true;
+                }
+
+                bool failed() const noexcept {
+                        return _failed;
+                }
+
+                auto expiration() const noexcept {
+                        return api_reqs_expirations_tree_node.key;
+                }
+
+                // for some types of requests, we may
+                // want to materialize something in-memory
+                // so that when we gc_api_request() it will be destroyed
+                union {
+                        struct {
+                                std::pair<uint64_t, uint64_t> *v;
+                        } discover_partitions;
+                } materialized_resp;
+
+                union As final {
+                        struct Consume final {
+                                uint64_t max_wait;
+                                size_t   min_size;
+                        } consume;
+
+                        struct CreateTopic final {
+                                uint16_t   partitions;
+                                str_view32 config;
+                        } create_topic;
+
+                        As()
+                            : create_topic{} {
+                        }
+
+                } as;
+
+                void reset() {
+                        broker_requests_list.reset();
+                        ready_partitions_list.reset();
+                        managed_bufs.clear();
+                        retry_bundles_list.reset();
+                        request_id                                 = 0;
+                        api_reqs_expirations_tree_node.key         = 0;
+                        api_reqs_expirations_tree_node.node.leaf_p = nullptr;
+                        _failed                                    = false;
+
+                        memset(&materialized_resp, 0, sizeof(materialized_resp));
+                }
+        };
+
+        // a *materialized* broker_api_request
+        // it's really just holds a buffer and the iovecs
+        struct broker_outgoing_payload final {
+                broker_outgoing_payload *next;
+                IOBuffer *               b;
+                broker_api_request *     broker_req;
+
+                struct IOVECS final {
+                        struct iovec data[256];
+                        uint8_t      size;
+                } iovecs;
+        };
+
+        struct buf_llhdr final {
+                IOBuffer * b;
+                buf_llhdr *next;
+        };
+
+        struct managed_buf final {
+                enum class Flags : uint8_t {
+                        Locked = 1u << 0,
+                };
+
+                managed_buf *next{nullptr};
+                uint32_t     rc{1}, locks_{0};
+                uint32_t     capacity_{0};
+                uint32_t     length{0};
+                uint32_t     offset_{0};
+                char *       data_{nullptr};
+                // an object may depend on 0+ buffers
+                // a buffer may be a dependncy of 0+ objects
+                switch_dlist users_list{&users_list, &users_list};
+
+                ~managed_buf() {
+                        if (data_) {
+                                std::free(data_);
+                        }
+                }
+
+                void serialize(int8_t *ptr, const size_t l) {
+			TANK_EXPECT(locks_ == 0);
+
+                        reserve(l);
+                        memcpy(data_ + length, ptr, l);
+                        length += l;
+                }
+
+                auto size() const noexcept {
+                        return length;
+                }
+
+                const char *data() const noexcept {
+                        return data_;
+                }
+
+                char *data() noexcept {
+                        return data_;
+                }
+
+                void lock() noexcept {
+                        ++locks_;
+                }
+
+                bool is_locked() const noexcept {
+                        return locks_;
+                }
+
+                bool unlock() {
+                        TANK_EXPECT(locks_);
+                        return --locks_ == 0;
+                }
+
+                void reserve(const size_t n) {
+                        if (n > capacity_ && likely(n)) {
+                                capacity_ = n;
+                                data_     = static_cast<char *>(realloc(data_, capacity_ * sizeof(char)));
+                        }
+                }
+
+                auto capacity() const noexcept {
+                        return capacity_;
+                }
+
+                void clear() TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+			TANK_EXPECT(locks_ == 0);
+
+                        length  = 0;
+                        locks_  = 0;
+                        offset_ = 0;
+                        next    = nullptr;
+                }
+
+                void set_offset(const char *p) {
+                        TANK_EXPECT(p >= data() && p <= data() + size());
+                        offset_ = p - data();
+                }
+
+                void set_offset(const uint32_t o) {
+                        TANK_EXPECT(o <= size());
+                        offset_ = o;
+                }
+
+                void erase_chunk(const uint32_t o, const uint32_t s) {
+                        auto p = data_ + o;
+
+			TANK_EXPECT(locks_ == 0);
+                        TANK_EXPECT(o + s <= size());
+                        memmove(p, p + s, size() - (o + s));
+                        length -= s;
+                }
+
+                auto offset() const noexcept {
+                        return offset_;
+                }
+
+                void retain() noexcept {
+                        ++rc;
+                }
+
+                bool release() noexcept {
+                        return --rc == 0;
+                }
+
+                auto use_count() const noexcept {
+                        return rc;
+                }
+        };
+
+        struct connection final {
+                int fd{-1};
+
+                enum class Type : uint8_t {
+                        Tank
+                } type;
+
+#ifdef HAVE_NETIO_THROTTLE
+                struct {
+                        struct {
+                                switch_dlist ll;
+                                uint64_t     until;
+
+                                void reset() {
+                                        ll.reset();
+                                        until = std::numeric_limits<uint64_t>::max();
+                                }
+                        } read, write;
+                } throttler;
+#endif
+
+                uint64_t     gen;
+                switch_dlist all_conns_list_ll;
+
+                union {
+                        struct {
+                                switch_dlist list;
+                                uint64_t     expiration;
+                        };
+                };
+
+                struct {
+                        managed_buf *b;
+                } in;
+
+                struct State final {
+                        enum class Flags : uint8_t {
+                                ConnectionAttempt = 0,
+                                NeedOutAvail,
+                                RetryingConnection,
+                        };
+
+                        uint8_t flags;
+                } state;
+
+                struct As final {
+                        struct Tank final {
+                                enum class Flags : uint8_t {
+                                        ConsideredReqHeader     = 0,
+                                        InterleavedRespAssembly = 1,
+                                };
+
+#ifdef TANK_CLIENT_FAST_CONSUME
+				// this is used exclusively for consume responses
+				struct Response final {
+					enum class State : uint8_t {
+						ParseHeader = 0,
+						ParseTopic,
+						ParseFirstTopicPartition,
+						ParsePartition,
+						ParsePartitionBundle,
+						ParsePartitionBundleMsgSet,
+						Drain,
+						Ready,
+					} state;
+
+					request_partition_ctx *no_leader_l, *retry_l;
+					bool any_faults;
+					bool retain_buf;
+					uint32_t resp_end_offset;
+                                        broker_api_request *breq;
+                                        uint32_t            req_id;
+                                        uint32_t            hdr_size;
+                                        uint8_t             topics_cnt;
+                                        uint8_t             topic_partitions_cnt;
+                                        switch_dlist *      br_req_partctx_it;
+                                        buf_llhdr *         used_bufs;
+                                        struct {
+                                                char data_[256];
+						uint8_t len;
+
+						auto size() const noexcept {
+							return len;
+						}
+
+						const char *data() const noexcept {
+							return data_;
+						}
+                                        } topic_name;
+
+                                        struct {
+                                                uint64_t     highwater_mark;
+                                                uint32_t     bundles_chunk_len;
+                                                uint64_t     log_base_seqnum;
+                                                uint32_t     need_upto, need_from;
+
+                                                struct {
+                                                        msgs_bucket *first_bucket, *last_bucket;
+                                                        uint32_t     last_bucket_size;
+                                                        uint32_t     consumed;
+
+                                                        void reset() {
+                                                                first_bucket = last_bucket = nullptr;
+                                                                last_bucket_size           = sizeof_array(msgs_bucket::data);
+                                                                consumed                   = 0;
+                                                        }
+                                                } capture_ctx;
+
+                                                struct {
+                                                        uint32_t offset;
+                                                        uint32_t end;
+                                                } bundles_chunk;
+
+                                                struct {
+                                                        uint8_t  codec;
+							bool sparse;
+							bool any_captured;
+							uint64_t first_msg_seqnum, last_msg_seqnum;
+							uint32_t size;
+							uint32_t conumed;
+
+                                                        union MsgSetContent final {
+                                                                struct {
+                                                                        const uint8_t *p;
+                                                                        const uint8_t *e;
+                                                                } tmpbuf_range;
+                                                                struct {
+                                                                        uint32_t o;
+                                                                        uint32_t e;
+                                                                } inb_range;
+                                                        } msgset_content;
+
+                                                        struct {
+                                                                uint64_t ts;
+                                                                uint32_t msg_idx;
+                                                                uint64_t min_accepted_seqnum;
+								uint32_t size;
+                                                        } cur_msg_set;
+                                                } cur_bundle;
+                                        } cur_partition;
+
+                                        void reset() {
+                                                state       = State::ParseHeader;
+                                                retain_buf  = false;
+                                                used_bufs   = nullptr;
+                                                any_faults  = false;
+                                                no_leader_l = nullptr;
+                                                retry_l     = nullptr;
+                                        }
+                                } cur_resp;
+#endif
+
+
+                                uint8_t flags;
+                                broker *br;
+
+
+                                void reset() {
+                                        flags = 0;
+                                        br    = nullptr;
+#ifdef TANK_CLIENT_FAST_CONSUME
+					cur_resp.reset();
+#endif
+                                }
+                        } tank;
+                } as;
+
+                void reset() noexcept {
+                        in.b = nullptr;
+                        fd   = -1;
+                        list.reset();
+                        all_conns_list_ll.reset();
+
+
+#ifdef HAVE_NETIO_THROTTLE
+                        throttler.read.reset();
+                        throttler.write.reset();
+#endif
+                }
+        };
+
+        uint32_t next_broker_request_id{1};
+        uint32_t next_api_request_id{1};
 
         struct broker final {
-                struct connection *    con{nullptr};
-                const Switch::endpoint endpoint;
+                static constexpr size_t max_consequtive_connection_failures{5};
+                uint64_t                blocked_until{0};
+                eb64_node               unreachable_brokers_tree_node{.node.leaf_p = nullptr};
+                connection_handle       ch;
+                const Switch::endpoint  ep;
+                uint8_t                 consequtive_connection_failures{0};
+                switch_dlist            all_brokers_ll{&all_brokers_ll, &all_brokers_ll};
+		uint8_t flags{0};
 
-                switch_dlist retainedPayloadsList;
+                enum class Flags : uint8_t {
+                        Important = 0,
+                };
 
                 enum class Reachability : uint8_t {
-                        Reachable = 0,  // Definitely reachable, or we just don't know yet for we haven't tried to connect
-                        Unreachable,    // Definitely unreachable; can't retry connection until block_ctx.until
-                        MaybeReachable, // Was blocked, and will now retry the connection in case it is now possible
-                        Blocked         // Blocked; will retry the connection at block_ctx.until
-                } reachability{Reachability::Reachable};
+                        LikelyUnreachable,
+                        LikelyReachable,
+                        MaybeReachable,
+                        Blocked,
+                } reachability{Reachability::MaybeReachable};
 
-                struct
-                {
-                        uint32_t prevSleep;
-                        uint64_t until;
-                        uint64_t naSince;
-                        uint16_t retries{0};
-                } block_ctx;
+                switch_dlist pending_responses_list{&pending_responses_list, &pending_responses_list};
 
-                void set_reachability(const Reachability r, const uint32_t);
+                void set_reachability(const Reachability, const size_t);
 
-                // outgoing content will be associated with a leader state, not its connection
-                // and the connection will drain this outgoing_content
-                struct
-                {
-                        outgoing_payload *front_{nullptr}, *back_{nullptr};
+                // Tank node connections will drain a broker's outgoing_content
+                // i.e data will be tracked by the broker, not the connection
+                struct {
+                        using payload = broker_outgoing_payload;
 
-                        void push_front(outgoing_payload *const p) noexcept {
-                                p->iovIdx = 0;
-                                p->next   = front_;
-                                front_    = p;
-                                if (!back_)
-                                        back_ = front_;
-                        }
+                        payload *front_{nullptr}, *back_{nullptr};
+                        uint8_t  front_payload_iovecs_index{0};
+                        bool     first_payload_partially_transferred{false};
 
-                        // this will be a no-op a few revisions later
-                        // just need to make sure ordering is preserved
-                        void validate() {
-                                if (auto it = front_) {
-                                        require(it->__id);
+                        size_t size() const noexcept {
+                                size_t n{0};
 
-                                        for (auto prev = it; (it = it->next);) {
-                                                require(it->__id);
-                                                require(it->__id > prev->__id);
-                                        }
+                                for (auto it = front_; it; it = it->next) {
+                                        ++n;
                                 }
+
+                                return n;
                         }
 
-                        void push_back(outgoing_payload *const p) {
-                                p->iovIdx = 0;
-                                p->next   = nullptr;
+                        void push_front(payload *p) noexcept {
+                                p->next = nullptr;
 
-                                if (back_)
+                                if (front_) {
+                                        front_->next = p;
+                                } else {
+                                        back_ = p;
+                                }
+                                front_ = p;
+                        }
+
+                        void push_back(payload *p) {
+                                p->next = nullptr;
+
+                                if (back_) {
                                         back_->next = p;
-                                else
+                                        TANK_EXPECT(front_);
+                                } else {
                                         front_ = p;
+                                }
 
                                 back_ = p;
                         }
 
-                        constexpr auto front() const noexcept {
+                        auto front() noexcept {
                                 return front_;
                         }
 
-                        constexpr void pop_front() noexcept {
-                                front_ = front_->next;
-                                if (!front_)
-                                        back_ = nullptr;
+                        auto back() noexcept {
+                                return back_;
                         }
 
+                        auto empty() noexcept {
+                                return !front_;
+                        }
+
+                        void pop_back() noexcept {
+                                back_ = back_->next;
+
+                                if (!back_) {
+                                        front_ = nullptr;
+                                }
+                        }
+
+                        void pop_front() noexcept {
+                                front_ = front_->next;
+
+                                if (!front_) {
+                                        back_ = nullptr;
+                                }
+                        }
+
+                        void clear() noexcept {
+                                front_ = back_                      = nullptr;
+                                front_payload_iovecs_index          = 0;
+                                first_payload_partially_transferred = false;
+                        }
                 } outgoing_content;
 
-                struct
-                {
-                        std::set<uint32_t> pendingConsume;
-                        std::set<uint32_t> pendingProduce;
-                        std::set<uint32_t> pendingCtrl;
-                } reqs_tracker;
-
                 broker(const Switch::endpoint e)
-                    : endpoint{e} {
-                        switch_dlist_init(&retainedPayloadsList);
+                    : ep{e} {
+                        outgoing_content.clear();
                 }
+
+                // see module headers
+                //
+                // if we can safely abort the first payload, we can safely abort them all
+                //
+                // if we wish to abort a payload associated with a broker request, we can safely drop it from
+                // the outgoing_content payloads list if (can_safely_abort_broker_request_payload() == true)
+                bool can_safely_abort_first_payload() const noexcept {
+                        return outgoing_content.first_payload_partially_transferred == false;
+                }
+
+                bool can_safely_abort_broker_request_payload(broker_api_request *breq) noexcept {
+                        if (auto p = outgoing_content.front(); p && p->broker_req == breq) {
+                                return can_safely_abort_first_payload();
+                        }
+
+                        return true;
+                }
+
+                broker_outgoing_payload *abort_broker_request_payload(const broker_api_request *);
         };
 
-        uint64_t                                            nextInflightReqsTimeoutCheckTs{0};
-        RetryStrategy                                       retryStrategy{RetryStrategy::RetryAlways};
-        CompressionStrategy                                 compressionStrategy{CompressionStrategy::CompressIntelligently};
-        std::unordered_map<Switch::endpoint, broker *>      bsMap;
-        std::unordered_map<strwlen8_t, Switch::endpoint>    leadersMap;
-        Switch::endpoint                                    defaultLeader{};
-        bool                                                allowStreamingConsumeResponses{false};
-        int                                                 sndBufSize{128 * 1024}, rcvBufSize{1 * 1024 * 1024};
-        strwlen8_t                                          clientId{"c++"};
-        switch_dlist                                        connections;
-        Switch::vector<std::pair<connection *, IOBuffer *>> connsBufs;
-        // TODO: https://github.com/phaistos-networks/TANK/issues/6
-        Switch::vector<IOBuffer *>                          usedBufs;
-        simple_allocator                                    resultsAllocator{2 * 1024 * 1024};
-        Switch::vector<void *>                              resultsAllocations;
-        Switch::vector<partition_content>                   consumedPartitionContent;
-        Switch::vector<fault>                               capturedFaults;
-        Switch::vector<produce_ack>                         produceAcks;
-        Switch::vector<discovered_topic_partitions>         discoverPartitionsResults;
-        std::vector<reload_conf_result>                     reload_conf_results_v;
-        Switch::vector<created_topic>                       createdTopicsResults;
-        Switch::vector<consumed_msg>                        consumptionList;
-        Switch::vector<consume_ctx>                         consumeOut;
-        Switch::vector<produce_ctx>                         produceOut;
-        uint64_t                                            nowMS;
-        uint32_t                                            nextConsumeReqId{1}, nextProduceReqId{1};
-        Switch::vector<connection *>                        connectionAttempts, connsList;
-        EPoller                                             poller;
-        int                                                 pipeFd[2];
-        std::atomic<bool>                                   polling{false};
-        Switch::vector<connection *>                        connectionsPool;
-        Switch::vector<outgoing_payload *>                  payloadsPool;
-        Switch::vector<IOBuffer *>                          buffersPool;
-        size_t                                              buffersPoolPressure{0};
-        Switch::vector<range32_t>                           ranges;
-        IOBuffer                                            produceCtx;
-        Switch::unordered_map<uint32_t, active_consume_req> pendingConsumeReqs;
-        Switch::unordered_map<uint32_t, active_produce_req> pendingProduceReqs;
-        Switch::unordered_map<uint32_t, active_ctrl_req>    pendingCtrlReqs;
-        struct reschedule_queue_entry_cmp {
-                bool operator()(const broker *const b1, const broker *const b2) noexcept {
-                        return b1->block_ctx.until > b2->block_ctx.until;
-                }
-        };
-        std::priority_queue<broker *, std::vector<broker *>, reschedule_queue_entry_cmp> rescheduleQueue;
+      protected:
+        // we need to track resources in-use
+        // this helps with figuring out situtations where a resource may be released more than once, and
+        // also help with unit tests
+        struct ResourceTracker final {
+                uint32_t api_request;
+                uint32_t broker_api_request;
+                uint32_t request_partition_ctx;
+                uint32_t buffer;
+                uint32_t managed_buf;
+                uint32_t payload;
+                uint32_t connection;
 
-      private:
-        inline void update_time_cache() {
-                nowMS = Timings::Milliseconds::Tick();
-        }
-
-        broker *broker_state(const Switch::endpoint e);
-
-        static uint8_t choose_compression_codec(const msg *const, const size_t);
-
-        // this is somewhat complicated, because we want to use varint for the bundle length and we want to
-        // encode this efficiently (no copying or moving data across buffers)
-        // so we construct payload->iov[] properly
-        bool produce_to_leader(const uint32_t clientReqId, const Switch::endpoint leader, const produce_ctx *const produce, const size_t cnt);
-
-        bool produce_to_leader_with_base(const uint32_t clientReqId, const Switch::endpoint leader, const produce_ctx *const produce, const size_t cnt);
-
-        // minSize: The minimum amount of data the server should return for a fetch request.
-        // If insufficient data is available, the request will wait for >= that much data to accumlate before answering the request.
-        // 0 (default) means that the fetch requests are answered as soon as a single byte is available or the fetch request times out waiting for data to arrive.
-        //
-        // maxWait: The maximum amount of time the server will block before answering a fetch request, if ther isn't sufficeint data to immediately satisfy the requirement set by minSize
-        bool consume_from_leader(const uint32_t clientReqId, const Switch::endpoint leader, const consume_ctx *const from, const size_t total, const uint64_t maxWait, const uint32_t minSize);
-
-        void track_na_broker(broker *);
-
-        bool is_unreachable(const Switch::endpoint) const;
-
-        bool consider_retransmission(broker *);
-
-        void track_inflight_req(const uint32_t, const uint64_t, const TankAPIMsgType);
-
-        void abort_inflight_req(connection *, const uint32_t, const TankAPIMsgType);
-
-        void consider_inflight_reqs(const uint64_t);
-
-        void forget_inflight_req(const uint32_t, const TankAPIMsgType);
-
-        bool shutdown(connection *const c, const uint32_t ref, const bool fault = false);
-
-        void reschedule_any();
-
-        bool process_produce(connection *const c, const uint8_t *const content, const size_t len);
-
-        bool process_consume(connection *const c, const uint8_t *const content, const size_t len);
-
-        bool process_discover_partitions(connection *const c, const uint8_t *const content, const size_t len);
-	
-	bool process_reload_conf(connection *, const uint8_t *, const size_t);
-
-        bool process_create_topic(connection *const c, const uint8_t *const content, const size_t len);
-
-        bool process(connection *const c, const uint8_t msg, const uint8_t *const content, const size_t len);
-
-        auto get_buffer() {
-                if (buffersPool.size()) {
-                        auto b = buffersPool.Pop();
-
-                        buffersPoolPressure -= b->Reserved();
-                        return b;
-                } else
-                        return new IOBuffer();
-        }
-
-        void ack_payload(broker *, outgoing_payload *);
-
-        void prepare_retransmission(broker *);
-
-        bool try_recv(connection *const c);
-
-        bool try_send(connection *const c);
-
-        void retain_for_resp(broker *, outgoing_payload *);
-
-        void put_buffer(IOBuffer *const b);
-
-        void put_buffers(IOBuffer **const list, const size_t n);
-
-        uint32_t __nextPayloadId{0};
-
-        auto get_payload() {
-                auto res = payloadsPool.size() ? payloadsPool.Pop() : new outgoing_payload();
-
-                res->iovCnt = res->iovIdx = 0;
-                res->next                 = nullptr;
-                res->flags                = 0;
-                res->b                    = get_buffer();
-                res->b2                   = get_buffer();
-
-                {
-                        // See broker::outgoing_content::validate()
-                        res->__id = ++__nextPayloadId;
-                        require(res->__id);
+                void clear() {
+                        memset(this, 0, sizeof(*this));
                 }
 
-                switch_dlist_init(&res->pendingRespList);
-                return res;
-        }
-
-        outgoing_payload *get_payload_for(connection *, const size_t);
-
-        void put_payload(outgoing_payload *const p, const uint32_t ref) {
-                require(p->__id);
-
-                if (p->b) {
-                        put_buffer(p->b);
-                        p->b = nullptr;
-                }
-                if (p->b2) {
-                        put_buffer(p->b2);
-                        p->b2 = nullptr;
+                bool any() const noexcept {
+                        return api_request | broker_api_request | request_partition_ctx | buffer | managed_buf | payload | connection;
                 }
 
-                p->__id = 0; // so that validate() will catch it if e.g we re-use a payload without put_payload() first
+                ResourceTracker() {
+                        clear();
+                }
+        } rsrc_tracker;
+#ifdef HAVE_NETIO_THROTTLE
+        switch_dlist throttled_connections_read_list{&throttled_connections_read_list, &throttled_connections_read_list};
+        switch_dlist throttled_connections_write_list{&throttled_connections_write_list, &throttled_connections_write_list};
+        uint64_t     throttled_connections_read_list_next{std::numeric_limits<uint64_t>::max()};
+        uint64_t     throttled_connections_write_list_next{std::numeric_limits<uint64_t>::max()};
+#endif
 
-                payloadsPool.push_back(p);
-        }
+        eb_root                                   api_reqs_expirations_tree{EB_ROOT};
+        uint64_t                                  api_reqs_expirations_tree_next{std::numeric_limits<uint64_t>::max()};
+        eb_root                                   timers_ebtree_root{EB_ROOT};
+        uint64_t                                  timers_ebtree_next{std::numeric_limits<uint64_t>::max()};
+        eb_root                                   retry_bundles_ebt_root{EB_ROOT};
+        uint64_t                                  retry_bundles_next{std::numeric_limits<uint64_t>::max()};
+        eb_root                                   unreachable_brokers_tree{EB_ROOT};
+        uint64_t                                  unreachable_brokers_tree_next{std::numeric_limits<uint64_t>::max()};
+        simple_allocator                          reqs_allocator;
+        std::vector<std::unique_ptr<api_request>> reusable_api_requests;
+        std::vector<broker_api_request *>         reusable_broker_api_requests;
+        std::vector<request_partition_ctx *>      reusable_request_partition_contexts;
 
-        auto get_connection() {
-                return connectionsPool.size() ? connectionsPool.Pop() : new connection();
-        }
+        CompressionStrategy                                           compressionStrategy{CompressionStrategy::CompressIntelligently};
+        std::unordered_map<Switch::endpoint, std::unique_ptr<broker>> brokers;
+        switch_dlist                                                  all_brokers{&all_brokers, &all_brokers};
+        std::unordered_map<topic_partition, Switch::endpoint>         leaders;
+        std::unordered_map<str_view8, bool>                           topics_intern_map;
+        bool                                                          allowStreamingConsumeResponses{false};
+        int                                                           sndBufSize{128 * 1024}, rcvBufSize{1 * 1024 * 1024};
+        strwlen8_t                                                    clientId{"c++"};
+        switch_dlist                                                  conns_pend_est_list{&conns_pend_est_list, &conns_pend_est_list};
+        uint64_t                                                      conns_pend_est_next_expiration{std::numeric_limits<uint64_t>::max()};
+        switch_dlist                                                  all_conns_list{&all_conns_list, &all_conns_list};
+        uint64_t                                                      next_conns_gen{1};
+        simple_allocator                                              resultsAllocator{2 * 1024 * 1024};
 
-        void put_connection(connection *const c) {
-                c->state.flags = 0;
-                connectionsPool.push_back(c);
-        }
+        std::vector<partition_content>           consumed_content;
+        std::vector<fault>                       all_captured_faults;
+        std::vector<produce_ack>                 produce_acks_v;
+        std::vector<discovered_topic_partitions> all_discovered_partitions;
+        std::vector<reload_conf_result>          reload_conf_results_v;
+        std::vector<created_topic>               created_topics_v;
+        std::vector<srv_status>                  collected_cluster_status_v;
 
-        int init_connection_to(const Switch::endpoint e);
+        std::unordered_map<uint32_t, broker_api_request *>         pending_brokers_requests;
+        std::unordered_map<uint32_t, std::unique_ptr<api_request>> pending_responses;
+        std::vector<std::unique_ptr<api_request>>                  ready_responses;
 
-        void bind_fd(connection *const c, int fd);
+        EPoller                                   poller;
+	int interrupt_fd{-1};
+        std::atomic<bool>                         sleeping{false};
+        uint64_t                                  now_ms{0};
+        uint64_t                                  next_curtime_update{0};
+        time_t                                    cur_time{0};
+        simple_allocator                          core_allocator;
+        std::vector<broker_outgoing_payload *>    reusable_payloads;
+        std::vector<std::unique_ptr<connection>>  reusable_connections;
+        std::vector<std::unique_ptr<IOBuffer>>    reusable_buffers;
+        std::vector<std::unique_ptr<managed_buf>> reusable_managed_buffers;
+        std::vector<range32_t>                    ranges;
 
-        bool try_transmit(broker *);
-
-        void flush_broker(broker *bs);
-
-      public:
-        TankClient(const strwlen32_t defaultLeader = {});
-
-        ~TankClient();
-
-        const auto &consumed() const noexcept {
-                return consumedPartitionContent;
-        }
-
-        const auto &faults() const noexcept {
-                return capturedFaults;
-        }
-
-        const auto &produce_acks() const noexcept {
-                return produceAcks;
-        }
-
-        const auto &discovered_partitions() const noexcept {
-                return discoverPartitionsResults;
-        }
-
-        const auto &reloaded_partition_configs() const noexcept {
-                return reload_conf_results_v;
-        }
-
-        const auto &created_topics() const noexcept {
-                return createdTopicsResults;
-        }
-
-        void poll(uint32_t timeoutMS);
-
-        // Maybe you want to use it after poll() has returned
-        // TODO: check if (!vector.empty()) instead; should be faster for std::vector<>
-        bool any_responses() const noexcept {
-                return consumed().size() || faults().size() || produce_acks().size() || discovered_partitions().size() || created_topics().size();
-        }
-
-        [[ gnu::warn_unused_result, nodiscard ]] uint32_t produce(const std::vector<std::pair<topic_partition, std::vector<msg>>> &req);
-
-        [[ gnu::warn_unused_result, nodiscard ]] uint32_t produce(const std::pair<topic_partition, std::vector<msg>> *, const size_t);
-
-        [[ gnu::warn_unused_result, nodiscard ]] uint32_t produce_to(const topic_partition &to, const std::vector<msg> &msgs);
-
-        // This is needed for Tank system tools. Applications should never need to use this method
-        // e.g tank-ctl mirroring functionality
-        //
-        // Right now, it's only required for implementing the mirroring functionality
-        [[ gnu::warn_unused_result, nodiscard ]] uint32_t produce_with_base(const std::vector<std::pair<topic_partition, std::pair<uint64_t, std::vector<msg>>>> &req);
-
-        [[ gnu::warn_unused_result, nodiscard ]] uint32_t produce_with_base(const std::pair<topic_partition, std::pair<uint64_t, std::vector<msg>>> *, const size_t);
-
-        Switch::endpoint leader_for(const strwlen8_t topic, const uint16_t partition);
-
-        [[ gnu::warn_unused_result, nodiscard ]] uint32_t consume(const std::vector<std::pair<topic_partition, std::pair<uint64_t, uint32_t>>> &req, const uint64_t maxWait, const uint32_t minSize);
-
-        [[ gnu::warn_unused_result, nodiscard ]] uint32_t consume_from(const topic_partition &from, const uint64_t seqNum, const uint32_t minFetchSize, const uint64_t maxWait, const uint32_t minSize);
-
-        [[ gnu::warn_unused_result, nodiscard ]] uint32_t discover_partitions(const strwlen8_t topic);
-
-        [[ gnu::warn_unused_result, nodiscard ]] uint32_t reload_partition_conf(const strwlen8_t topic, const uint16_t partition);
-
-        [[ gnu::warn_unused_result, nodiscard ]] uint32_t create_topic(const strwlen8_t topic, const uint16_t numPartitions, const strwlen32_t configuration);
-
-        void reset();
-
-        void set_client_id(const char *const p, const uint32_t len) {
-                clientId.Set(p, len);
-        }
-
-        void set_retry_strategy(const RetryStrategy r) noexcept {
-                retryStrategy = r;
-        }
-
-        void set_compression_strategy(const CompressionStrategy c) noexcept {
-                compressionStrategy = c;
-        }
-
-        void set_sock_sndbuf_size(const int v) noexcept {
-                sndBufSize = v;
-        }
-
-        void set_sock_rcvbuf_size(const int v) noexcept {
-                rcvBufSize = v;
-        }
-
-        void set_default_leader(const Switch::endpoint e);
-
-        void set_allow_streaming_consume_responses(const bool v) noexcept {
-                allowStreamingConsumeResponses = v;
-        }
-
-        void set_default_leader(const strwlen32_t e) {
-                set_default_leader(Switch::ParseSrvEndpoint(e, {_S("tank")}, 11011));
-        }
-
-        void set_topic_leader(const strwlen8_t topic, const strwlen32_t e);
-
-        void interrupt_poll();
-
-        bool should_poll() const noexcept;
-
-        // A handy utility method
-        // Will check that reqID is valid, and then will wait until it gets an ack. for this request
-        // or any fault - and if it fails, it will throw an exception..
-        // This is mostly useful for produce responses
-        void wait_scheduled(const uint32_t reqID);
+#include "client_pragmas.h"
 };
 
-namespace std {
-        template <>
-        struct hash<TankClient::topic_partition> {
-                using argument_type = TankClient::topic_partition;
-                using result_type   = std::size_t;
+TankClient::connection *TankClient::connection_handle::get() noexcept {
+        return c_ && c_->gen == c_gen ? c_ : nullptr;
+}
 
-                inline result_type operator()(const argument_type &v) const {
-                        size_t hash{2166136261U};
+const TankClient::connection *TankClient::connection_handle::get() const noexcept {
+        return c_ && c_->gen == c_gen ? c_ : nullptr;
+}
 
-                        for (uint32_t i{0}; i != v.first.len; ++i)
-                                hash = (hash * 16777619) ^ v.first.p[i];
-
-                        hash ^= std::hash<uint16_t>{}(v.second) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-                        return hash;
-                }
-        };
-} // namespace std
-
-#ifndef LEAN_SWITCH
-namespace Switch {
-        template <>
-        struct hash<TankClient::topic_partition> {
-                using argument_type = TankClient::topic_partition;
-                using result_type   = uint32_t;
-
-                inline result_type operator()(const argument_type &v) const {
-                        uint32_t seed = Switch::hash<strwlen8_t>{}(v.first);
-
-                        Switch::hash_combine(seed, Switch::hash<uint16_t>{}(v.second));
-                        return seed;
-                }
-        };
-} // namespace Switch
-#endif
+void TankClient::connection_handle::set(connection *c) noexcept {
+        c_    = c;
+        c_gen = c->gen;
+}

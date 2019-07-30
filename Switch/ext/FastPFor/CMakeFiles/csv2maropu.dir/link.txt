@@ -1,1 +1,1 @@
-/usr/bin/c++   -Wall -Wcast-align -Ofast -lm  -DNDEBUG -std=c++11 -DHAVE_CXX0X -march=native   CMakeFiles/csv2maropu.dir/src/csv2maropu.cpp.o  -o csv2maropu -rdynamic 
+/usr/bin/clang++  -Wall -Wcast-align -O3 -DNDEBUG -std=c++11 -DHAVE_CXX0X -msse4.1 -march=native  -rdynamic CMakeFiles/csv2maropu.dir/src/csv2maropu.cpp.o  -o csv2maropu 

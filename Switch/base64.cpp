@@ -5,10 +5,11 @@ std::size_t Base64::decoded_repr_length(const str_view32 s) {
         size_t l = s.size(), padding;
 
         if (l && s.data()[l - 1] == '=') {
-                if (l >= 2 && s.data()[l - 2] == '=')
+                if (l >= 2 && s.data()[l - 2] == '=') {
                         padding = 2;
-                else
+                } else {
                         padding = 1;
+                }
         }
         padding = 0;
 
@@ -16,20 +17,21 @@ std::size_t Base64::decoded_repr_length(const str_view32 s) {
 }
 
 uint16_t b64_int(const uint8_t c) noexcept {
-        if (c == 43)
+        if (c == 43) {
                 return 62;
-        else if (c == 47)
+        } else if (c == 47) {
                 return 63;
-        else if (c == 61)
+        } else if (c == 61) {
                 return 64;
-        else if (c > 47 && c < 58)
+        } else if (c > 47 && c < 58) {
                 return c + 4;
-        else if (c > 64 && c < 91)
+        } else if (c > 64 && c < 91) {
                 return c - 'A';
-        else if (c > 96 && c < 123)
+        } else if (c > 96 && c < 123) {
                 return (c - 'a') + 26;
-        else
+        } else {
                 return 256;
+        }
 }
 
 uint32_t Base64::Encode(const uint8_t *in, size_t in_len, Buffer *out) {
@@ -56,16 +58,18 @@ uint32_t Base64::Encode(const uint8_t *in, size_t in_len, Buffer *out) {
         if (j) {
                 uint8_t o[4];
 
-                if (j == 1)
+                if (j == 1) {
                         s[1] = 0;
+                }
 
                 o[0] = b64_chr[(s[0] & 255) >> 2];
                 o[1] = b64_chr[((s[0] & 0x03) << 4) + ((s[1] & 0xF0) >> 4)];
 
-                if (j == 2)
+                if (j == 2) {
                         o[2] = b64_chr[((s[1] & 0x0F) << 2)];
-                else
+                } else {
                         o[2] = '=';
+                }
 
                 o[3] = '=';
 
@@ -80,10 +84,11 @@ int32_t Base64::Decode(const uint8_t *in, const size_t in_len, Buffer *out) {
         const auto saved{out->size()};
 
         for (uint32_t i{0}; i < in_len; i++) {
-                if (const auto v = b64_int(in[i]); v == 256)
+                if (const auto v = b64_int(in[i]); v == 256) {
                         return -1;
-                else
+                } else {
                         s[j++] = v;
+                }
 
                 if (j == 4) {
                         uint8_t k{0}, o[4];

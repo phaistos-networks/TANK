@@ -1,4 +1,3 @@
-#pragma once
 #include "common.h"
 #include <fs.h>
 #include <network.h>
@@ -13,6 +12,37 @@
 #include <unordered_map>
 #include <ext/ebtree/eb64tree.h>
 #include <thread>
+#include <text.h>
+#include <unordered_set>
+#include <deque>
+#include <switch_bitops.h>
+#include <queue>
+#include <zlib.h>
+#include <crypto.h>
+#include <switch_mallocators.h>
+
+// if HWM_UPDATE_BASED_ON_ACKS is defined, the current semantics apply:
+// Assuming two producers PR1 and PR2, both publishing to partition P0.
+// Assuming PR1 publishes a single message with LSN 100 with required acks = 2 (+1 for implicit local ack)
+// and PR2 publishing a single message that gets LSN 101, with required acks = 1 (+1 for implicit local ack)
+// If HWM_UPDATE_BASED_ON_ACKS is defined, then the HWM will advance as soon as both messages 100 and 101 are acknowledged.
+//
+// Assuming one of the RS nodes ask to cosume from 102. That will ackn. the message from PR2 (because it required
+// just 1 ack. from remote RS peer). However, PR1's message can't be ackowledged yet (requires one more consumer to fetch
+// from 101+). We would only acknowlege PR2's message if all other messages before it(i.e PR1's) were acknowledged, and we would only
+// advance the HWMark to X as long as no other messages < X are not acknowledged yet.
+// This is very powerful, but apparently it doesn't comply with Kafka semantics. Kafka semantics are much simpler to implement
+//
+// See: https://gist.github.com/markpapadakis/5c0e0ee74fe5fcc4d06fd87563c29236
+//
+// Kafka semantics in a nutshell, based on Gwen's input(thanks, Gwen!):
+// - HWM advances based on the "lowest offset replicated by the entire ISR" (so really, just the lowest LSN
+//	in a ConsumePeer request among all nodes in the ISR)
+// - Producers get an ack **regardless** of HWM advancement (i.e if producer P produces a message with LSN 100 and ack = 2(requires
+//	the implicit ack from the leader and 2 acks from the remote nodes in the ISR), then as soon as 2+ different remote peers
+// 	ConsumePeer for LSN > 100, that producer P gets the ack).
+// 
+//#define HWM_UPDATE_BASED_ON_ACKS 1
 
 // The index is sparse, so we need to be able to locate the _last_ index entry for relative sequence number <= targetRelativeSeqNumber
 // so that we can either
@@ -31,13 +61,14 @@ namespace std {
                         const auto p   = first + mid;
                         const auto r   = comp(*p, value);
 
-                        if (!r)
+                        if (!r) {
                                 return p;
-                        else if (r > 0) {
+                        } else if (r > 0) {
                                 res = p;
                                 btm = mid + 1;
-                        } else
+                        } else {
                                 top = mid - 1;
+                        }
                 }
 
                 return res;
@@ -70,6 +101,12 @@ struct fd_handle
         }
 };
 
+struct adjust_range_start_cache_value final {
+        bool     first_bundle_is_sparse;
+        uint32_t file_offset;
+        uint64_t seq_num;
+};
+
 // A read-only (immutable, frozen-sealed) partition commit log(Segment) (and the index file for quick lookups)
 // we don't need to acquire a lock to access this
 //
@@ -80,6 +117,7 @@ struct fd_handle
 struct ro_segment final {
         // the absolute sequence number of the first message in this segment
         const uint64_t baseSeqNum;
+
         // the absolute sequence number of the last message in this segment
         // i.e this segment contains [baseSeqNum, lastAssignedSeqNum]
         // See: https://github.com/phaistos-networks/TANK/issues/2 for rationale
@@ -126,31 +164,46 @@ struct ro_segment final {
         ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, const strwlen32_t base, const uint32_t, const bool haveWideEntries);
 
         ~ro_segment() {
-                if (index.data && index.data != MAP_FAILED)
+                if (index.data && index.data != MAP_FAILED) {
                         munmap((void *)index.data, index.fileSize);
+                }
         }
 
         // Locate the (relative seq.num, abs.file offset) for the LAST index record where record.relSqNum <= targetRelSeqNum
-        std::pair<uint32_t, uint32_t> snapDown(const uint64_t absSeqNum) const;
+        std::pair<uint32_t, uint32_t> snap_floor(const uint64_t absSeqNum) const;
 
-        // Locate the (relative seq.num, abs.file offset) for the LAST index record where record.relSqNum >= targetRelSeqNum
-        std::pair<uint32_t, uint32_t> snapUp(const uint64_t absSeqNum) const;
+#if 0 // no longer used \
+    // Locate the (relative seq.num, abs.file offset) for the LAST index record where record.relSqNum >= targetRelSeqNum
+        std::pair<uint32_t, uint32_t> snap_ceil(const uint64_t absSeqNum) const;
+#endif
 
-        ro_segment_lookup_res translateDown(const uint64_t absSeqNum, const uint32_t max) const {
-                const auto res = snapDown(absSeqNum);
-
-                return {{res.first, res.second}, fileSize - res.second};
-        }
+        ro_segment_lookup_res translate_floor(const uint64_t, const uint32_t) const;
 };
 
-struct eb64_node_ctx final {
+struct timer_node final {
         enum class ContainerType : uint8_t {
+                ConnEstTimeout = 0,
+                PeerConnEstTimeout,
                 Connection,
                 WaitCtx,
-		CleanupTracker
+                CleanupTracker,
+                ScheduleRenewConsulSess,
+                TryConsulClusterReg,
+                SchedConsulReq,
+                ShutdownConsumerConn,
+                ForceSetReactorStateIdle,
+                TryBecomeClusterLeader,
         } type;
 
         eb64_node node;
+
+        void reset() {
+                node.node.leaf_p = nullptr;
+        }
+
+        bool is_linked() const noexcept {
+                return node.node.leaf_p;
+        }
 };
 
 struct append_res final {
@@ -164,6 +217,7 @@ struct lookup_res final {
                 NoFault = 0,
                 Empty,
                 BoundaryCheck,
+                PastMax,
                 AtEOF
         } fault;
 
@@ -182,25 +236,34 @@ struct lookup_res final {
         // file offset for the bundle with the first message == absBaseSeqNum
         uint32_t fileOffset;
 
-        // The last committed absolute sequence number
-        uint64_t highWatermark;
-
         lookup_res(lookup_res &&o)
-            : fault{o.fault}, fileOffsetCeiling{o.fileOffsetCeiling}, fdh(std::move(o.fdh)), absBaseSeqNum{o.absBaseSeqNum}, fileOffset{o.fileOffset}, highWatermark{o.highWatermark} {
+            : fault{o.fault}, fileOffsetCeiling{o.fileOffsetCeiling}, fdh(std::move(o.fdh)), absBaseSeqNum{o.absBaseSeqNum}, fileOffset{o.fileOffset} {
         }
 
-        lookup_res(const lookup_res &) = delete;
+        lookup_res(const lookup_res &o)
+            : fileOffsetCeiling{o.fileOffsetCeiling}, fdh{o.fdh}, absBaseSeqNum{o.absBaseSeqNum}, fileOffset{o.fileOffset} {
+        }
 
         lookup_res()
             : fault{Fault::NoFault} {
         }
 
-        lookup_res(fd_handle *const f, const uint32_t c, const uint64_t seqNum, const uint32_t o, const uint64_t h)
-            : fault{Fault::NoFault}, fileOffsetCeiling{c}, fdh{f}, absBaseSeqNum{seqNum}, fileOffset{o}, highWatermark{h} {
+        lookup_res(fd_handle *const f, const uint32_t c, const uint64_t seqNum, const uint32_t o)
+            : fault{Fault::NoFault}, fileOffsetCeiling{c}, fdh{f}, absBaseSeqNum{seqNum}, fileOffset{o} {
         }
 
-        lookup_res(const Fault f, const uint64_t h)
-            : fault{f}, highWatermark{h} {
+        lookup_res(const Fault f)
+            : fault{f} {
+        }
+
+        auto &operator=(const lookup_res &o) {
+                fault             = o.fault;
+                fileOffsetCeiling = o.fileOffsetCeiling;
+                fdh               = o.fdh;
+                absBaseSeqNum     = o.absBaseSeqNum;
+                fileOffset        = o.fileOffset;
+
+                return *this;
         }
 };
 
@@ -209,7 +272,7 @@ enum class CleanupPolicy : uint8_t {
         CLEANUP
 };
 
-struct partition_config final {
+extern struct partition_config final {
         // Kafka defaults
         size_t        roSegmentsCnt{0};
         uint64_t      roSegmentsSize{0};
@@ -226,19 +289,22 @@ struct partition_config final {
 } config;
 
 static void PrintImpl(Buffer &out, const lookup_res &res) {
-        if (res.fault != lookup_res::Fault::NoFault)
+        if (res.fault != lookup_res::Fault::NoFault) {
                 out.append("{fd = ", res.fdh ? res.fdh->fd : -1, ", absBaseSeqNum = ", res.absBaseSeqNum, ", fileOffset = ", res.fileOffset, "}");
-        else
+        } else {
                 out.append("{fault = ", unsigned(res.fault), "}");
+        }
 }
+
+struct topic_partition;
 
 // An append-only log for storing bundles, divided into segments
 struct topic_partition;
 struct topic_partition_log final {
-        // The first available absolute sequence number across all segments
+        // the absolute sequence number of the first available message across all log segments
         uint64_t firstAvailableSeqNum;
 
-        // This will be initialized from the latest segment in initPartition()
+        // the absolute sequence number of the last available message across all log segments
         uint64_t lastAssignedSeqNum{0};
 
         topic_partition *partition;
@@ -270,9 +336,24 @@ struct topic_partition_log final {
                 uint32_t createdTS;
                 bool     nameEncodesTS;
 
+                // make sure we flush when we rotate
+                std::unordered_map<uint64_t, adjust_range_start_cache_value> triangulation_cache;
+
                 struct
                 {
                         int fd;
+
+                        // relative sequence number to (absolute base sequence number, file offset)
+                        // See https://github.com/phaistos-networks/TANK/issues/63
+                        std::unordered_map<uint64_t, std::pair<uint64_t, uint32_t>> cache;
+
+                        // this is populated by append_bundle().
+                        // When it reaches 64k or so entries, it's flushed.
+                        //
+                        //  We consult it whenever we can, but because we only populate it with
+                        // monotonically increasing sequence numbers, we also use a tiny cache(ondisk.cache)
+                        // that protects us from what would otherwise need to access the on-disk memory mapped index
+                        // and should provide us with some real befits
 
                         // relative sequence number => file physical offset
                         // relative sequence number = absSeqNum - baseSeqNum
@@ -288,6 +369,10 @@ struct topic_partition_log final {
                                 const uint8_t *data;
                                 uint32_t       span;
 
+                                // small cache that help with tailing semantics
+                                // make sure we flush whenever we rotate
+                                std::unordered_map<uint32_t, index_record> cache;
+
                                 // last recorded tuple in the index; we need this here
                                 struct
                                 {
@@ -296,7 +381,6 @@ struct topic_partition_log final {
                                 } lastRecorded;
 
                         } ondisk;
-
                 } index;
 
                 struct
@@ -304,6 +388,10 @@ struct topic_partition_log final {
                         uint64_t pendingFlushMsgs{0};
                         uint32_t nextFlushTS;
                 } flush_state;
+
+		void sanity_checks() const {
+			// no-op
+		}
 
         } cur; // the _current_ (latest) segment
 
@@ -330,7 +418,9 @@ struct topic_partition_log final {
 
         lookup_res read_cur(const uint64_t absSeqNum, const uint32_t maxSize, const uint64_t maxAbsSeqNum);
 
-        lookup_res range_for(uint64_t absSeqNum, const uint32_t maxSize, uint64_t maxAbsSeqNum);
+        lookup_res range_for(uint64_t, const uint32_t, uint64_t);
+
+        lookup_res range_for_immutable_segments(uint64_t, const uint32_t, uint64_t);
 
         append_res append_bundle(const time_t, const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt, const uint64_t, const uint64_t);
 
@@ -364,6 +454,14 @@ struct topic_partition_log final {
 
         bool should_roll(const uint32_t) const;
 
+        void roll(const uint64_t);
+
+        void roll() {
+                roll(lastAssignedSeqNum + 1);
+        }
+
+        void flush_index_skiplist();
+
         bool may_switch_index_wide(const uint64_t);
 
         void schedule_flush(const uint32_t);
@@ -373,8 +471,34 @@ struct topic_partition_log final {
         void compact(const char *);
 };
 
+using nodeid_t = uint16_t;
+struct cluster_node;
+
+namespace NodesPartitionsUpdates {
+        // topic number of replicas were reduded to new_size
+        struct reduced_rs final {
+                topic_partition *p;
+                uint16_t         new_size;
+        };
+
+        // topic number of replicas increased; new replicas appended to
+        // p->cluster.replicas.nodes
+        // and size of p->rcluster.replicas.nodes is tracked on original_size
+        // (for convenience we will append and then later we resize back to original_size)
+        struct expanded_rs final {
+                topic_partition *p;
+                uint16_t         original_size;
+        };
+
+        // partition leader has changed to n(can be nullptr)
+        struct leadership_promotion final {
+                topic_partition *p;
+                cluster_node *   n;
+        };
+
+} // namespace NodesPartitionsUpdates
+
 struct connection;
-struct topic_partition;
 
 // In order to support minBytes semantics, we will
 // need to track produced data for each tracked topic partition, so that
@@ -382,34 +506,605 @@ struct topic_partition;
 struct wait_ctx_partition final {
         fd_handle *      fdh;
         uint64_t         seqNum;
+        uint64_t         hwmark_threshold;
         range32_t        range;
         topic_partition *partition;
 };
 
 struct wait_ctx final {
-        connection * c;
-        bool         scheduledForDtor;
-        uint32_t     requestId;
-        switch_dlist list;
-        eb64_node_ctx exp_tree_node;
-        uint32_t minBytes;
+        connection *   c;             // connection of consumer or peer replication partition content from this node
+        TankAPIMsgType _msg;          // ConsumePeer if this is for a peer replication content from this node
+        uint32_t       requestId;     // this is meaningfuil for Consume requests;
+        switch_dlist   list;          // ll for c->as.tank.waitCtxList
+        timer_node     exp_tree_node; // node for timer
+        uint32_t       minBytes;
 
         // A request may involve multiple partitions
         // minBytes applies to the sum of all captured content for all specified partitions
         uint32_t capturedSize;
 
-        uint8_t            partitionsCnt;
+        // we don't really need this anymore
+        wait_ctx_partition *find(const topic_partition *tp) const noexcept {
+                for (size_t i{0}; i < total_partitions; ++i) {
+                        auto &it = partitions[i];
+
+                        if (it.partition == tp) {
+                                return const_cast<wait_ctx_partition *>(&it);
+                        }
+                }
+
+                return nullptr;
+        }
+
+        uint8_t            total_partitions;
         wait_ctx_partition partitions[0];
+};
+
+// tracks an ISR(In-Sync-Replica) (node, partition)
+struct isr_entry final {
+        // XXX: if this becomes expensive because
+        // we are tracking pointers, we can use a handle:u32 instead
+        // which just points to a global vector that holds all distinct partitions and nodes
+        cluster_node *   node_;
+        topic_partition *partition_;
+
+#ifdef HWM_UPDATE_BASED_ON_ACKS
+        // see partition::cluster::pending_client_produce_acks_tracker::pending_ack
+        // this is a very important optimization
+        //
+        // see topic_partition::cluster::pending_client_produce_acks_tracker
+        uint8_t partition_isr_node_id;
+#endif
+
+        auto node() {
+                return node_;
+        }
+
+        auto partition() {
+                return partition_;
+        }
+
+        switch_dlist node_ll;      // cluster_node::isr::list
+        switch_dlist partition_ll; // partition::Cluster::isr::list
+
+        // for tracking ack.expiration
+        switch_dlist pending_next_ack_ll;
+        uint64_t     pending_next_ack_timeout;
+
+#ifndef HWM_UPDATE_BASED_ON_ACKS
+	uint64_t last_msg_lsn;
+#endif
+
+        void reset() {
+                node_ll.reset();
+                partition_ll.reset();
+                pending_next_ack_ll.reset();
+
+#ifdef HWM_UPDATE_BASED_ON_ACKS
+                partition_isr_node_id = 0;
+#endif
+                node_                 = nullptr;
+                partition_            = nullptr;
+
+#ifndef HWM_UPDATE_BASED_ON_ACKS
+		last_msg_lsn = 0;
+#endif
+        }
+};
+
+struct connection_handle final {
+        connection *c_{nullptr};
+        uint64_t    c_gen;
+
+        void reset() {
+                c_gen = std::numeric_limits<uint64_t>::max();
+                c_    = nullptr;
+        }
+
+        inline void set(connection *const c) TANK_NOEXCEPT_IF_NORUNTIME_CHECKS;
+
+        inline connection *get() noexcept;
+
+        inline const connection *get() const noexcept;
+};
+
+// For each client PRODUCE request, we collect
+// all participants; the partitions involved
+// in the request.
+struct topic;
+struct produce_response final {
+        struct {
+                connection_handle ch;
+                uint32_t          req_id;
+                switch_dlist      connection_ll; // c->as.tank.deferred_produce_responses_list.push_back(&dpr->connection_ll);
+
+                void reset() {
+                        ch.reset();
+                        req_id = 0;
+                        connection_ll.reset();
+                }
+        } client_ctx;
+
+        // a partition participating in the produce op.
+        struct participant final {
+                str_view8        topic_name; // needed because topic can be == nullptr
+                topic *          topic;
+                topic_partition *p;
+                uint16_t         partition;
+
+                struct {
+                        range_base<const uint8_t *, size_t> bundle;
+                        uint64_t                            first_msg_seq_num;
+                } update;
+
+                enum class OpRes : uint8_t {
+                        OK = 0,
+                        ReadOnly,
+                        InvalidSeqNums,
+                        UnknownTopic,
+                        UnknownPartition,
+                        NoLeader,
+                        OtherLeader,
+                        Pending,
+                        IO_Fault,
+                        InsufficientReplicas,
+                } res;
+        };
+
+#if 1
+        uint64_t gen;
+#else
+        // instead of a gen, we can just use an rc
+        // so 1 for when  associated with a node, and 1 for when in the std::deque of pending produce reqs to ack
+        uint8_t rc;
+#endif
+
+        std::vector<participant> participants;
+        std::vector<char *>      unknown_topic_names;
+
+        // a produce resposne may be DEFERRED
+        struct {
+                uint8_t pending_partitions;
+
+                struct {
+                        // see deferred_produce_responses_expiration_list
+                        switch_dlist ll;
+                        uint64_t     ts;
+                } expiration;
+
+                void reset() {
+                        expiration.ll.reset();
+                        expiration.ts      = 0;
+                        pending_partitions = 0;
+                }
+        } deferred;
+
+        void reset() {
+                participants.clear();
+                deferred.reset();
+
+                for (auto ptr : unknown_topic_names) {
+                        std::free(ptr);
+                }
+
+                unknown_topic_names.clear();
+                client_ctx.reset();
+        }
+};
+
+struct repl_stream final {
+        topic_partition * partition;       // fetching content for this partion
+        cluster_node *    src;             // from this peer
+        size_t            min_fetch_size;  // next request must be for at least as much data
+        switch_dlist      repl_streams_ll; // links to cluster_state.replication_streams
+        connection_handle ch;
+
+        void reset() {
+                partition      = nullptr;
+                src            = nullptr;
+                min_fetch_size = 512;
+                repl_streams_ll.reset();
+                ch.reset();
+        }
+};
+
+struct cluster_node final {
+        const nodeid_t   id;
+        bool             available_{true}; // lock (session) set for the node ns key
+        Switch::endpoint ep{};             // if we have no endpoint, we consider it na
+        // TODO: if we fail to connect, block it
+        // for a while and enable it again later(when you do, try_replicate_from(node))
+        bool blocked{false};
+
+        cluster_node(const nodeid_t _id)
+            : id{_id} {
+        }
+
+        bool likely_reachable() const noexcept {
+                return available_ && false == blocked;
+        }
+
+        bool available() const noexcept {
+                return available_ && ep;
+        }
+
+        struct Leadership final {
+                // track partitions this node is a leader for
+                size_t       partitions_cnt{0};
+                switch_dlist list{&list, &list};
+                bool         dirty{false};
+
+                // whenever needed, we will rebuild this list
+                // it will include all partitions <local node> node is a leader of, that we are interested in (i.e we
+                // are replica of)
+                // i.e all partitions this node is a leader of that are also replicated to the <local node>
+                std::unique_ptr<std::vector<topic_partition *>> local_replication_list;
+        } leadership;
+
+        // this node may also be a replica of 0+ partitions
+        // this rarely changes so we should use an array
+        std::vector<topic_partition *> replica_for;
+
+        bool is_replica_for(const topic_partition *) const TANK_NOEXCEPT_IF_NORUNTIME_CHECKS;
+
+        struct {
+                // A node may also be in the ISR of a partition
+                // this should change fairly often, so we need to
+                // use a list instead.
+                // see isr_entry
+                ///
+                // A problem with this idea is that we may have 50k partitions
+                // and maybe just 2 nodes. We can't reallistically expect to scan a linked list, so we
+                // need a fast hash map instead.
+                // Thankfully we never have to use linear search to find anything in this lit
+                switch_dlist list{&list, &list};
+                uint16_t     cnt{0}; // how many ISR lists is this node in?
+
+                auto size() const TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+                        TANK_EXPECT(cnt == list.size());
+
+                        return cnt;
+                }
+        } isr;
+
+        struct {
+                // a connection from this node to that peer
+                // for CONSUMING from it
+                connection_handle ch;
+
+                // total replication streams  in cluster_state.local_node.replication_streams
+                // that depend on this connection
+                size_t repl_streams_cnt{0};
+        } consume_conn;
+
+        struct {
+                switch_dlist ll{&ll, &ll};
+                uint64_t     when{0};
+        } consume_retry_ctx;
+};
+
+struct node_partition_rel_update final {
+        cluster_node *   n;
+        topic_partition *p;
+        bool             assign; // if false, it's no longer assigned
+};
+
+struct cluster_nodeid_update final {
+        nodeid_t         id;
+        Switch::endpoint ep;
+        bool             have_owner;
 };
 
 struct topic;
 struct topic_partition
     : public RefCounted<topic_partition> {
+        enum class Flags : uint8_t {
+                // this is set when reset_partition_log()
+                // runs, so that subsequent calls to reset_partition_log() won't need to iterate the dir. contents
+                // it is cleared when we open() a file in the partition dir.
+                NoDataFiles = 1u << 0,
+
+                // Failed to persist messages
+                // likely ran out of disk space or disk is busted
+                IOFailed = 1u << 1,
+        };
         uint16_t         idx; // (0, ...)
         uint32_t         distinctId;
         topic *          owner{nullptr};
-        uint16_t         localBrokerId; // for convenience
         partition_config config;
+        uint8_t          flags{0};
+
+	struct {
+		time_t last_access{0};
+		switch_dlist ll{&ll, &ll};
+	} access;
+
+
+        uint64_t hwmark() const noexcept;
+
+        // this is only meaningful if cluster_aware()
+        struct HW_mark final {
+                // XXX:
+                // this is very tricky
+                // if (cluster_aware()), then we need to track BOTH the last 'committed' sequence number
+                // and we also need to offset of the next message right after that last committed sequence number
+                //
+                // Example:
+                // Assuming cluster of two nodes, with 2 replicas in the ISR of partition, and cluster hasn't
+                // gotten any events published to the partition for a while, so we
+                // assume the are no current publishers. Last published message seq.num is X, and
+                // offet of the *next* message past X is at O.
+                //
+                // 1. Client A produces 1 new message M1 to partition
+                // 2. Node N1 accepts the produce req with first message.seq num to be X + 1 AT O and advances O to O1, and waits
+                // 	for N2 to consume from >= (X+1)  to ack it
+                // 3. Client A produces 1 new message M2 to partition
+                // 4. Node N1 still haven't received a consume req. from N2. It accepts the
+                // 	produce reque with first message seq.num to be X + 1 + 1(see above), and advances O to O2,  and
+                //	waits for N2 to consume from (X + 1 + 1) to ack it
+                // 5. Client B wants to consume from EOF
+                // 6. Node N1 should be able to do the right thing here.
+                //	What's the EOF and where does it start?
+                // 	- if M1 is acknowledged, HW mark should be M1, and N1 should stream from O1 <--
+                //	- if M2 is acknowledged, HW mark should be M2, and N2 should stream from O1 <--
+                //
+                // Why should that happen? maybe we need to track for each consume request pending wake-up the
+                // (file handle, file offset) of the last highwater mark at the time when the consume request was queued to be woken up?
+                // 	-- It is important that the client can ignore messages with seq.num < requested sequest number and that it won't go past the highwater mark --
+                // So we need to always keep track of (file, offset)
+
+                // sequence number of the *last* confirmed message
+                uint64_t seq_num;
+
+                // handle of the file that should include the *next* message after
+                // the last confirmed(i.e highwater mark) message, and file size
+                // at the time it was assigned to file.handle
+                //
+                // this is very important in cluster_aware() configurations.
+                // When we get a CONSUME request from EOF, we shouldn't wait for (lastAssignedSeqNum + 1)
+                // we need to instead wait for (highwater_mark + 1)
+                // and we need to read starting from (highwater_mark.handle, highwater_mark.size), as opposed to
+                // start reading from the current file
+                struct {
+                        Switch::shared_refptr<fd_handle> handle;
+                        uint32_t                         size;
+                } file;
+        } highwater_mark;
+
+        struct Cluster final {
+                enum class Flags : uint8_t {
+                        ISRDirty        = 1u << 0,
+                        GC_ISR          = 1u << 1,
+                        GeneratedUpdate = 1u << 7,
+                };
+
+                uint8_t flags{0};
+
+                bool isr_dirty() const noexcept {
+                        return flags & unsigned(Flags::ISRDirty);
+                }
+
+                struct ISR final {
+                        // potentially frequently updated
+                        // see isr_entry.
+                        // Unlike with node's ISR tracker, this list here will be very short
+                        switch_dlist list{&list, &list};
+                        uint64_t     gen{0};
+                        uint8_t      cnt{0}; // size of list
+                        bool         dirty{false};
+
+#ifndef HWM_UPDATE_BASED_ON_ACKS
+                        struct Tracker final{
+                                struct {
+                                        nodeid_t nid;
+					// we will track the LSN of the last message reported as persisted by the peer
+                                        uint64_t lsn;
+                                } data[16]; // XXX:
+                                uint8_t size{0};
+
+				// returns true if at least K many nodes have reported last message lsn being >= seqnum
+				//
+				// so if a client published a message set where last message id is X
+				// and we want to ack the produce request as soon as 2+ different *peers* issue ConsumePeer for LSN > X
+				// then we will use confirmed(2, X)
+                                bool confirmed(const uint8_t k, const uint64_t seqnum) const TANK_NOEXCEPT_IF_NORUNTIME_CHECKS;
+                        } tracker;
+#endif
+
+                        struct {
+                                uint64_t seq_num{0};
+                                uint64_t nodes_mask{0};
+                        } max_ack;
+
+                        auto size() const TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+                                TANK_EXPECT(cnt == list.size());
+
+                                return cnt;
+                        }
+
+                        auto empty() const TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+                                TANK_EXPECT(cnt == list.size());
+
+                                return !cnt;
+                        }
+
+                        bool count(const cluster_node *n) const noexcept {
+                                for (auto it : list) {
+                                        if (switch_list_entry(isr_entry, partition_ll, it)->node() == n) {
+                                                return true;
+                                        }
+                                }
+                                return false;
+                        }
+
+#ifdef HWM_UPDATE_BASED_ON_ACKS
+                        uint8_t next_partition_isr_node_id() const noexcept {
+                                if (list.empty()) {
+                                        return 0;
+                                }
+
+                                uint8_t max{0};
+
+                                for (auto it : list) {
+                                        max = std::max(max, switch_list_entry(isr_entry, partition_ll, it)->partition_isr_node_id);
+                                }
+
+                                return max + 1;
+                        }
+#endif
+
+                        // a partition shouldn't have more than 3-4 nodes in its ISR
+                        // so this should be fast
+                        auto find(const cluster_node *node) const noexcept -> isr_entry * {
+                                for (auto it : list) {
+                                        const auto isr_e = switch_list_entry(isr_entry, partition_ll, it);
+
+                                        if (isr_e->node() == node) {
+                                                return isr_e;
+                                        }
+                                }
+                                return nullptr;
+                        }
+                } isr;
+
+                struct {
+                        cluster_node *node{nullptr};
+                        // see cluster_node::leadership
+                        switch_dlist leadership_ll{&leadership_ll, &leadership_ll};
+                } leader;
+
+                struct {
+                        // TODO: we should probably
+                        // use a SBO design instead
+                        std::vector<cluster_node *> nodes;
+
+                        // this is going to be fast because replicas are always ordered
+                        cluster_node *by_id(const nodeid_t id, const size_t span) const TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+                                TANK_EXPECT(std::is_sorted(nodes.begin(), nodes.begin() + span, [](const auto a, const auto b) noexcept { return a->id < b->id; }));
+
+                                for (int32_t top = static_cast<int32_t>(span) - 1, btm = 0; btm <= top;) {
+                                        const auto mid    = (btm + top) / 2;
+                                        const auto mn     = nodes[mid];
+                                        const auto at_mid = mn->id;
+
+                                        if (id < at_mid) {
+                                                top = mid - 1;
+                                        } else if (id > at_mid) {
+                                                btm = mid + 1;
+                                        } else {
+                                                return mn;
+                                        }
+                                }
+
+                                return nullptr;
+                        }
+
+                        cluster_node *by_id(const nodeid_t id) const {
+                                return by_id(id, nodes.size());
+                        }
+
+                        bool count(const nodeid_t id) const {
+                                // for now we will rely on by_id()
+                                // which is not necessarily very efficient
+                                return by_id(id);
+                        }
+
+                        bool count(const nodeid_t id, const size_t span) const {
+                                return by_id(id, span);
+                        }
+
+                        void sort_nodes() noexcept {
+                                std::sort(nodes.begin(), nodes.end(), [](const auto a, const auto b) noexcept {
+                                        return a->id < b->id;
+                                });
+                        }
+
+                        uint64_t last_update_gen{0};
+                } replicas;
+
+                struct pending_ack_bundle_desc final {
+                        // seqnuence number of the last message in the bundle
+                        uint64_t last_msg_seqnum;
+
+                        // when we initialise this, we also
+                        // track partition_log()->cur.fdh.get() and partition_log()->cur.fileSize
+                        // because otherwise we don't know where to start reading when we get requests for EOF
+                        // we may not need that, but it's cheap to track it anyway
+                        struct {
+                                fd_handle *handle;
+                                uint32_t   size;
+                        } next;
+                };
+
+#ifdef HWM_UPDATE_BASED_ON_ACKS
+                struct pending_ack_bundle_desc_cmp final {
+                        inline bool operator()(const pending_ack_bundle_desc &a, const pending_ack_bundle_desc &b) const noexcept {
+                                return b.last_msg_seqnum < a.last_msg_seqnum;
+                        }
+                };
+#endif
+
+                struct PendingClientProduceAcks final {
+                        // this represents a produce request pending ack.
+                        struct pending_ack final {
+                                pending_ack_bundle_desc bundle_desc;
+
+#ifdef HWM_UPDATE_BASED_ON_ACKS
+                                // we can't just use a acknowledged counter
+                                // because the same peer (in the ISR) may issue
+                                // a CONSUMEPEER for the same sequence number more than once, so we can't rely on
+                                // acks. to be distinct. (in practice, we don't expect this to happen
+                                // but we need to guard against that)
+                                //
+                                // Instead, for each node in a partition's ISR, we assign it
+                                // a partition-local ISR index [0, sizeof(isr_nodes_acknowledged_bm) - 1)
+                                // and we use isr_nodes_acknowledged_bm here for tracking
+                                // distinct nodes that acknowleded this, but just checking
+                                // for (isr_nodes_acknowledged_bm & (1 << isr_e->partition_isr_node_id)
+                                // the size of an ISR is bound by (sizeof(isr_nodes_acknowledged_bm) * 8)
+				//
+				// XXX: can we really have 64 different peers in an ISR?
+				// maybe u8 for upto 8 replicas should do
+                                uint64_t isr_nodes_acknowledged_bm;
+
+                                // how many _peers_ (i.e _excluding_ local) ISR nodes have acknowledged this?
+                                inline auto ack_count() const noexcept {
+                                        return isr_nodes_acknowledged_bm ? SwitchBitOps::PopCnt(isr_nodes_acknowledged_bm) : 0;
+                                }
+#endif
+
+                                struct {
+                                        produce_response *deferred_resp;
+                                        uint64_t          deferred_resp_gen; // cookie
+                                };
+
+                                // index in deferred_resp->participants[]
+                                uint8_t pr_participant_idx;
+
+                                // how many acks we need in total from *PEERS* (i.e
+                                // this does not include the ack we will implicitly get from the coordinator)
+                                //
+                                // this is specific to each produce request
+                                // Again, this is how many acks we need in total from _PEERS_
+                                uint8_t required_acks;
+                        };
+
+                        std::deque<pending_ack> pending;
+
+#ifdef HWM_UPDATE_BASED_ON_ACKS
+                        std::priority_queue<pending_ack_bundle_desc,
+                                            std::vector<pending_ack_bundle_desc>,
+                                            pending_ack_bundle_desc_cmp>
+                            acknowledged;
+#endif
+                } pending_client_produce_acks_tracker;
+
+                // set if we are replicating from this partition
+                repl_stream *rs{nullptr};
+
+	
+		uint64_t consume_next_lsn{std::numeric_limits<uint64_t>::max()};
+        } cluster;
 
         // for foreach_msg()
         struct msg final {
@@ -419,64 +1114,66 @@ struct topic_partition
                 strwlen32_t data;
         };
 
-        struct replica
-            : public RefCounted<replica> {
-                const uint16_t brokerId; // owner
-                uint64_t       time;
-                uint64_t       initialHighWaterMark;
+        inline bool defined() const noexcept;
 
-                // The high watermark sequence number; maintained for followers replicas
-                uint64_t highWatermMark;
+        inline bool enabled() const noexcept;
 
-                // Tracked across all replicas
-                // for the local replica, it's the partition's lastAssignedSeqNum, for remote replicas, this is updated by followers fetch reqs
-                uint64_t lastAssignedSeqNum;
-
-                replica(const uint16_t id)
-                    : brokerId{id} {
-                }
-        };
-
-        struct
-        {
-                uint16_t                       brokerId;
-                uint64_t                       epoch;
-                Switch::shared_refptr<replica> replica;
-        } leader;
-
-        // this node may or may not be a replica for this partition
-        std::unique_ptr<topic_partition_log>                         log_;
-        std::unordered_map<uint16_t, Switch::shared_refptr<replica>> replicasMap;
-        Switch::vector<replica *>                                    insyncReplicas;
-        Switch::vector<wait_ctx *>                                   waitingList;
-
-        auto highwater_mark() const {
-                return log_->lastAssignedSeqNum;
+        topic_partition(topic *t)
+            : owner{t} {
+                TANK_EXPECT(owner);
         }
 
-        Switch::shared_refptr<replica> replicaByBrokerId(const uint16_t brokerId) {
-                const auto it = replicasMap.find(brokerId);
+        // log_ should be initialized iff this node is a replica of this partition
+        // it encapsulates the state of this node's partition dataset
+        std::unique_ptr<topic_partition_log> _log;
 
-                return it != replicasMap.end() ? it->second.get() : nullptr;
+        // TODO: make waitingList a singly-linked list
+        // so that we won't need to reallocate any memory here
+        // just include a next field in wait_ctx
+        //
+        //
+        // pair of (wait_ctx, index), where the `index` is the index for this partition in wait_ctx::partitions[],
+        // so that we don't need to look it up using linear search later
+        std::vector<std::pair<wait_ctx *, uint8_t>> waiting_list;
+
+        void erase_from_waiting_list(const size_t index) {
+                // faster than waiting_list.erase(waiting_list.begin() + index)
+                // because we don't need to preserve order
+                waiting_list[index] = std::move(waiting_list.back());
+                waiting_list.pop_back();
         }
-
-        void consider_append_res(append_res &res, Switch::vector<wait_ctx *> &waitCtxWorkL);
 
         append_res append_bundle_to_leader(const time_t, const uint8_t *const bundle, const size_t bundleLen, const uint32_t bundleMsgsCnt, Switch::vector<wait_ctx *> &waitCtxWorkL, const uint64_t, const uint64_t);
 
-        lookup_res read_from_local(const bool fetchOnlyFromLeader, const bool fetchOnlyComittted, const uint64_t absSeqNum, const uint32_t fetchSize);
+        lookup_res read_from_local(const bool, const uint64_t absSeqNum, const uint32_t fetchSize);
 
         // This is mostly useful for scanning internal topics, e.g on startup
         // where you want to, for example, use it to checkpoint offsets and whatnot
         // https://github.com/phaistos-networks/TANK/issues/40
         bool foreach_msg(std::function<bool(msg &)> &) const;
+
+        uint16_t required_replicas() const noexcept;
+
+        bool require_leader() const noexcept;
+
+        bool safe_to_reset() const noexcept;
+
+        bool log_open() const noexcept {
+                return _log.get();
+        }
 };
 
 struct topic
     : public RefCounted<topic> {
-        const strwlen8_t                   name_;
-        Switch::vector<topic_partition *> *partitions_;
-        partition_config                   partitionConf;
+        const strwlen8_t                name_;
+        std::vector<topic_partition *> *partitions_;
+        // We may have multiple registered partitions, but only some of the first ones may be enabled
+        uint16_t         total_enabled_partitions{0};
+        partition_config partitionConf;
+        // a topic may have been created and registered with this service
+        // but an update in topology excluded this topic
+        // We do not erase topics, but we set enabled to false
+        bool enabled{true};
 
         // for Prometheus metrics
         struct metrics_struct final {
@@ -525,9 +1222,24 @@ struct topic
                 // i.e distinct connections that have consumed or produced at least one from/to this topic
         } metrics;
 
+        struct {
+                uint64_t last_update_gen{0};
+                // by default, we are not replicating anything nor are we accepting any requests
+                // we require that RF is explicitly specified for the topic first
+                //
+                // rf_ cannot be 0. This is because we don't want anyone to accidently setting rf to 0 and thus
+                // forcing all nodes to reset_partition_log()
+		//
+		// XXX: it is important to understand that this the number of times a message should be replicated in the cluster
+		// 1 means only the leader should store it, 2 means a leader and another node, etc. 
+		//
+		// that is to say, this is not the number of _additional_ peers that need to replicate from the leader
+                uint8_t rf_{1};
+        } cluster;
+
         topic(const strwlen8_t name, const partition_config c)
             : name_{name.Copy(), name.len}, partitionConf{c} {
-                partitions_ = new Switch::vector<topic_partition *>();
+                partitions_ = new std::vector<topic_partition *>();
         }
 
         auto name() const {
@@ -537,7 +1249,7 @@ struct topic
         ~topic() {
                 if (auto *const p = const_cast<char *>(name_.p)) {
                         free(p);
-		}
+                }
 
                 if (partitions_) {
                         while (partitions_->size()) {
@@ -549,7 +1261,10 @@ struct topic
                 }
         }
 
-        void register_partition(topic_partition *const p) {
+        uint8_t compute_required_peers_acks(const topic_partition *, const uint8_t) const TANK_NOEXCEPT_IF_NORUNTIME_CHECKS;
+
+        void register_partition(topic_partition *const p) TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+                TANK_EXPECT(p->idx < std::numeric_limits<uint16_t>::max()); // UINT16_MAX is reserved
                 p->owner = this;
                 partitions_->push_back(p);
 
@@ -557,22 +1272,42 @@ struct topic
                         return a->idx < b->idx;
                 });
 
-                EXPECT(partitions_->back()->idx == partitions_->size() - 1);
+                TANK_EXPECT(partitions_->back()->idx == partitions_->size() - 1);
+                total_enabled_partitions = partitions_->size();
         }
 
         void register_partitions(topic_partition **const all, const size_t n) {
                 for (uint32_t i{0}; i != n; ++i) {
-                        EXPECT(all[i]);
+                        TANK_EXPECT(all[i]);
+                        TANK_EXPECT(all[i]->idx < std::numeric_limits<uint16_t>::max()); // UINT16_MAX is reserved
 
                         all[i]->owner = this;
                         partitions_->push_back(all[i]);
                 }
 
-                std::sort(partitions_->begin(), partitions_->end(), [](const auto a, const auto b) noexcept{
+                std::sort(partitions_->begin(), partitions_->end(), [](const auto a, const auto b) noexcept {
                         return a->idx < b->idx;
                 });
 
-                EXPECT(partitions_->back()->idx == partitions_->size() - 1);
+                TANK_EXPECT(partitions_->back()->idx == partitions_->size() - 1);
+                total_enabled_partitions = partitions_->size();
+        }
+
+        void register_partitions(Switch::shared_refptr<topic_partition> *const all, const size_t n) {
+                for (uint32_t i{0}; i != n; ++i) {
+                        TANK_EXPECT(all[i]);
+                        TANK_EXPECT(all[i]->idx < std::numeric_limits<uint16_t>::max()); // UINT16_MAX is reserved
+
+                        all[i]->owner = this;
+                        partitions_->push_back(all[i].get());
+                }
+
+                std::sort(partitions_->begin(), partitions_->end(), [](const auto a, const auto b) noexcept {
+                        return a->idx < b->idx;
+                });
+
+                TANK_EXPECT(partitions_->back()->idx == partitions_->size() - 1);
+                total_enabled_partitions = partitions_->size();
         }
 
         const topic_partition *partition(const uint16_t idx) const {
@@ -583,284 +1318,547 @@ struct topic
                 return idx < partitions_->size() ? partitions_->at(idx) : nullptr;
         }
 
+        const topic_partition *enabled_partition(const uint16_t idx) const {
+                if (auto p = partition(idx); p && p->enabled()) {
+                        return p;
+                }
+
+                return nullptr;
+        }
+
+        topic_partition *enabled_partition(const uint16_t idx) {
+                if (auto p = partition(idx); p && p->enabled()) {
+                        return p;
+                }
+
+                return nullptr;
+        }
+
         void foreach_msg(std::function<bool(topic_partition::msg &)> &l) const {
                 for (auto p : *partitions_) {
-                        if (!p->foreach_msg(l))
+                        if (!p->foreach_msg(l)) {
                                 return;
+                        }
                 }
+        }
+
+        uint8_t replication_factor() const noexcept;
+};
+
+bool topic_partition::defined() const noexcept {
+        return idx < owner->total_enabled_partitions;
+}
+
+bool topic_partition::enabled() const noexcept {
+        // a topic's RF cannot be 0, but we are supporting this just in case
+        // in case that was ever true, the partition would have been considered disabled anwyay because
+        // there is no replica supporting it
+        return defined() && likely(owner->cluster.rf_);
+}
+
+struct content_file_range final {
+        fd_handle *fdhandle;
+        range32_t  range;
+
+        content_file_range &operator=(const content_file_range &o) {
+                fdhandle = o.fdhandle;
+                fdhandle->Retain();
+                range = o.range;
+                return *this;
+        }
+
+        content_file_range &operator=(content_file_range &&o) {
+                fdhandle = o.fdhandle;
+                range    = o.range;
+
+                o.fdhandle = nullptr;
+                o.range.reset();
+                return *this;
         }
 };
 
-// We could have used Switch::deque<> but let's just use something simpler
-// TODO: Maybe we should just use a linked list instead
+struct payload {
+        payload *next;
+
+        enum class Source : uint8_t {
+                DataVector = 0,
+                FileContents,
+        } src;
+
+        void reset() {
+                next = nullptr;
+        }
+};
+
+struct file_contents_payload final
+    : public payload {
+        content_file_range file_range;
+        struct
+        {
+                uint64_t since;
+                topic *  src_topic;
+        } tracker;
+
+        void reset() {
+                payload::reset();
+                file_range.fdhandle    = nullptr;
+                tracker.src_topic = nullptr;
+                tracker.since     = 0;
+        }
+
+        void init(fd_handle *const fdh, const range32_t r, const uint64_t start, topic *t) {
+		TANK_EXPECT(fdh);
+
+                tracker.since       = start;
+                tracker.src_topic   = t;
+                file_range.fdhandle = fdh;
+                file_range.range    = r;
+
+                file_range.fdhandle->Retain();
+        }
+};
+
+struct data_vector_payload final
+    : public payload {
+        IOBuffer *   buf;
+        char         small_buf[64];
+        struct iovec iov[32];
+        uint8_t      iov_cnt;
+
+        static_assert(0 == (sizeof_array(iov) & 1));
+
+        void reset() {
+                payload::reset();
+                iov_cnt = 0;
+                buf     = nullptr;
+        }
+
+        void set_iov(const range32_t *const l, const uint32_t cnt) TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+                TANK_EXPECT(buf);
+                TANK_EXPECT(cnt <= sizeof_array(iov));
+
+                iov_cnt = cnt;
+                for (uint32_t i{0}; i < cnt; ++i) {
+                        auto ptr = iov + i;
+
+                        ptr->iov_base = static_cast<void *>(buf->data() + l[i].offset);
+                        ptr->iov_len  = static_cast<int>(l[i].len);
+                }
+        }
+
+        void append(const strwlen32_t s) TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+                TANK_EXPECT(iov_cnt < sizeof_array(iov));
+
+                iov[iov_cnt].iov_base  = reinterpret_cast<void *>(const_cast<char *>(s.data()));
+                iov[iov_cnt++].iov_len = s.size();
+        }
+};
+
 struct outgoing_queue final {
-        struct content_file_range final {
-                fd_handle *fdh;
-                range32_t  range;
+        payload *front_, *back_;
+        // so that we wont' need to include an index in data_vector_payload
+        uint8_t dv_iov_index;
 
-                content_file_range &operator=(const content_file_range &o) {
-                        fdh = o.fdh;
-                        fdh->Retain();
-                        range = o.range;
-                        return *this;
+        size_t size() const noexcept {
+                size_t res{0};
+
+                for (auto it = front_; it; it = it->next, ++res) {
+                        //
                 }
-
-                content_file_range &operator=(content_file_range &&o) {
-                        fdh   = o.fdh;
-                        range = o.range;
-
-                        o.fdh = nullptr;
-                        o.range.reset();
-                        return *this;
-                }
-        };
-
-        struct payload final {
-                bool payloadBuf;
-
-                struct
-                {
-                        uint64_t since;
-                        topic *  src_topic;
-                } tracker;
-
-                union {
-                        struct
-                        {
-                                IOBuffer *buf;
-
-                                struct
-                                {
-                                        struct iovec iov[512]; // https://github.com/phaistos-networks/TANK/issues/12
-                                        uint16_t      iovIdx;
-                                        uint16_t      iovCnt;
-					
-					static_assert(0 == (sizeof_array(iov) & 1));
-                                };
-                        };
-
-                        content_file_range file_range;
-                };
-
-                void set_iov(const range32_t *const l, const uint32_t cnt) {
-                        iovCnt = cnt;
-
-                        for (uint32_t i{0}; i != cnt; ++i) {
-                                auto ptr = iov + i;
-
-                                ptr->iov_base = static_cast<void *>(buf->At(l[i].offset));
-                                ptr->iov_len  = l[i].len;
-                        }
-                }
-
-                void append(const strwlen32_t s) {
-                        iov[iovCnt].iov_base  = (void *)s.data();
-                        iov[iovCnt++].iov_len = s.size();
-                }
-
-                payload()
-                    : payloadBuf{false} {
-                        tracker.since = 0;
-                }
-
-                payload(IOBuffer *const b) {
-                        payloadBuf    = true;
-                        buf           = b;
-                        tracker.since = 0;
-                        iovCnt = iovIdx = 0;
-                }
-
-                payload(fd_handle *const fdh, const range32_t r, const uint64_t start, topic *t) {
-                        payloadBuf        = false;
-                        tracker.since     = start;
-                        tracker.src_topic = t;
-                        file_range.fdh    = fdh;
-                        file_range.range  = r;
-                        file_range.fdh->Retain();
-                }
-
-                void set_buf(IOBuffer *b) {
-                        payloadBuf = true;
-                        buf        = b;
-                }
-
-                payload &operator=(const payload &) = delete;
-
-                payload &operator=(payload &&o) {
-                        payloadBuf        = o.payloadBuf;
-                        tracker.since     = o.tracker.since;
-                        tracker.src_topic = o.tracker.src_topic;
-
-                        if (payloadBuf) {
-                                buf    = o.buf;
-                                iovCnt = o.iovCnt;
-                                iovIdx = o.iovIdx;
-                                memcpy(iov, o.iov, iovCnt * sizeof(struct iovec));
-
-                                o.buf    = nullptr;
-                                o.iovCnt = o.iovIdx = 0;
-                        } else {
-                                file_range = std::move(o.file_range);
-                        }
-
-                        o.payloadBuf = false;
-                        return *this;
-                }
-        };
-
-        using reference       = payload &;
-        using reference_const = const payload &;
-
-        payload                 A[256]; // fixed size
-        uint16_t                backIdx{0}, frontIdx{0}, size_{0};
-        static constexpr size_t capacity{sizeof_array(A)};
-
-        inline uint32_t prev(const uint32_t idx) const noexcept {
-                return (idx + (capacity - 1)) & (capacity - 1);
-        }
-
-        inline uint32_t next(const uint32_t idx) const noexcept {
-                return (idx + 1) & (capacity - 1);
-        }
-
-        inline reference front() noexcept {
-                return A[frontIdx];
-        }
-
-        inline reference_const front() const noexcept {
-                return A[frontIdx];
-        }
-
-        inline reference back() noexcept {
-                return A[prev(backIdx)];
-        }
-
-        inline reference_const back() const noexcept {
-                return A[prev(backIdx)];
-        }
-
-        inline reference at(const size_t idx) noexcept {
-                return A[(frontIdx + idx) & (capacity - 1)];
-        }
-
-        inline reference_const at(const size_t idx) const noexcept {
-                return A[(frontIdx + idx) & (capacity - 1)];
-        }
-
-        inline void did_push() noexcept {
-                ++size_;
-        }
-
-        inline void did_pop() noexcept {
-                --size_;
-        }
-
-        payload &push_back(const payload &v) = delete;
-
-        auto push_back(payload &&v) {
-                if (unlikely(size_ == capacity))
-                        throw Switch::system_error("Queue full");
-
-                payload *const res = A + backIdx;
-
-                *res    = std::move(v);
-                backIdx = next(backIdx);
-                did_push();
-
                 return res;
         }
 
-        void push_front(const payload &v) = delete;
-
-        void push_front(payload &&v) {
-                if (unlikely(size_ == capacity))
-                        throw Switch::system_error("Queue full");
-
-                frontIdx    = prev(frontIdx);
-                A[frontIdx] = std::move(v);
-                did_push();
+        void reset() noexcept {
+                front_ = back_ = nullptr;
+                dv_iov_index   = 0;
         }
 
-        inline void pop_back() noexcept {
-                backIdx = prev(backIdx);
-                did_pop();
+        void verify() TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+#ifdef TANK_RUNTIME_CHECKS
+                EXPECT(!front_ || back_);
+#endif
         }
 
-        inline void pop_front() noexcept {
-                frontIdx = next(frontIdx);
-                did_pop();
-        }
+        void pop_front() TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+                TANK_EXPECT(front_);
 
-        inline bool full() const noexcept {
-                return size_ == capacity;
-        }
+                verify();
 
-        inline bool empty() const noexcept {
-                return !size_;
-        }
-
-        inline auto size() const noexcept {
-                return size_;
-        }
-
-        template <typename L>
-        void clear(L &&l) {
-                while (frontIdx != backIdx) {
-                        auto &p = A[frontIdx];
-
-                        if (p.payloadBuf) {
-                                if (p.buf)
-                                        l(p.buf);
-                        } else
-                                p.file_range.fdh->Release();
-
-                        frontIdx = next(frontIdx);
+                front_ = front_->next;
+                if (!front_) {
+                        back_ = nullptr;
                 }
 
-                size_    = 0;
-                frontIdx = backIdx = 0;
+                verify();
         }
 
-        outgoing_queue() {
+        void push_back(payload *p) TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+                verify();
+
+                if (!back_) {
+                        front_ = back_ = p;
+                } else {
+                        back_->next = p;
+                }
+                back_ = p;
+
+                verify();
+        }
+
+        bool empty() const noexcept {
+                return nullptr == front_;
+        }
+
+        auto front() noexcept {
+                return front_;
+        }
+
+        auto back() noexcept {
+                return back_;
+        }
+};
+
+struct consul_request final {
+        // for chaining in consul_state.pending_reqs
+        consul_request *next;
+
+        // A request may depend on another request
+        // that is, it cannot be scheduled before a request has been processed
+        // to support that, we are going to just append requests using next
+        // so that once a request is processed, we check its next to see if it has a dependancy, and if so, we schedule that a swell
+        // we track all pending consul requests
+        consul_request *then;
+
+        // we may want to reschedule a request sometime later
+        // see process_drained_consul_resp_impl()
+        timer_node tn;
+
+        enum class Flags : uint8_t {
+                // Request has been assigned to a connection
+                Assigned    = 1u << 0,
+                Urgent      = 1u << 1,
+                Deferred    = 1u << 2,
+                Released    = 1u << 3,
+                OverHandled = 1u << 4,
+        };
+
+        enum class Type : uint8_t {
+                InitNS_Topology = 1,
+                InitNS_Nodes,
+                InitNS_Leaders,
+                InitNS_ISR,
+                // Whenever a topic's configuration has been updated (Replication factor, max.seg size etc)
+                // we are not going to update anything under TANK/<cluster>/topology/<topic>
+                // because we monitor topology, so we 'll wind up getting the confgiuration for all topics if it is updated for just one of them.
+                // We will instead "touch" a key (no value, bumped version) in TANK/<cluster/conf-updates/<topic> so that
+                // we 'll determine that the version of that key now differs from what we track locally, and then
+                // pull  TANK/<cluster>/configs/<topic> and apply it.
+                //
+                // We can use multi-key transactions to atomically update configs/<topic> and conf_updates</topic>
+                InitNS_ConfUpdates,
+                RetrieveTopicConfig,
+                // There is a single configuration file (see also, RetrieveTopicConfig)
+                // that specifies the cluster's configuration
+                // Initially, we 'll fetch the configuration for all topics _AND_ the cluster configuration
+                RetrieveClusterConfig,
+                RetrieveConfigs,
+                TryBecomeClusterLeader = 9,
+                MonitorTopology,
+                MonitorLeaders,
+                MonitorISRs,
+                MonitorConfUpdates,
+                MonitorConfUpdatesNoApply,
+                MonitorNodes,
+                AcquireNodeID,
+                CreateSession,
+                // We deliberately choose a very short TTL for the created sessions, so that we will renew them regularly
+                // failing to renew them in due time, will release the acquired lock on whichever keys(i.e partitions or CLUSTER)
+                // so that other cluster nodes react in time.
+                // Also, renewals are a HB of sort -- by communicating with the consul endpoint very often, we can detect
+                // when it becomes NA and thus resign leadership
+                RenewSession,
+                DestroySession,
+                ReleaseClusterLeadership, // 20
+                ReleaseNodeLock,
+                // Namespaces Updates
+                PartitionsTX,
+                CreatePartititons,
+        } type;
+
+        union {
+                topic *          tref;
+                bool             no_apply;
+                topic_partition *part;
+                IOBuffer *       tx_repr;
+
+                struct {
+                        topic_partition *data[64];
+                        uint8_t          size;
+                } partitions;
+
+                struct {
+                        struct {
+                                char    data[64];
+                                uint8_t size;
+                        } topic_name;
+
+                        uint8_t           first_partition_index;
+                        uint8_t           partitions_cnt;
+                        connection_handle client_ch;
+                        uint32_t          client_req_id;
+                } new_partitions;
+        };
+
+        uint8_t flags;
+
+        bool is_set() const noexcept {
+                return flags & unsigned(Flags::Assigned);
+        }
+
+        bool is_released() const noexcept {
+                return flags & unsigned(Flags::Released);
+        }
+
+        bool will_long_poll() const noexcept {
+                switch (type) {
+                        case Type::MonitorTopology:
+                        case Type::MonitorNodes:
+                        case Type::MonitorLeaders:
+                        case Type::MonitorISRs:
+                        case Type::MonitorConfUpdates:
+                        case Type::MonitorConfUpdatesNoApply:
+                                return true;
+
+                        default:
+                                return false;
+                }
+        }
+
+        void reset() {
+                next                = nullptr;
+                then                = nullptr;
+                flags               = 0;
+                tn.node.node.leaf_p = nullptr;
+                tref                = nullptr;
+        }
+};
+
+struct CompressionContext final {
+        enum class State : uint8_t {
+                Headers = 0,
+                Content,
+                Footer,
+                Fin,
+        } state;
+
+        z_stream       stream;
+        CRC32Generator crc32_gen;
+        uint32_t       processed_bytes;
+        IOBuffer *     b;
+
+        void reset() {
+                b     = nullptr;
+                state = State::Headers;
         }
 };
 
 struct connection final {
-        int       fd;
+        int fd;
+#ifdef TANK_RUNTIME_CHECKS
+        uintptr_t sentinel;
+#endif
         IOBuffer *inB{nullptr};
-
-        uint32_t addr4;
+        uint32_t  addr4;
+        uint64_t  gen;
 
         // May have an attached outgoing queue
         outgoing_queue *outQ{nullptr};
 
         // all active wait_ctx's
-        switch_dlist connectionsList, waitCtxList;
+        switch_dlist connectionsList;
 
-	struct { 
-		uint64_t since;
-		switch_dlist idle_conns_ll;
-	} idle;
+        // A connection is classified as Unclassified, Idle, or Active
+        // and depending on the classifiication, it may be attached to a list
+        struct ClassificationTracker final {
+                uint64_t     since; // when it was classified
+                switch_dlist ll;    // optionally link to a classification speicific list
 
-        // This is initialized to(0) for clients, but followers are expected to
-        // issue an REPLICA_ID request as soon as they connect
-        uint16_t replicaId;
+                enum class Type : uint8_t {
+                        NotClassified = 0,
+                        Idle,
+                        Active,
+                        LongPolling
+                };
+        } classification;
 
-        struct State {
+        enum class Type : uint8_t {
+                TankClient = 0,
+                Prometheus,
+                ConsulClient,
+                Consumer,
+                UNKNOWN,
+        } type;
+
+        struct State final {
                 enum class Flags : uint8_t {
-                        PendingIntro = 0,
-                        NeedOutAvail,
-                        ConsideredReqHeader,
-                        TypePrometheus,
-                        DrainingForShutdown
+                        NeedOutAvail = 0,
+                        ShutdownReasonTimeout,
+                        DrainingForShutdown,
+                        // 3 MSBs are reserved for the activity tracker list
                 };
 
-                uint8_t  flags;
-                uint64_t lastInputTS;
+                auto classification() const noexcept {
+                        return static_cast<ClassificationTracker::Type>(flags >> 5);
+                }
+
+                void set_classsification(const ClassificationTracker::Type l) TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+                        TANK_EXPECT(unsigned(l) < 7);
+
+                        flags = (flags & 0b11111) | (unsigned(l) << 5);
+                }
+
+                auto flags_sans_class() const noexcept {
+                        return flags & 0b11111;
+                }
+
+                uint8_t flags;
         } state;
 
-        inline bool src_prometheus() const noexcept {
-                return state.flags & (1 << unsigned(State::Flags::TypePrometheus));
+        union As final {
+                struct Consul final {
+                        // this is useful for tracking active and idle consul connections
+                        // with consul_state
+                        switch_dlist conns_ll;
+
+                        enum class State : uint8_t {
+                                Idle,
+                                Connecting,
+                                TxReq,
+                                WaitRespFirstBytes,
+                                ReadHeaders,
+                                ReadContent,
+                                ReadCompressedContent,
+                        } state;
+
+                        enum class Flags : uint8_t {
+                                WaitShutdown = 1 << 0,
+                        };
+
+                        uint8_t    flags;
+                        timer_node attached_timer;
+
+                        struct Cur final {
+                                struct Response final {
+                                        uint64_t           consul_index;
+                                        size_t             content_length;
+                                        uint8_t            flags;
+                                        CompressionContext comp_ctx;
+
+                                        enum class Flags : uint8_t {
+                                                KeptAlive      = 1u << 0,
+                                                GZIP_Encoding  = 1u << 1,
+                                                ChunksTransfer = 1u << 2,
+                                                Draining       = 1u << 3,
+                                        };
+
+                                        union {
+                                                size_t remaining_content_bytes;
+                                                // if we we are processing a chunk-encoded response
+                                                size_t decoded_content_bytes;
+                                        };
+
+                                        uint16_t rc;
+
+                                        void reset() {
+                                                content_length          = 0;
+                                                remaining_content_bytes = 0;
+                                                rc                      = 0;
+                                                flags                   = 0;
+                                                consul_index            = 0;
+                                                comp_ctx.reset();
+                                        }
+
+                                        inline bool chunked_transfer_enc() const noexcept {
+                                                return flags & unsigned(Flags::ChunksTransfer);
+                                        }
+                                } resp;
+
+                                consul_request *req;
+                        } cur;
+
+                        void reset() {
+                                conns_ll.reset();
+                                cur.resp.content_length = 0;
+                                state                   = State::Idle;
+                                cur.req                 = nullptr;
+                                flags                   = 0;
+                        }
+
+                } consul;
+
+                struct Prometheus final {
+                        void reset() {
+                        }
+
+                } prometheus;
+
+                struct Tank final {
+                        enum class Flags : uint8_t {
+                                PendingIntro        = 1u << 0,
+                                ConsideredReqHeader = 1u << 1,
+                        };
+
+                        uint8_t      flags;
+                        switch_dlist waitCtxList;
+                        switch_dlist produce_responses_list;
+
+                        // see consider_pending_client_produce_responses()
+                        // for each product request from this client
+                        struct {
+                                // so that once the connection is closed, we can get rid of
+                                // whatever we use to track those pending produce acks
+                        } pending_produce_reqs_acks;
+
+                        void reset() {
+                                flags = 0;
+                                waitCtxList.reset();
+                                produce_responses_list.reset();
+                        }
+                } tank;
+
+                // consumes from a peer
+                struct Consumer final {
+                        enum class State : uint8_t {
+                                Idle = 0,
+                                Busy,
+                                Connecting,
+                                ScheduledShutdown,
+                        } state;
+
+                        cluster_node *node;
+                        timer_node    attached_timer;
+
+                        void reset() {
+                                state = State::Idle;
+                                node  = nullptr;
+                                attached_timer.reset();
+                        }
+                } consumer;
+
+                As() {
+                }
+        } as;
+
+        inline bool is_consul() const noexcept {
+                return type == Type::ConsulClient;
+        }
+
+        inline bool is_prometheus() const noexcept {
+                return type == Type::Prometheus;
+        }
+
+        inline bool is_tank() const noexcept {
+                return type == Type::TankClient;
         }
 
         void set_close_on_flush() {
@@ -870,28 +1868,522 @@ struct connection final {
         bool close_on_flush() const noexcept {
                 return state.flags & (1 << unsigned(State::Flags::DrainingForShutdown));
         }
+
+        void verify() TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+#ifdef TANK_RUNTIME_CHECKS
+                TANK_EXPECT(sentinel == reinterpret_cast<uintptr_t>(this));
+                TANK_EXPECT(gen);
+                TANK_EXPECT(gen != std::numeric_limits<uint64_t>::max());
+                TANK_EXPECT(type != Type::UNKNOWN);
+
+                if (connectionsList.prev || connectionsList.next) {
+                        TANK_EXPECT(connectionsList.prev);
+                        TANK_EXPECT(connectionsList.next);
+                } else {
+                        TANK_EXPECT(!connectionsList.next);
+                        TANK_EXPECT(!connectionsList.prev);
+                }
+#endif
+        }
 };
 
-class Service final {
-        friend struct ro_segment;
+void connection_handle::set(connection *const c) TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+        TANK_EXPECT(c);
 
-      private:
+        c_    = c;
+        c_gen = c->gen;
+}
+
+connection *connection_handle::get() noexcept {
+        return c_ && c_->gen == c_gen ? c_ : nullptr;
+}
+
+const connection *connection_handle::get() const noexcept {
+        return c_ && c_->gen == c_gen ? c_ : nullptr;
+}
+
+class Service {
+        friend struct ro_segment;
+        friend struct topic_partition_log;
+
+      protected:
+        struct partition_leader_update final {
+                str_view8 topic;
+                uint16_t  partition;
+                nodeid_t  leader_id;
+                bool      locked;
+        };
+
+        typedef struct topology_partition final {
+                str_view8                       topic;
+                uint16_t                        partition;
+                uint64_t                        gen;
+                range_base<uint16_t *, uint8_t> replicas;
+        } partition_isr_info;
+
+        struct ConsulState final {
+                char    _token[64], _session_id[64];
+                uint8_t _token_len{0}, _session_id_len{0};
+
+                // linked via connection::as::consul::conns_ll
+                switch_dlist idle_conns{&idle_conns, &idle_conns};
+                switch_dlist active_conns{&active_conns, &active_conns};
+
+                uint64_t active_conns_next_process_ts{std::numeric_limits<uint64_t>::max()};
+
+                struct {
+                        consul_request *front_{nullptr};
+                        consul_request *back_{nullptr};
+
+                        void push_back(consul_request *r) TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+                                TANK_EXPECT(r);
+                                TANK_EXPECT(!r->is_released());
+
+                                r->next = nullptr;
+                                if (back_) {
+                                        back_->next = r;
+                                } else {
+                                        front_ = r;
+                                }
+
+                                back_ = r;
+                        }
+
+                        bool empty() const noexcept {
+                                return front_ == nullptr;
+                        }
+
+                        void pop_front() TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+                                TANK_EXPECT(front_);
+                                TANK_EXPECT(back_);
+
+                                front_ = front_->next;
+                                if (nullptr == front_) {
+                                        back_ = nullptr;
+                                }
+                        }
+
+                        auto front() TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+                                TANK_EXPECT(!front_->is_released());
+                                return front_;
+                        }
+
+                        auto back() TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+                                TANK_EXPECT(!back_->is_released());
+                                return back_;
+                        }
+
+                } pending_reqs;
+
+                // the (current) consul service
+                struct Srv final {
+                        str_view32       hn{_S("localhost")};
+                        Switch::endpoint endpoint{};
+                        uint64_t         unreachable_since{0};
+                        uint8_t          consequtive_faults{0};
+                        timer_node       retry_reg_timer{.type = timer_node::ContainerType::TryConsulClusterReg, .node.node.leaf_p = nullptr};
+
+                        enum class State : uint8_t {
+                                Unknown = 0,
+                                Available,
+                                Unreachable,
+                                Unreliable,
+                        } state{State::Unknown};
+                } srv;
+
+                enum class Flags : uint8_t {
+                        // Set when our CreateSession request was successful
+                        // and we acquired as ession ID
+                        ConfirmedSession = 1 << 0,
+
+                        // Acquired ID but have _not_ yet assigned our endpoint to the value of the /nodes/key
+                        RegistrationComplete = 1 << 1,
+
+                        // Set in consul_ns_retrieval_complete()
+                        // that function is invoked when we have been retrieved (topology, leaders, configs, ISRs)
+                        StateRetrieved = 1 << 2,
+
+                        // Set in process_consul_configs() when all configurations have been retrieved
+                        ConfigsRetrieved = 1 << 3,
+
+                        // Set once we apply_cluster_state_updates() for all updates collected during bootstrap
+                        BootstrapStateUpdatesProcessed = 1 << 4,
+
+                        // Set if there is an active TryBecomeClusterLeader request
+                        // XXX: Need to make sure we are doing this properly; if we are not unsetting this
+                        // when we retrieve(prior to processing) the request to TryBecomeClusterLeader
+                        // and when we consul_state.put_req() then
+                        // we may get stuck where we will never be able to try_become_cluster_leader_timer() again
+                        //
+                        // TODO: we should probably do this for all other namespace retrieval requests
+                        // because it makes little sense to e.g have more than 1 active /nodes fetch requests
+                        AttemptBecomeClusterLeader = 1 << 5,
+
+                        // Last time we attempted to register with the consul agent resulted in a fault
+                        LastRegFailed = 1 << 6,
+                };
+
+                bool bootstrap_state_updates_processed() const noexcept {
+                        return flags & unsigned(Flags::BootstrapStateUpdatesProcessed);
+                }
+
+                bool reg_completed() const noexcept {
+                        return flags & unsigned(Flags::RegistrationComplete);
+                }
+
+                uint32_t                      flags{0};
+                std::vector<consul_request *> reusable_reqs;
+                simple_allocator              reqs_allocator{sizeof(consul_request) * 512};
+                timer_node                    renew_timer{.type = timer_node::ContainerType::ScheduleRenewConsulSess, .node.node.leaf_p = nullptr};
+                uint64_t                      topology_monitor_modify_index{0}, leaders_monitor_modify_index{0}, isrs_monitor_modify_index{0}, conf_updates_monitor_modify_index{0}, nodes_monitor_modify_index{0};
+                consul_request *              deferred_reqs_head{nullptr};
+                // used for namespace init. and for monitor registration
+                uint8_t  ack_cnt{0};
+                uint64_t reg_init_ts;
+                int      _interrupt_efd{-1};
+
+                str_view8 token() const noexcept {
+                        return {_token, _token_len};
+                }
+
+                str_view8 session_id() const noexcept {
+                        return {_session_id, _session_id_len};
+                }
+
+                auto get_req() {
+                        consul_request *req;
+
+                        if (!reusable_reqs.empty()) {
+                                constexpr auto bm = unsigned(consul_request::Flags::Released);
+
+                                req = reusable_reqs.back();
+                                reusable_reqs.pop_back();
+
+                                TANK_EXPECT(req->flags & bm);
+                                req->flags &= ~bm;
+                        } else {
+                                req = static_cast<consul_request *>(reqs_allocator.Alloc(sizeof(consul_request)));
+                        }
+
+                        req->reset();
+                        return req;
+                }
+
+                auto get_req(const consul_request::Type t) {
+                        auto r = get_req();
+
+                        TANK_EXPECT(r);
+
+                        r->type = t;
+                        return r;
+                }
+
+                auto get_req(const consul_request &o) {
+                        auto r = get_req();
+
+                        TANK_EXPECT(r);
+                        r->type = o.type;
+
+                        switch (o.type) {
+                                case consul_request::Type::RetrieveTopicConfig:
+                                        r->tref = o.tref;
+                                        break;
+
+                                case consul_request::Type::PartitionsTX:
+                                        r->tx_repr = o.tx_repr;
+                                        break;
+
+                                default:
+                                        break;
+                        }
+
+                        return r;
+                }
+
+                void put_req(consul_request *r, const size_t ref) {
+                        constexpr auto bm = unsigned(consul_request::Flags::Released);
+
+                        TANK_EXPECT(r->flags & unsigned(consul_request::Flags::OverHandled));
+
+                        if (r->type == consul_request::Type::PartitionsTX) {
+                                delete r->tx_repr;
+                        }
+
+                        TANK_EXPECT(r);
+                        TANK_EXPECT(0 == (r->flags & bm));
+
+                        r->flags |= bm;
+                        r->flags &= ~unsigned(consul_request::Flags::OverHandled);
+                        reusable_reqs.emplace_back(r);
+                }
+        } consul_state;
+
+        struct ClusterState final {
+                static constexpr size_t                                     K_max_replicas{8};
+                nodeid_t                                                    leader_id{0};
+                switch_dlist                                                replication_streams{&replication_streams, &replication_streams};
+                std::unordered_map<nodeid_t, std::unique_ptr<cluster_node>> nodes;
+                std::vector<cluster_node *>                                 all_nodes, all_available_nodes;
+                bool                                                        all_nodes_dirty{false};
+                char                                                        _name[64];
+                uint8_t                                                     _name_len{0};
+                const str_view32                                            tank_ns{_S("TANK")};
+
+                inline str_view32 name() const noexcept {
+                        return {_name, _name_len};
+                }
+
+                bool registered{false};
+
+                bool leader_self() const TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+                        TANK_EXPECT(local_node.id);
+
+                        return local_node.id == leader_id;
+                }
+
+                struct {
+                        nodeid_t      id{0};
+                        cluster_node *ref{nullptr};
+                } local_node;
+
+                cluster_node *find_node(const nodeid_t id) {
+                        if (const auto it = nodes.find(id); it != nodes.end()) {
+                                return it->second.get();
+                        } else {
+                                return nullptr;
+                        }
+                }
+
+                cluster_node *find_or_create_node(const nodeid_t id) {
+                        const auto it = nodes.emplace(id, nullptr);
+
+                        if (it.second) {
+                                auto n = new cluster_node(id);
+
+                                it.first->second.reset(n);
+                                all_nodes.emplace_back(n);
+                                all_nodes_dirty = true;
+                        }
+                        return it.first->second.get();
+                }
+
+                void begin_nodes_updates() {
+                        //
+                }
+
+                void end_nodes_update() {
+                        if (all_nodes_dirty) {
+                                std::sort(all_nodes.begin(), all_nodes.end(), [](const auto a, const auto b) noexcept {
+                                        return a->id < b->id;
+                                });
+
+                                all_nodes_dirty = false;
+                        }
+                }
+
+                struct {
+                        uint64_t last_update_gen{0};
+                } local_conf;
+
+                // enqueue updates here and update them once
+                struct Updates final {
+                        struct {
+                                nodeid_t nid;
+                                bool     defined{false};
+                        } cluster_leader;
+
+                        void set_cluster_leader(const nodeid_t v) {
+                                cluster_leader.nid     = v;
+                                cluster_leader.defined = true;
+                        }
+
+                        struct partition final {
+                                struct {
+                                        nodeid_t id;
+                                        bool     defined{false};
+                                } leader;
+
+                                struct {
+                                        std::vector<cluster_node *> nodes;
+                                        bool                        updated{false};
+                                } replicas;
+
+                                std::unique_ptr<std::vector<nodeid_t>> isr_update;
+
+                                void set_leader(const nodeid_t id) {
+                                        leader.id      = id;
+                                        leader.defined = true;
+                                }
+
+                                void set_replicas(cluster_node **nodes, const size_t n) {
+                                        replicas.nodes.clear();
+                                        replicas.nodes.insert(replicas.nodes.end(), nodes, nodes + n);
+
+                                        TANK_EXPECT(std::is_sorted(replicas.nodes.begin(), replicas.nodes.end(), [](const auto a, const auto b) noexcept {
+                                                return a->id < b->id;
+                                        }));
+
+                                        replicas.updated = true;
+                                }
+                        };
+
+                        struct topic final {
+                                struct {
+                                        bool value;
+                                        bool defined{false};
+                                } state;
+
+                                struct {
+                                        uint16_t value;
+                                        bool     defined{false};
+                                } total_enabled;
+
+                                struct {
+                                        uint16_t value;
+                                        bool     defined{false};
+                                } rf;
+
+                                void set_disabled() {
+                                        state.value   = false;
+                                        state.defined = true;
+                                }
+
+                                void set_enabled() {
+                                        state.value   = true;
+                                        state.defined = true;
+                                }
+
+                                void set_total_enabled_partitions(const size_t n) {
+                                        total_enabled.value   = n;
+                                        total_enabled.defined = true;
+                                }
+
+                                void set_rf(const uint16_t v) {
+                                        rf.value   = v;
+                                        rf.defined = true;
+                                }
+                        };
+
+                        simple_allocator                                                      a;
+                        std::unordered_map<cluster_node *, std::pair<Switch::endpoint, bool>> nodes;
+                        std::unordered_map<topic_partition *, std::unique_ptr<partition>>     pm;
+                        std::unordered_map<::topic *, std::unique_ptr<topic>>                 tm;
+
+                        auto get_partition(topic_partition *tp) {
+                                TANK_EXPECT(tp);
+                                const auto res = pm.emplace(tp, nullptr);
+
+                                if (res.second) {
+                                        res.first->second.reset(new partition());
+                                }
+
+                                return res.first->second.get();
+                        }
+
+                        auto get_topic(::topic *t) {
+                                TANK_EXPECT(t);
+                                const auto res = tm.emplace(t, nullptr);
+
+                                if (res.second) {
+                                        res.first->second.reset(new topic());
+                                }
+
+                                return res.first->second.get();
+                        }
+                } updates;
+        } cluster_state;
+
+        struct {
+                std::vector<wait_ctx *>                                         woken_up;
+                std::vector<topic_partition::msg>                               partition_msgs;
+                std::vector<IOBuffer *>                                         acquired_buffers;
+                std::unordered_set<cluster_node *>                              nodes_set;
+                std::vector<std::pair<str_view8, uint16_t>>                     v;
+                std::vector<node_partition_rel_update>                          updates;
+                std::vector<std::pair<topic *, range_base<uint16_t, uint16_t>>> pending_partitions;
+                std::vector<Switch::shared_refptr<topic>>                       pending_reg_topics;
+                std::unordered_set<topic *>                                     retained_topics;
+                std::vector<cluster_node *>                                     nodes;
+                std::vector<std::pair<str_view8, uint64_t>>                     conf_updates;
+                simple_allocator                                                json_a;
+                std::vector<partition_leader_update>                            new_leadership;
+                std::vector<cluster_nodeid_update>                              nodes_updates;
+                std::vector<uint16_t>                                           all_replicas;
+                std::unordered_map<str_view8, bool>                             intern_map;
+                std::vector<partition_isr_info>                                 isr_updates;
+                std::vector<topology_partition>                                 new_topology;
+
+                std::unordered_set<cluster_node *>                                         dirty_nodes;
+                std::unordered_set<topic *>                                                dirty_topics;
+                std::unordered_set<topic_partition *>                                      dirty_partitions;
+                std::vector<std::pair<topic_partition *, bool>>                            part_bool_hashmap;
+                std::vector<topic_partition *>                                             pv;
+                std::vector<std::pair<cluster_node *, std::pair<topic_partition *, bool>>> nodes_replicas_updates;
+                std::vector<std::pair<topic_partition *, cluster_node *>>                  stream_start, stream_stop;
+
+                std::vector<NodesPartitionsUpdates::reduced_rs>                    reduced;
+                std::vector<NodesPartitionsUpdates::expanded_rs>                   expanded;
+                std::vector<NodesPartitionsUpdates::leadership_promotion>          promotions;
+                std::unordered_set<cluster_node *>                                 peers_set;
+                std::vector<std::pair<str_view8, std::pair<str_view32, uint64_t>>> json_conf_updates;
+        } reusable;
+
+      protected:
         static constexpr size_t idle_connection_ttl{16 * 1000};
-        enum class OperationMode : uint8_t {
-                Standalone = 0,
-                Clustered
-        } opMode{OperationMode::Standalone};
+        static constexpr size_t active_consul_connection_ttl{4 * 1000};
+        enum class ReactorState : uint8_t {
+                Idle = 0, // it's important this is (== 0)
+                Active,
+                ReleaseSess,
+                WaitAllConnsIdle,
+                TearDown,
+        } reactor_state;
+        Switch::endpoint                                             tank_listen_ep{0}, prom_endpoint{};
+        timer_node                                                   set_reactor_state_idle_timer{.type = timer_node::ContainerType::ForceSetReactorStateIdle, .node.node.leaf_p = nullptr};
+        timer_node                                                   try_become_cluster_leader_timer{.type = timer_node::ContainerType::TryBecomeClusterLeader, .node.node.leaf_p = nullptr};
+        std::vector<wait_ctx *>                                      now_awake;
+        std::vector<topic_partition_log *>                           cleanup_tracker;
+        Buffer                                                       base64_dec_buffer;
+        int                                                          _interrupt_efd{-1};
+        uint64_t                                                     next_deferred_produce_response_gen{0};
+        switch_dlist                                                 deferred_produce_responses_expiration_list{&deferred_produce_responses_expiration_list, &deferred_produce_responses_expiration_list};
+        uint64_t                                                     deferred_produce_responses_next_expiration{std::numeric_limits<uint64_t>::max()};
+        std::vector<topic_partition *>                               isr_dirty_list;
+        std::vector<topic_partition *>                               cluster_partitions_dirty;
+        std::vector<isr_entry *>                                     reusable_isr_entries;
+        simple_allocator                                             isr_entries_allocator{sizeof(isr_entry) * 128};
         Switch::vector<wait_ctx *>                                   waitCtxPool[255];
         std::unordered_map<strwlen8_t, Switch::shared_refptr<topic>> topics;
+        size_t                                                       partitions_io_failed_cnt{0};
+        std::vector<topic_partition *>                               partitions_v;
+	std::mutex partitions_v_lock;
+        std::vector<repl_stream *>                                   reusable_replication_streams;
+        simple_allocator                                             repl_streams_allocator;
         Switch::vector<IOBuffer *>                                   bufs;
-        Switch::vector<connection *>                                 connsPool;
+        std::vector<std::unique_ptr<produce_response>>               reusable_produce_responses;
+        uint64_t                                                     next_produce_response_gen{0};
+        std::vector<data_vector_payload *>                           reusable_data_vector_payloads;
+        std::vector<file_contents_payload *>                         reusable_file_contents_payloads;
+        std::vector<connection *>                                    reusable_conns, pending_reusable_conns;
+        simple_allocator                                             payloads_allocator;
         Switch::vector<outgoing_queue *>                             outgoingQueuesPool;
+        simple_allocator                                             connections_allocators;
+        switch_dlist                                                 active_partitions{&active_partitions, &active_partitions};
         switch_dlist                                                 allConnections, idle_connections{&idle_connections, &idle_connections};
-	size_t idle_connections_count{0};
-	uint64_t next_idle_check_ts{std::numeric_limits<uint64_t>::max()};
-        eb_root  timers_ebtree_root;
-        uint64_t timers_ebtree_next;
-	eb64_node_ctx cleanup_tracker;
+        switch_dlist                                                 long_polling_conns{&long_polling_conns, &long_polling_conns};
+        switch_dlist                                                 isr_pending_ack_list{&isr_pending_ack_list, &isr_pending_ack_list};
+        uint64_t                                                     isr_pending_ack_list_next{std::numeric_limits<uint64_t>::max()};
+        size_t                                                       idle_connections_count{0};
+        uint32_t                                                     next_connection_generation{0};
+        switch_dlist                                                 scheduled_consume_retries_list{&scheduled_consume_retries_list, &scheduled_consume_retries_list};
+        uint64_t                                                     scheduled_consume_retries_list_next{std::numeric_limits<uint64_t>::max()};
+        uint64_t                                                     next_cluster_state_apply{std::numeric_limits<uint64_t>::max()};
+        uint64_t                                                     next_active_partitions_check{std::numeric_limits<uint64_t>::max()};
+
+        uint64_t   next_idle_check_ts{std::numeric_limits<uint64_t>::max()};
+        eb_root    timers_ebtree_root;
+        uint64_t   timers_ebtree_next{std::numeric_limits<uint64_t>::max()};
+        timer_node cleanup_tracker_timer{.type = timer_node::ContainerType::CleanupTracker, .node.node.leaf_p = nullptr};
         // In the past, it was possible, however improbably, that
         // we 'd invoke destroy_wait_ctx() twice on the same context, or would otherwise
         // use or re-use the same context while it was either invalid, or was reused
@@ -905,203 +2397,21 @@ class Service final {
         // down a hasenbug, though it turned out to be a silly application bug, not a Tank bug.
         // It's nonethless great that we figured out this edge case(no evidence that this
         // has ever happened) and we are dealing with it here.
-        Switch::vector<wait_ctx *>        expiredCtxList, expiredCtxList2, expiredCtxList3, waitCtxDeferredGC;
-        uint32_t                          nextDistinctPartitionId{0};
-        int                               listenFd, prom_listen_fd{-1};
-        std::atomic<bool>                 sleeping alignas(64){false};
-        EPoller                           poller;
-        pthread_t                         main_thread_id;
-        std::unique_ptr<std::thread>      sync_thread;
-        Switch::vector<topic_partition *> deferList;
-        range32_t                         patchList[1024];
-        time_t                            curTime;
-        uint64_t                          now_ms;
+        std::vector<wait_ctx *>        expiredCtxList, expiredCtxList2, expiredCtxList3, waitctx_deferred_gc;
+        uint32_t                       nextDistinctPartitionId{0};
+        int                            listenFd{-1}, prom_listen_fd{-1};
+        std::atomic<bool>              sleeping alignas(64){false};
+        EPoller                        poller;
+        pthread_t                      main_thread_id;
+        std::unique_ptr<std::thread>   sync_thread;
+        std::vector<topic_partition *> partitions_requested_eof;
+        range32_t                      patch_list[1024];
+        time_t                         curTime;
+        uint64_t                       now_ms{Timings::Milliseconds::Tick()};
 
-      private:
-        static void parse_partition_config(const char *, partition_config *);
-
-        static void parse_partition_config(const strwlen32_t, partition_config *);
-
-        auto get_outgoing_queue() {
-                return outgoingQueuesPool.size() ? outgoingQueuesPool.Pop() : new outgoing_queue();
-        }
-
-        topic *topic_by_name(const strwlen8_t) const;
-
-        void put_outgoing_queue(outgoing_queue *const q) {
-                q->clear([this](auto buf) {
-                        this->put_buffer(buf);
-                });
-
-                outgoingQueuesPool.push_back(q);
-        }
-
-        auto get_buffer() {
-                return bufs.size() ? bufs.Pop() : new IOBuffer();
-        }
-
-        void put_buffer(IOBuffer *b) {
-                if (b) {
-                        if (b->Reserved() > 800 * 1024 || bufs.size() > 16)
-                                delete b;
-                        else {
-                                b->clear();
-                                bufs.push_back(b);
-                        }
-                }
-        }
-
-        auto get_connection() {
-                auto c = connsPool.size() ? connsPool.Pop() : new connection();
-
-                c->idle.idle_conns_ll.reset();
-                return c;
-        }
-
-        void put_connection(connection *const c) {
-                if (c->inB) {
-                        put_buffer(c->inB);
-                        c->inB = nullptr;
-                }
-
-                if (connsPool.size() > 16)
-                        delete c;
-                else {
-                        connsPool.push_back(c);
-                }
-        }
-
-        void register_topic(topic *const t) {
-                if (!topics.insert({t->name(), t}).second)
-                        throw Switch::exception("Topic ", t->name(), " already registered");
-        }
-
-        Switch::shared_refptr<topic_partition> init_local_partition(const uint16_t idx, const char *const bp, const partition_config &);
-
-        bool isValidBrokerId(const uint16_t replicaId) {
-                return replicaId != 0;
-        }
-
-        uint32_t partitionLeader(const topic_partition *const p) {
-                return 1;
-        }
-
-        const topic_partition *getPartition(const strwlen8_t topic, const uint16_t partitionIdx) const {
-                if (const auto it = topics.find(topic); it != topics.end())
-                        return it->second->partition(partitionIdx);
-                else
-                        return nullptr;
-        }
-
-        topic_partition *getPartition(const strwlen8_t topic, const uint16_t partitionIdx) {
-                if (const auto it = topics.find(topic); it != topics.end())
-                        return it->second->partition(partitionIdx);
-                else
-                        return nullptr;
-
-                return nullptr;
-        }
-
-	void gc_waitctx_deferred();
-
-	void consider_idle_conns();
-
-	size_t try_shutdown_idle(size_t);
-
-	void tear_down();
-
-	void make_idle(connection *);
-
-	void try_make_idle(connection *);
-
-	void make_active(connection *);
-
-	bool process_load_conf(connection *, const uint8_t *, const size_t);
-
-        bool process_consume(connection *const c, const uint8_t *p, const size_t len);
-
-        bool process_replica_reg(connection *const c, const uint8_t *p, const size_t len);
-
-        bool process_discover_partitions(connection *const c, const uint8_t *p, const size_t len);
-
-        bool process_create_topic(connection *const c, const uint8_t *p, const size_t len);
-
-        wait_ctx *get_waitctx(const uint8_t totalPartitions) {
-                if (waitCtxPool[totalPartitions].size()) {
-                        return waitCtxPool[totalPartitions].Pop();
-                } else {
-                        return reinterpret_cast<wait_ctx *>(malloc(sizeof(wait_ctx) + totalPartitions * sizeof(wait_ctx_partition)));
-                }
-        }
-
-        void put_waitctx(wait_ctx *const ctx) {
-                waitCtxPool[ctx->partitionsCnt].push_back(ctx);
-        }
-
-	bool process_pending_signals(uint64_t);
-
-	void drain_pubsub_queue();
-
-        void fire_timer(eb64_node_ctx *);
-
-        bool cancel_timer(eb64_node *);
-
-        void register_timer(eb64_node *);
-
-        void process_timers();
-
-        bool register_consumer_wait(connection *const c, const uint32_t requestId, const uint64_t maxWait, const uint32_t minBytes, topic_partition **const partitions, const uint32_t totalPartitions);
-
-        bool process_produce(const TankAPIMsgType, connection *const c, const uint8_t *p, const size_t len);
-
-        bool process_msg(connection *const c, const uint8_t msg, const uint8_t *const data, const size_t len);
-
-        void wakeup_wait_ctx(wait_ctx *const wctx, const append_res &appendRes, connection *);
-
-        void abort_wait_ctx(wait_ctx *const wctx);
-
-        void destroy_wait_ctx(wait_ctx *const wctx);
-
-        void cleanup_connection(connection *);
-
-        bool shutdown(connection *const c, const uint32_t ref);
-
-        bool flush_iov(connection *, struct iovec *, const uint32_t, const bool);
-
-        bool try_send_ifnot_blocked(connection *const c) {
-                if (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail)))
-                        return true;
-                else {
-                        return try_send(c);
-                }
-        }
-
-        void poll_outavail(connection *);
-
-        void stop_poll_outavail(connection *);
-
-        void introduce_self(connection *, bool &);
-
-        bool try_send(connection *const c);
-
-        int try_accept(int);
-
-        int try_accept_prom(int);
-
-        bool try_recv_prom(connection *);
-
-        bool try_recv_tank(connection *);
-
-        bool try_recv(connection *);
-
-        int process_io(const int);
-
-	void wakeup_reactor();
-
-        int reactor_main();
-	
-	int verify(char **, const int);
-
+      protected:
+        // so that changing that file won't trigger rebuild all service*.o
+#include "service_pragmas.h"
       protected:
         static void rebuild_index(int, int);
 
@@ -1109,26 +2419,109 @@ class Service final {
 
         static void verify_index(int, const bool);
 
-	public:
-	void maybe_wakeup_reactor();
+      public:
+        void maybe_wakeup_reactor();
 
-	void schedule_cleanup();
+        void schedule_cleanup();
 
-	int safe_open(const char *path, int flags, mode_t mode = 0);
+        int safe_open(const char *path, int flags, mode_t mode = 0);
+
+        void track_log_cleanup(topic_partition_log *log) {
+                cleanup_tracker.emplace_back(log);
+        }
 
       public:
         static inline std::atomic<uint64_t> pending_signals{0};
 
       public:
-        Service() {
-                switch_dlist_init(&allConnections);
-
-                memset(&timers_ebtree_root, 0, sizeof(timers_ebtree_root));
-                timers_ebtree_next        = std::numeric_limits<uint64_t>::max();
-                cleanup_tracker.type      = eb64_node_ctx::ContainerType::CleanupTracker;
-        }
+        Service();
 
         ~Service();
 
         int start(int argc, char **argv);
 };
+
+// basic type-erasure for the callable of std::bind
+struct mainthread_closure final {
+        struct callable {
+                virtual void invoke() = 0;
+                virtual ~callable()   = default;
+        };
+
+        template <typename T>
+        struct internal final
+            : public callable {
+                T v;
+
+                internal(T &&call)
+                    : v(std::move(call)) {
+                }
+
+                void invoke() override {
+                        v();
+                }
+        };
+
+        template <typename T>
+        mainthread_closure(T &&foo)
+            : L{new internal<T>(std::move(foo))} {
+        }
+
+        void operator()() {
+                L->invoke();
+        }
+
+        mainthread_closure *      next;
+        std::unique_ptr<callable> L;
+};
+
+template <typename T>
+struct PubSubQueue final {
+        alignas(64 /* cache line size */) std::atomic<T *> list{nullptr};
+
+        void push_back(T *const v) {
+                T *old;
+
+                do {
+                        old     = list.load(std::memory_order_relaxed);
+                        v->next = old;
+                } while (!list.compare_exchange_weak(old, v, std::memory_order_release, std::memory_order_relaxed));
+        }
+
+        bool any() const {
+                return list.load(std::memory_order_relaxed);
+        }
+
+        inline T *drain() {
+                if (!list.load(std::memory_order_relaxed)) {
+                        return nullptr;
+                } else {
+                        return list.exchange(nullptr, std::memory_order_acquire);
+                }
+        }
+};
+
+extern PubSubQueue<mainthread_closure> mainThreadClosures;
+extern Service *                       this_service;
+extern Buffer                          basePath_;
+extern int                             logFd;
+extern bool                            read_only;
+
+template <typename F, typename... Arg>
+static inline void run_on_main_thread(F &&l, Arg &&... args) {
+        mainThreadClosures.push_back(new mainthread_closure(std::bind(l, std::forward<Arg>(args)...)));
+        this_service->maybe_wakeup_reactor();
+}
+
+template <typename... T>
+inline void track_shutdown(connection *const c, const size_t line, T &&... args) {
+#ifndef LEAN_SWITCH
+        if (auto fd{logFd}; fd != -1) {
+                Buffer b;
+
+                b.append(Date::ts_repr(time(nullptr)), ": Unexpected shutdown at ", line, " for connection from ", ip4addr_repr(c ? c->addr4 : INADDR_NONE), ":");
+                b.append(std::forward<T>(args)...);
+                write(fd, b.data(), b.size());
+        }
+#endif
+}

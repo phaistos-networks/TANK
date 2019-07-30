@@ -47,36 +47,70 @@ static uint64_t parse_timestamp(strwlen32_t s) {
         // for now, YYYYMMDDHH:MM:SS
         // Eventually, will support more date/timeformats
 
+	if (s.StripPrefix(_S("today"))) {
+		auto now = time(nullptr);
 
-        if (s.size() != 16) {
-                return 0;
+		localtime_r(&now, &tm);
+	} else if (s.StripPrefix(_S("yesterday"))) {
+		auto now = time(nullptr) - 86400;
+
+		localtime_r(&now, &tm);
+        } else {
+                if (s.size() < "20181001"_len) {
+                        return 0;
+                }
+
+                c = s.Prefix(4);
+                if (!c.all_of_digits()) {
+                        return 0;
+                }
+                s.StripPrefix(4);
+                tm.tm_year = c.AsUint32() - 1900;
+
+                s.StripPrefix(_S("."));
+                c = s.Prefix(2);
+                if (!c.all_of_digits()) {
+                        return 0;
+                }
+                s.StripPrefix(2);
+                tm.tm_mon = c.AsUint32() - 1;
+
+                s.StripPrefix(_S("."));
+                c = s.Prefix(2);
+                if (!c.all_of_digits()) {
+                        return 0;
+                }
+                s.StripPrefix(2);
+                tm.tm_mday = c.AsUint32();
+        }
+	if (s && (s.front() == '@' || s.front() == ':')) {
+		s.strip_prefix(1);
 	}
 
-        c = s.Prefix(4);
-        s.StripPrefix(4);
-        tm.tm_year = c.AsUint32() - 1900;
-        c          = s.Prefix(2);
-        s.StripPrefix(2);
-        tm.tm_mon = c.AsUint32() - 1;
-        c         = s.Prefix(2);
-        s.StripPrefix(2);
-        tm.tm_mday = c.AsUint32();
-
         c = s.Prefix(2);
         s.StripPrefix(2);
-
-        s.StripPrefix(1);
         tm.tm_hour = c.AsUint32();
-        c          = s.Prefix(2);
-        s.StripPrefix(2);
-        tm.tm_min = c.AsUint32();
 
-        s.StripPrefix(1);
-        c = s.Prefix(2);
-        s.StripPrefix(2);
-        tm.tm_sec = c.AsUint32();
+        if (s && s.StripPrefix(_S(":"))) {
+                c = s.Prefix(2);
+                s.StripPrefix(2);
+                tm.tm_min = c.AsUint32();
+
+                if (s && s.StripPrefix(_S(":"))) {
+                        c = s.Prefix(2);
+                        s.StripPrefix(2);
+                        tm.tm_sec = c.AsUint32();
+                } else {
+                        tm.tm_sec = 0;
+                }
+        } else {
+                tm.tm_min = 0;
+		tm.tm_sec = 0;
+        }
 
         tm.tm_isdst = -1;
+
+	// SLog(Date::ts_repr(mktime(&tm)), "\n"); exit(0);
 
         if (const auto res = mktime(&tm); - 1 == res) {
                 return 0;
@@ -92,13 +126,15 @@ static uint64_t lcrng(const uint64_t state) noexcept {
 int main(int argc, char *argv[]) {
         Buffer            topic, endpoint;
         uint16_t          partition{0};
+        bool              partition_specified{false};
         int               r;
         TankClient        tank_client;
         const char *const app = argv[0];
         bool              verbose{false}, retry{false};
 
-        if (argc == 1)
+        if (argc == 1) {
                 goto help;
+	}
 
         tank_client.set_retry_strategy(TankClient::RetryStrategy::RetryNever);
         while ((r = getopt(argc, argv, "+vb:t:p:hrS:R:")) != -1) // see GETOPT(3) for '+' initial character semantics
@@ -148,8 +184,10 @@ int main(int argc, char *argv[]) {
 
                                         topic.append(s.PrefixUpto(p));
                                         partition = v;
-                                } else
+					partition_specified = true;
+                                } else {
                                         topic.append(s);
+				}
 
                                 if (!IsBetweenRangeInclusive<uint32_t>(topic.size(), 1, 240)) {
                                         Print("Inalid topic name '", topic, "'\n");
@@ -172,31 +210,38 @@ int main(int argc, char *argv[]) {
                                         return 1;
                                 }
 
+				partition_specified = true;
                                 partition = v;
                         } break;
 
                         case 'h':
                         help:
-                                Print(app, " [common options] command [command options] [command arguments]\n");
-                                Print("Common options include:\n");
-                                Print("-b broker endpoint: The endpoint of the Tank broker. If not specified, assumed localhost:11011\n");
-                                Print("-t topic: The selected topic\n");
-                                Print("-p partition: The selected partition\n");
-                                Print("-S bytes: set tank client's socket send buffer size\n");
-                                Print("-R bytes: set tank client's socket receive buffer size\n");
-                                Print("-v : enable verbose output\n");
-                                Print("Commands available: consume, produce, benchmark, discover_partitions, mirror, create_topic, reload_config\n");
+				Print("Usage: ", app, " <settings> [other common options] <command> [args]\n");
+				Print("\nSettings:\n");
+				Print(Buffer{}.append(align_to(5), "-b broker endpoint"_s32, align_to(32), "The endpoint of the TANK broker. If not specified, the default is localhost:11011"_s32), "\n");
+				Print(Buffer{}.append(align_to(5), "-t topic"_s32, align_to(32), "Selected topic"_s32), "\n");
+				Print(Buffer{}.append(align_to(5), "-p partition"_s32, align_to(32), "Selected partition. You can also use -t topic/partition to specify both the topic and the partition with -t"_s32), "\n");
+
+				Print("\nOther common options:\n");
+				Print(Buffer{}.append(align_to(5), "-S bytes"_s32, align_to(32), "Sets TANK Client's socket send buffer size"_s32), "\n");
+				Print(Buffer{}.append(align_to(5), "-R bytes"_s32, align_to(32), "Sets TANK Client's socket receive buffer size"_s32), "\n");
+				Print(Buffer{}.append(align_to(5), "-v"_s32, align_to(32), "Enables Verbose output"_s32), "\n");
+
+				Print("\nCommands:\n");
+				Print(Buffer{}.append(align_to(5), "consume"_s32, align_to(32), "Consumes content from partition"_s32), "\n");
+				Print(Buffer{}.append(align_to(5), "produce"_s32, align_to(32), "Produce content(events, messages) to partition"_s32), "\n");
+				Print(Buffer{}.append(align_to(5), "benchmark"_s32, align_to(32), "Benchmark TANK"_s32), "\n");
+				Print(Buffer{}.append(align_to(5), "discover_partitions"_s32, align_to(32), "Enumerates all defined topic's partitions"_s32), "\n");
+				Print(Buffer{}.append(align_to(5), "create_topic"_s32, align_to(32), "Creates a new topic"_s32), "\n");
+				Print(Buffer{}.append(align_to(5), "mirror"_s32, align_to(32), "Mirror partitions across TANK nodes"_s32), "\n");
+				Print(Buffer{}.append(align_to(5), "reload_config"_s32, align_to(32), "Reload per-topic configuration"_s32), "\n");
+				Print(Buffer{}.append(align_to(5), "status"_s32, align_to(32), "Displays service status"_s32), "\n");
                                 return 0;
 
                         default:
                                 Print("Please use ", app, " -h for options\n");
                                 return 1;
                 }
-        }
-
-        if (!topic.size()) {
-                Print("Topic not specified. Use -t to specify topic\n");
-                return 1;
         }
 
         argc -= optind;
@@ -210,19 +255,36 @@ int main(int argc, char *argv[]) {
                         tank_client.set_default_leader(":11011"_s32);
                 }
         } catch (const std::exception &e) {
-                Print("Invalid broker endpoint specified '", endpoint, "':", e.what(), "\n");
+                Print("The broker endpoint \"", endpoint, "\" endpoint specified is invalid.\n");
+		Print("Examples of valid endpoints include:\n");
+		Print(Buffer{}.append(align_to(5), "localhost:11011"_s32), "\n");
+		Print(Buffer{}.append(align_to(5), ":11011"_s32), "\n");
+		Print(Buffer{}.append(align_to(5), "127.0.0.1:11011"_s32), "\n");
+		Print(Buffer{}.append(align_to(5), "127.0.0.1"_s32), "\n");
                 return 1;
         }
 
         if (!argc) {
-                Print("Command not specified. Please use ", app, " -h for available commands\n");
+		Print("Command was not specified. Please run ", app, " for a list of all available commands.\n");
                 return 1;
         }
 
         const strwlen32_t                 cmd(argv[0]);
+
+        if (topic.empty()) {
+                if (!cmd.Eq(_S("status"))) {
+                        Print("Topic was not specified. Use ", ansifmt::bold, "-t", ansifmt::reset, " to specify the topic name\n");
+                        return 1;
+                }
+        }
+
         const TankClient::topic_partition topicPartition(topic.AsS8(), partition);
         const auto                        consider_fault = [](const TankClient::fault &f) {
                 switch (f.type) {
+                        case TankClient::fault::Type::UnsupportedReq:
+                                Print("Unable to process request. Service likely running in cluster-aware mode?\n");
+                                break;
+
                         case TankClient::fault::Type::BoundaryCheck:
                                 Print("Boundary Check fault. first available sequence number is ", f.ctx.firstAvailSeqNum, ", high watermark is ", f.ctx.highWaterMark, "\n");
                                 break;
@@ -236,12 +298,16 @@ int main(int argc, char *argv[]) {
                                 break;
 
                         case TankClient::fault::Type::Access:
-                                Print("Access error\n");
+                                Print("Access Error\n");
                                 break;
 
                         case TankClient::fault::Type::SystemFail:
                                 Print("System Error\n");
                                 break;
+
+			case TankClient::fault::Type::InsufficientReplicas:
+				Print("Insufficient Replicas\n");
+				break;
 
                         case TankClient::fault::Type::InvalidReq:
                                 Print("Invalid Request\n");
@@ -253,6 +319,10 @@ int main(int argc, char *argv[]) {
 
                         case TankClient::fault::Type::AlreadyExists:
                                 Print("Already Exists\n");
+                                break;
+
+                        case TankClient::fault::Type::Timeout:
+                                Print("Timeout\n");
                                 break;
 
                         default:
@@ -267,31 +337,41 @@ int main(int argc, char *argv[]) {
                         Key,
                         Content,
                         TS,
+			TS_MS,
                         Size
                 };
-                uint8_t   displayFields{1u << uint8_t(Fields::Content)};
-                size_t    defaultMinFetchSize{128 * 1024 * 1024};
-                uint32_t  pendingResp{0};
-                bool      statsOnly{false}, asKV{false};
-                IOBuffer  buf;
-                range64_t time_range{0, UINT64_MAX};
-                bool      drainAndExit{false};
-                uint64_t  endSeqNum{UINT64_MAX};
-		str_view32 filter;
+                uint8_t    displayFields{1u << uint8_t(Fields::Content)};
+                size_t     defaultMinFetchSize{128 * 1024 * 1024};
+                uint32_t   pendingResp{0};
+                bool       statsOnly{false}, asKV{false};
+                IOBuffer   buf;
+                range64_t  time_range{0, UINT64_MAX};
+                bool       drain_and_exit{false};
+                uint64_t   endSeqNum{UINT64_MAX};
+                str_view32 filter;
+                uint64_t   msgs_limit = std::numeric_limits<uint64_t>::max();
+
+                if (1 == argc) {
+			goto help_get;
+		}
 
                 optind = 0;
-                while ((r = getopt(argc, argv, "+SF:hBT:KdE:s:f:")) != -1) {
+                while ((r = getopt(argc, argv, "+SF:hBT:KdE:s:f:l:")) != -1) {
                         switch (r) {
-				case 'f':
-					filter.set(optarg);
+				case 'l':
+					msgs_limit = str_view32(optarg).as_uint64();
 					break;
+
+                                case 'f':
+                                        filter.set(optarg);
+                                        break;
 
                                 case 'E':
                                         endSeqNum = strwlen32_t(optarg).AsUint64();
                                         break;
 
                                 case 'd':
-                                        drainAndExit = true;
+                                        drain_and_exit = true;
                                         break;
 
                                 case 'K':
@@ -321,7 +401,7 @@ int main(int argc, char *argv[]) {
                                                         s.set_end(p);
                                                         c = '-';
                                                         break;
-                                                } else if (*p == '.') {
+                                                } else if (*p == '.' && p[1] == '.') {
                                                         const auto _p = p;
 
                                                         for (++p; p < e && *p == '.'; ++p) {
@@ -343,13 +423,13 @@ int main(int argc, char *argv[]) {
 
                                         time_range.offset = parse_timestamp(s);
                                         if (!time_range.offset) {
-                                                Print("Failed to parse ", s, "\n");
+                                                Print("Failed to parse timestamp ", s, "\n");
                                                 return 1;
                                         }
 
                                         if (c == '-') {
                                                 if (const auto end = parse_timestamp(s2); !end) {
-                                                        Print("Failed to parse ", s2, "\n");
+                                                        Print("Failed to parse timestamp ", s2, "\n");
 
                                                         return 1;
                                                 } else {
@@ -388,6 +468,7 @@ int main(int argc, char *argv[]) {
                                         }
                                 } break;
 
+
                                 case 'S':
                                         statsOnly = true;
                                         break;
@@ -395,17 +476,19 @@ int main(int argc, char *argv[]) {
                                 case 'F':
                                         displayFields = 0;
                                         for (const auto it : strwlen32_t(optarg).Split(',')) {
-                                                if (it.Eq(_S("seqnum")))
+                                                if (it.Eq(_S("seqnum"))) {
                                                         displayFields |= 1u << uint8_t(Fields::SeqNum);
-                                                else if (it.Eq(_S("key")))
+                                                } else if (it.Eq(_S("key"))) {
                                                         displayFields |= 1u << uint8_t(Fields::Key);
-                                                else if (it.Eq(_S("content")))
+                                                } else if (it.Eq(_S("content"))) {
                                                         displayFields |= 1u << uint8_t(Fields::Content);
-                                                else if (it.Eq(_S("ts")))
+                                                } else if (it.Eq(_S("ts"))) {
                                                         displayFields |= 1u << uint8_t(Fields::TS);
-                                                else if (it.Eq(_S("size")))
+                                                } else if (it.Eq(_S("size"))) {
                                                         displayFields |= 1u << uint8_t(Fields::Size);
-                                                else {
+						} else if (it.Eq(_S("ts_ms"))) {
+                                                        displayFields |= 1u << uint8_t(Fields::TS_MS);
+                                                } else {
                                                         Print("Unknown field '", it, "'\n");
                                                         return 1;
                                                 }
@@ -413,28 +496,29 @@ int main(int argc, char *argv[]) {
                                         break;
 
                                 case 'h':
-                                        Print("CONSUME [options] [from]\n");
-                                        Print("Consumes/retrieves messages from Tank\n");
-					Print("From(sequence number) is required unless -T is used\n");
-                                        Print("Options include:\n");
-                                        Print("-F display format: Specify a ',' separated list of message properties to be displayed. Properties include: \"seqnum\", \"key\", \"content\", \"ts\". By default, only the content is displayed\n");
-                                        Print("-S: statistics only\n");
-					Print("-f string: filter messages by string, i.e only considers messages where their content includes that string\n");
-                                        Print("-E seqNum: Stop at sequence number specified\n");
-                                        Print("-d: drain and exit. As soon as all available messages have been consumed, exit (i.e do not tail)\n");
-                                        Print("-T: optionally, filter all consumes messages by specifying a time range\n");
-					Print("  You can use -T to select an absolute timestamp, using `-T timestamp`, a time range using `-T start-end`, or a start time and an offset using `-T start+span`, where span is a number followed by either S(for seconds), M(for minutes), H(for hours), or D(for days).\n");
-					Print("  Examples:\n");
-					Print("    -T 2018090115:20:30 : The first message's timestamp will >= that time\n");
-					Print("    -T 2018090115:20:30-2018090520:10:30 : The first message's timestamp will >= that time, and the last message's timestamp will be < the second timestamp\n");
-					Print("    -T 2018090100:00:00-24h : Will read all messages in 24 hours starting from that timesamp\n");
-					Print("    -T T-1h+2m : Will read the first 2 minutes worth of messages starting from 1 hour ago\n");
-					Print("  Currently, the only supported timestamp format notations are YYYYMMDDHH:MM:SS and T-n(S|H|M|D). More formats may be supported in the future\n");
-					Print("  tank-cli will use binary search to quickly determine the appropriate sequence number\n");
-                                        Print("\"from\" specifies the first message we are interested in.\n");
-                                        Print("If from is \"beginning\" or \"start\","
-                                              " it will start consuming from the first available message in the selected topic. If it is \"eof\" or \"end\", it will "
-                                              "tail the topic for newly produced messages, otherwise it must be an absolute 64bit sequence number\n");
+					help_get:
+					Print("Usage: ", app, " get [options] <start-spec>\n");
+					Print(Buffer{}.append(left_aligned(5, "Consumes/retrieves messages from the specified TANK <topic>/<partition>.\n\nBy default, the retrieved messages content will be displayed in stdout, but you can optionally specify a different display format or use the -S option for display of statistics related to the events retrieved.\n\nIt will begin reading starting from <start-spec>\n<start-spec> can be \"EOF\" (so that it will begin reading from the end of the partition, effectively, \"tailing\" the partition), or a sequence number. If the -T option is used, <start-spec> can be ommitted(if it is specified togeher with -T, <start-spec> is ignored)."_s32, 76)), "\n");
+
+					Print("\nOptions:\n\n"_s32);
+					Print(Buffer{}.append(align_to(3), "-F <format>"_s32), "\n");
+					Print(Buffer{}.append(left_aligned(5, "Specify a comma separated fields to be displayed\nOverrides the default display(only content) and accepts the following valid field names: 'seqnum', 'key', 'content', 'ts'"_s32, 76)), "\n\n");
+					
+					
+					Print(Buffer{}.append(align_to(3), "-S"_s32), "\n");
+					Print(Buffer{}.append(left_aligned(5, "Displays statistics about retrieved messages instead of the messages themselves"_s32, 76)), "\n\n");
+
+					Print(Buffer{}.append(align_to(3), "-l <limit>"_s32), "\n");
+					Print(Buffer{}.append(left_aligned(5, "Limit number of messages output"_s32,  76)), "\n\n");
+
+					Print(Buffer{}.append(align_to(3), "-E <sequence number>"_s32), "\n");
+					Print(Buffer{}.append(left_aligned(5, "When specified, it will stop as soon as it processes a message with seqnumber number >= the specified sequence number"_s32,  76)), "\n\n");
+						
+					Print(Buffer{}.append(align_to(3), "-d"_s32, "\n"));
+					Print(Buffer{}.append(left_aligned(5, "When specified, it will stop as soon as the partition has been drained. That is, as soon as a consume request returns no more messages"_s32, 76)), "\n\n");
+
+					Print(Buffer{}.append(align_to(3), "-T <spec>"_s32, "\n"));
+					Print(Buffer{}.append(left_aligned(5, "With this option, you can specify the beginning and optionally the end of the range of messages to consume by time, as opposed to by sequence number.\nThe <spec> supports three different notations:\n   <start>\n   <start>-<end>\n   <start>+<span>\n\nFor <start> and <end> you can either use T[-[N(DHMS)]] to denote the current wall time (optionally offsetting by a specified amount), or you can specify it using [YYYY][[.][MM][[.][DD][[@]HH[:[MM][:SS]]]]] notation.\n<span> can be represented as <countUNIT> where count unit is either (s, h, m, w) for seconds, hours, minutes, weeks.\n\nExamples:\n   -T 2018.09.15@20:30: The first message's timestamp shall be >= that specified time\n   -T 2018.09.15@20:30-2018.09.20@10:30: The first message's timestamp shall be>= the specified start time and the last message's timestamp shall be <= the specified end time\n   -T T-1h+2m: Th first message's timestamp shall be >= 1 hour ago and the last message's timestamp shall be <= 2 minutes past that specified start time\n\nThis tool will use binary search to quickly determine the sequence number of a message that is close to the message specified by the start time and then it will use linear search to advance to the appropriate message."_s32, 76)), "\n\n");
                                         return 0;
 
                                 default:
@@ -445,10 +529,10 @@ int main(int argc, char *argv[]) {
                 argc -= optind;
                 argv += optind;
 
-		if (time_range.offset) {
-			// not required, we 'll determine it based on binary search triangulation
-			next = 0;
-		} else if (!argc) {
+                if (time_range.offset) {
+                        // not required, we 'll determine it based on binary search triangulation
+                        next = 0;
+                } else if (!argc) {
                         Print("Expected sequence number to begin consuming from. Please see ", app, " consume -h\n");
                         return 1;
                 } else {
@@ -461,12 +545,13 @@ int main(int argc, char *argv[]) {
                         else if (!from.IsDigits()) {
                                 Print("Expected either \"beginning\", \"end\" or a sequence number for -f option\n");
                                 return 1;
-                        } else
-                                next = from.AsUint64();
+                        } else {
+                                next = from.as_uint64();
+                        }
                 }
 
-                size_t     totalMsgs{0}, sumBytes{0};
-                auto       minFetchSize = defaultMinFetchSize;
+                size_t totalMsgs{0}, sumBytes{0};
+                auto   minFetchSize = defaultMinFetchSize;
 
                 if (const auto seek_ts = time_range.offset) {
                         // @robert's idea
@@ -501,8 +586,11 @@ int main(int argc, char *argv[]) {
                                 if (!tank_client.discovered_partitions().empty()) {
                                         const auto &it = tank_client.discovered_partitions().front();
 
-                                        EXPECT(tank_client.discovered_partitions().size() == 1);
-                                        EXPECT(it.topic == topicPartition.first);
+                                        TANK_EXPECT(tank_client.discovered_partitions().size() == 1);
+                                        if (unlikely(it.topic != topicPartition.first)) {
+                                                Print("Unexpected topic [", it.topic, "] does not match [", topicPartition.first, "]\n");
+                                                std::abort();
+                                        }
 
                                         if (topicPartition.second >= it.watermarks.size()) {
                                                 Print("Partition of '", topicPartition.first, "' is not defined\n");
@@ -541,9 +629,9 @@ int main(int argc, char *argv[]) {
                                         ++iterations;
                                         for (uint32_t req_id{0}, fetch_size{32 * 1024};;) {
                                                 if (!req_id) {
-							if (trace) {
-								SLog("At ", mid, " ", fetch_size, "\n");
-							}
+                                                        if (trace) {
+                                                                SLog("At ", mid, " ", fetch_size, "\n");
+                                                        }
 
                                                         req_id = tank_client.consume_from(topicPartition, mid, fetch_size, 0, 0);
                                                         if (!req_id) {
@@ -581,7 +669,7 @@ int main(int argc, char *argv[]) {
                                                         continue;
                                                 }
 
-                                                EXPECT(tank_client.consumed().size() == 1);
+                                                TANK_EXPECT(tank_client.consumed().size() == 1);
 
                                                 const auto &it = tank_client.consumed().front();
 
@@ -630,9 +718,9 @@ int main(int argc, char *argv[]) {
                         if (!pendingResp) {
                                 if (verbose) {
                                         Print("Requesting from ", next, "\n");
-				}
+                                }
 
-                                pendingResp = tank_client.consume({{topicPartition, {next, minFetchSize}}}, drainAndExit ? 0 : 8e3, 0);
+                                pendingResp = tank_client.consume({{topicPartition, {next, minFetchSize}}}, drain_and_exit ? 0 : 8e3, 0);
 
                                 if (!pendingResp) {
                                         Print("Unable to issue consume request. Will abort\n");
@@ -661,14 +749,21 @@ int main(int argc, char *argv[]) {
                                 pendingResp = 0;
                         }
 
-			if (tank_client.consumed().empty()) {
-				continue;
+                        if (tank_client.consumed().empty()) {
+                                continue;
+                        }
+
+			if (verbose) {
+				SLog("consumed ", tank_client.consumed().size(), "\n");
 			}
 
-
-			pendingResp = 0;
+                        pendingResp = 0;
                         for (const auto &it : tank_client.consumed()) {
-                                if (drainAndExit && it.msgs.empty() && minFetchSize >= it.next.minFetchSize) {
+				if (verbose) {
+					SLog("Drained:", it.drained, "\n");
+				}
+
+                                if (drain_and_exit && it.drained) {
                                         // Drained if we got no message in the response, and if the size we specified
                                         // is <= next.minFetchSize. This is important because we could get no messages
                                         // because the message is so large the minFetchSize we provided for the request was too low
@@ -690,7 +785,11 @@ int main(int argc, char *argv[]) {
 
                                                                         Print(m->seqNum, ": ", size_repr(m->content.size()), "\n");
                                                                         sumBytes += m->content.len + m->key.len + sizeof(uint64_t);
-                                                                        ++totalMsgs;
+
+                                                                        if (++totalMsgs == msgs_limit) {
+										goto out;
+									}
+										
                                                                 } else if (m->ts >= time_range_end) {
                                                                         should_abort = true;
                                                                 }
@@ -704,7 +803,11 @@ int main(int argc, char *argv[]) {
                                                                         }
 
                                                                         sumBytes += m->content.len + m->key.len + sizeof(uint64_t);
-                                                                        ++totalMsgs;
+
+                                                                        if (++totalMsgs == msgs_limit) {
+										goto out;
+									}
+
                                                                 } else if (m->ts >= time_range_end) {
                                                                         should_abort = true;
                                                                 }
@@ -720,21 +823,29 @@ int main(int argc, char *argv[]) {
 
                                                 if (verbose) {
                                                         for (const auto m : it.msgs) {
-								if (filter && !m->content.Search(filter.data(), filter.size())) {
-									continue;
-								}
+                                                                if (filter && !m->content.Search(filter.data(), filter.size())) {
+                                                                        continue;
+                                                                }
 
                                                                 Print(m->seqNum, ": ", size_repr(m->content.size()), "\n");
                                                                 sumBytes += m->content.len + m->key.len + sizeof(uint64_t);
+
+                                                                        if (++totalMsgs == msgs_limit) {
+										goto out;
+									}
                                                         }
                                                 } else {
                                                         for (const auto m : it.msgs) {
-								if (filter && !m->content.Search(filter.data(), filter.size())) {
-									continue;
-								}
+                                                                if (filter && !m->content.Search(filter.data(), filter.size())) {
+                                                                        continue;
+                                                                }
 
                                                                 sumBytes += m->content.len + m->key.len + sizeof(uint64_t);
-                                                        }
+
+								if (++totalMsgs == msgs_limit) {
+									goto out;
+								}
+							}
                                                 }
                                         }
                                 } else {
@@ -778,19 +889,39 @@ int main(int argc, char *argv[]) {
                                                         if (asKV) {
                                                                 buf.append(m->seqNum, " [", m->key, "] = [", m->content, "]");
                                                         } else if (displayFields) {
-                                                                if (displayFields & (1u << uint8_t(Fields::TS)))
+                                                                if (displayFields & (1u << uint8_t(Fields::TS))) {
                                                                         buf.append(Date::ts_repr(Timings::Milliseconds::ToSeconds(m->ts)), ':');
-                                                                if (displayFields & (1u << uint8_t(Fields::SeqNum)))
+								}
+
+                                                                if (displayFields & (1u << uint8_t(Fields::TS_MS))) {
+                                                                        buf.append(m->ts, ':');
+								}
+
+                                                                if (displayFields & (1u << uint8_t(Fields::SeqNum))) {
                                                                         buf.append("seq=", m->seqNum, ':');
-                                                                if (displayFields & (1u << uint8_t(Fields::Size)))
+								}
+
+                                                                if (displayFields & (1u << uint8_t(Fields::Size))) {
                                                                         buf.append("size=", m->content.size(), ':');
-                                                                if (displayFields & (1u << uint8_t(Fields::Content)))
+								}
+
+								if (displayFields & (1u << unsigned(Fields::Key))) {
+									buf.append('[', m->key, "]:"_s32);
+								}
+
+                                                                if (displayFields & (1u << uint8_t(Fields::Content))) {
                                                                         buf.append(m->content);
+								}
+
                                                         } else {
                                                                 buf.append(m->content);
                                                         }
 
                                                         buf.append('\n');
+
+								if (++totalMsgs == msgs_limit) {
+									break;
+								}
                                                 }
                                         }
 
@@ -808,7 +939,7 @@ int main(int argc, char *argv[]) {
                                                 } while (s);
                                         }
 
-                                        if (should_abort) {
+                                        if (should_abort || totalMsgs >= msgs_limit) {
                                                 goto out;
                                         }
                                 }
@@ -821,20 +952,64 @@ int main(int argc, char *argv[]) {
         out:
                 if (statsOnly) {
                         Print(dotnotation_repr(totalMsgs), " messages consumed in ", duration_repr(Timings::Microseconds::Since(b)), ", ", size_repr(sumBytes), " consumed\n");
+                }
+
+	} else if (cmd.Eq(_S("status"))) {
+                optind = 0;
+                while ((r = getopt(argc, argv, "h")) != -1) {
+                        switch (r) {
+                                case 'h':
+                                        Print("Usage ", app, " status\n");
+                                        Print(Buffer{}.append(left_aligned(5, "Outputs service status"_s32, 76)), "\n");
+					return 0;
+
+                                default:
+                                        return 1;
+                        }
+                }
+                argc -= optind;
+                argv += optind;
+
+		const auto req_id = tank_client.service_status();
+
+		if (!req_id) {
+			Print("Unable to schedule service status request\n");
+			return 1;
 		}
 
+                while (tank_client.should_poll()) {
+                        tank_client.poll(1000);
+
+                        for (const auto &it : tank_client.faults()) {
+                                consider_fault(it);
+                        }
+
+                        for (const auto &it : tank_client.statuses()) {
+                                Print(Buffer{}.append("Topics"_s32, align_to(12), dotnotation_repr(it.counts.topics)), "\n");
+                                Print(Buffer{}.append("Partitions"_s32, align_to(12), dotnotation_repr(it.counts.partitions)), "\n");
+
+                                if (it.cluster_name.len) {
+                                        Print(Buffer{}.append("Nodes"_s32, align_to(12), dotnotation_repr(it.counts.nodes)), "\n");
+                                        Print(Buffer{}.append("Cluster"_s32, align_to(12), str_view32(it.cluster_name.data, it.cluster_name.len)), "\n");
+                                }
+                        }
+                }
+
+                return 0;
         } else if (cmd.Eq(_S("create_topic"))) {
                 Buffer config;
+
+		if (1 == argc) {
+			goto help_create_topic;
+		}
 
                 optind = 0;
                 while ((r = getopt(argc, argv, "+ho:")) != -1) {
                         switch (r) {
                                 case 'h':
-                                        Print("create_topic [options] total_partitions\n");
-                                        Print("Will create a new topic named '", topicPartition.first, "', with total_partitions total partitions\n");
-                                        Print("Options include:\n");
-                                        Print("-o config-options: A ',' separated list of key=value options, that will be stored in the configuration of the new topic\n");
-                                        Print("\tSee https://github.com/phaistos-networks/TANK/wiki/Configuration for available configuration options\n");
+					help_create_topic:
+					Print("Usage ", app, " create_topic [total partitions]\n");
+					Print(Buffer{}.append(left_aligned(5, "Creates a new topic, with `total partitions` topics in the range of [0, total partitions)\n\nIf the TANK endpooint is operating in cluster aware mode, no more than 64 parititions will be created.\nThis is an API limitation which will be lifted in forthcoming releases."_s32, 76), "\n"));
                                         return 0;
 
                                 case 'o':
@@ -879,11 +1054,12 @@ int main(int argc, char *argv[]) {
                 while (tank_client.should_poll()) {
                         tank_client.poll(1e3);
 
-                        for (const auto &it : tank_client.faults())
+                        for (const auto &it : tank_client.faults()) {
                                 consider_fault(it);
+                        }
 
                         for (const auto &it : tank_client.created_topics()) {
-                                require(it.clientReqId == reqId);
+                                TANK_EXPECT(it.clientReqId == reqId);
                                 Print("Created topic ", ansifmt::bold, it.topic, ansifmt::reset, "\n");
                         }
                 }
@@ -907,12 +1083,13 @@ int main(int argc, char *argv[]) {
                                         break;
 
                                 case 'h':
-                                        Print("mirror [options] endpoint\n");
-                                        Print("Will mirror the selected topic's partitions to the broker identified by <endpoint>.\n");
-                                        Print("You should have created the partitions(directories) in the destination before you attempt to mirror from source to destination.\n");
-                                        Print("Options include:\n");
-                                        Print("-C cnt: Each bundle produced will contain no more that `cnt` messages. Default is ", bundleMsgsSetCntThreshold, "\n");
-                                        Print("-S size: Each bundle produced will be no larger(in terms of bytes) than `size` bytes. Default is ", bundleMsgsSetSizeThreshold, "\n");
+					Print("Usage: ", app, " mirror [options] endpoint\n");
+					Print(Buffer{}.append(left_aligned(5, "Mirrors either 1 or all selected topic's partitions from the selected broker to <endpoint>.\nThe topic and partitions to be mirrored must be defined in the destination endpoint before attempting to mirror them from the source.\nIf you specify the partition explicitly using -p or <topic>/<partition> notation, then only that partition will be mirrored, otherwise all partitions will be mirrored."_s32, 86)), "\n");
+					Print("\nOptions:\n\n"_s32);
+					Print(Buffer{}.append(align_to(3), "-C <count>"_s32), "\n");
+					Print(Buffer{}.append(left_aligned(5, "Specify the size of bundles in messages. A bundle will not contain more than <count> messages. Default is 1"_s32, 76)), "\n\n");
+					Print(Buffer{}.append(align_to(3), "-S <size>"_s32), "\n");
+					Print(Buffer{}.append(left_aligned(5, "Specify the size of bundles in bytes. Produces bundles will not be larger than <size> bytes."_s32, 76)), "\n\n");
                                         return 0;
 
                                 case 'C':
@@ -951,8 +1128,9 @@ int main(int argc, char *argv[]) {
                         return 1;
                 }
 
-                if (verbose)
+                if (verbose) {
                         Print("Discovering partitions\n");
+                }
 
                 // Discover partitions first
                 reqId1 = tank_client.discover_partitions(topicPartition.first);
@@ -967,21 +1145,25 @@ int main(int argc, char *argv[]) {
                         return 1;
                 }
 
-                struct partition_ctx {
+                struct partition_ctx final {
                         uint16_t id;
                         bool     pending;
                         uint64_t nextBase, last;
                         uint64_t next;
+			uint32_t fetch_size;
                 };
 
-                simple_allocator                                                                                       allocator{4096};
-                uint16_t                                                                                               srcPartitionsCnt{0};
-                std::unordered_map<uint16_t, partition_ctx *>                                                          map;
-                std::vector<partition_ctx *>                                                                           pending;
-                std::vector<std::pair<TankClient::topic_partition, std::pair<uint64_t, uint32_t>>>                     inputs;
-                std::vector<std::pair<TankClient::topic_partition, std::vector<TankClient::msg>>>                      outputs;
-                std::vector<std::pair<TankClient::topic_partition, std::pair<uint64_t, std::vector<TankClient::msg>>>> outputsForBase;
-                std::vector<uint8_t>                                                                                   outputsOrder;
+                simple_allocator                                                                           allocator{4096};
+                std::unordered_map<uint16_t, partition_ctx *>                                              map;
+                std::vector<partition_ctx *>                                                               pending;
+                std::vector<std::pair<TankClient::topic_partition, std::pair<uint64_t, uint32_t>>>         inputs;
+                std::vector<uint8_t>                                                                       outputsOrder;
+                uint16_t                                                                                   src_partitions_cnt{0};
+                std::vector<std::pair<TankClient::topic_partition, std::vector<TankClient::consumed_msg>>> collected_withseqnum;
+                std::vector<std::pair<TankClient::topic_partition, std::vector<TankClient::msg>>>          collected;
+                std::vector<bool>                                                                          collections_tracker;
+                static constexpr bool                                                                      trace{false};
+		static constexpr size_t min_fetch_size = 16 * 1024 * 1024;
 
                 while (tank_client.should_poll()) {
                         tank_client.poll(1e3);
@@ -991,16 +1173,25 @@ int main(int argc, char *argv[]) {
                                 return 1;
                         }
 
-                        if (tank_client.discovered_partitions().size()) {
+                        if (!tank_client.discovered_partitions().empty()) {
                                 const auto &v = tank_client.discovered_partitions().front();
 
-                                require(v.clientReqId == reqId1);
-                                srcPartitionsCnt = v.watermarks.len;
+                                TANK_EXPECT(v.clientReqId == reqId1);
+                                src_partitions_cnt = v.watermarks.size();
 
-                                if (verbose)
-                                        Print("Discovered topics from source\n");
+                                if (verbose) {
+                                        Print("Discovered ", src_partitions_cnt, " partitions from source\n");
+                                }
                         }
                 }
+
+                partition_ctx **all{nullptr};
+
+                DEFER({
+                        if (all) {
+                                std::free(all);
+                        }
+                });
 
                 while (dest.should_poll()) {
                         dest.poll(1e3);
@@ -1010,51 +1201,86 @@ int main(int argc, char *argv[]) {
                                 return 1;
                         }
 
-                        if (dest.discovered_partitions().size()) {
+                        if (!dest.discovered_partitions().empty()) {
                                 const auto &v = dest.discovered_partitions().front();
+                                const auto  n = v.watermarks.size();
 
-                                require(v.clientReqId == reqId2);
-                                pending.reserve(v.watermarks.len);
-                                for (const auto p : v.watermarks) {
-                                        auto partition = allocator.Alloc<partition_ctx>();
+                                TANK_EXPECT(v.clientReqId == reqId2);
 
-                                        partition->id       = pending.size();
-                                        partition->pending  = true;
-                                        partition->nextBase = UINT64_MAX;
-                                        partition->last     = 0;
-                                        partition->next     = p->second + 1;
-                                        pending.push_back(partition);
-                                        map.insert({partition->id, partition});
+                                pending.reserve(n);
+                                if (n) {
+                                        all = static_cast<partition_ctx **>(malloc(sizeof(partition_ctx *) * n));
                                 }
 
-                                if (verbose)
-                                        Print("Discovered topics from dest\n");
+                                for (unsigned i = 0; i < v.watermarks.size(); ++i) {
+                                        if (!partition_specified || partition == i) {
+                                                const auto p         = v.watermarks.offset + i;
+                                                auto       partition = allocator.Alloc<partition_ctx>();
+
+                                                if (verbose) {
+                                                        Print("From source(accept) ", i, " from ", p->second + 1, "\n");
+                                                }
+
+                                                partition->id         = i;
+                                                partition->pending    = true;
+                                                partition->nextBase   = UINT64_MAX;
+                                                partition->last       = 0;
+                                                partition->next       = p->second + 1;
+                                                partition->fetch_size = min_fetch_size;
+
+                                                pending.emplace_back(partition);
+                                                all[partition->id] = partition;
+                                                map.emplace(partition->id, partition);
+                                        }
+                                }
+
+                                if (verbose) {
+                                        Print("Discovered ", map.size(), " partitions from dest\n");
+                                }
                         }
                 }
 
                 if (pending.empty()) {
                         Print("No partitions discovered - nothing to mirror\n");
                         return 1;
-                } else if (srcPartitionsCnt != pending.size()) {
-                        Print("Partitions mismatch, ", dotnotation_repr(srcPartitionsCnt), " partitions discovered in source, ", dotnotation_repr(pending.size()), " in destination\n");
+		}
+
+		if (partition_specified) {
+			if (partition >= src_partitions_cnt) {
+				Print("Selected partition invalid. Available partitions in source broker [0, "_s32, src_partitions_cnt, ")\n");
+				return 1;
+			} 
+
+			if (map.empty()) {
+				Print("Selected partition invalid. Not specified in the destination broker\n");
+				return 1;
+			}
+		} else if (map.size() != src_partitions_cnt) {
+                        Print("Total partitions mismatch, ", dotnotation_repr(src_partitions_cnt), " partitions discovered on source, ", dotnotation_repr(map.size()), " partitions discovered on destination\n");
                         return 1;
                 }
 
-                Print("Will now mirror ", dotnotation_repr(srcPartitionsCnt), " partitions of ", ansifmt::bold, topicPartition.first, ansifmt::reset, "\n");
+                Print("Will now mirror ", dotnotation_repr(map.size()), " partitions of ", ansifmt::bold, topicPartition.first, ansifmt::reset, "\n");
                 Print("You can safely abort mirroring by stoping this tank-cli process (e.g CTRL-C or otherwise). Next mirror session will pick up mirroring from where this session ended\n");
 
                 for (reqId1 = 0;;) {
-                        if (!reqId1 && pending.size() && !dest.should_poll()) {
+                        if (!reqId1 && !pending.empty() && !dest.should_poll()) {
                                 inputs.clear();
                                 for (const auto it : pending) {
-                                        if (verbose)
+                                        if (verbose) {
                                                 Print("Scheduling for partition ", it->id, " from ", it->next, "\n");
+                                        }
 
                                         it->pending = false;
-                                        inputs.push_back({{topicPartition.first, it->id}, {it->next, 4 * 1024 * 1024}});
+                                        inputs.emplace_back(
+                                            std::make_pair(TankClient::topic_partition{
+                                                               topicPartition.first,
+                                                               it->id},
+                                                           std::make_pair(it->next, it->fetch_size)));
                                 }
 
-                                reqId1 = tank_client.consume(inputs, 4e3, 1);
+                                reqId1 = tank_client.consume(inputs, 100, 1);
+
                                 if (!reqId1) {
                                         Print("Failed to issue consume request\n");
                                         return 1;
@@ -1063,136 +1289,198 @@ int main(int argc, char *argv[]) {
                                 pending.clear();
                         }
 
-                        if (tank_client.should_poll()) {
-                                tank_client.poll(1e2);
+                        tank_client.poll(8000);
 
-                                if (tank_client.faults().size()) {
-                                        for (const auto &it : tank_client.faults())
+                        if (!tank_client.faults().empty()) {
+                                for (const auto &it : tank_client.faults()) {
+                                        if (it.type == TankClient::fault::Type::BoundaryCheck) {
+                                                auto       partition = all[it.partition];
+                                                const auto to        = it.adjust_seqnum_by_boundaries(partition->next);
+
+                                                if (verbose) {
+                                                        Print("Adjusted seqnunce number for partition from ", it.partition, " ", partition->next, " => ", to, "\n");
+                                                }
+
+                                                partition->next = to;
+                                                if (!partition->pending) {
+                                                        partition->pending = true;
+                                                        pending.emplace_back(partition);
+                                                }
+                                        } else {
                                                 consider_fault(it);
-
-                                        return 1;
+                                                return 1;
+                                        }
                                 }
 
-                                if (tank_client.consumed().size()) {
-                                        outputs.clear();
-                                        outputsForBase.clear();
-                                        outputsOrder.clear();
-
-                                        for (const auto &it : tank_client.consumed()) {
-                                                auto partition = map[it.partition];
-
-                                                if (it.msgs.len) {
-                                                        std::vector<TankClient::msg> msgs;
-                                                        size_t                       sum{0};
-                                                        auto                         first = it.msgs.offset->seqNum;
-
-                                                        msgs.reserve(it.msgs.len);
-                                                        for (const auto m : it.msgs) {
-                                                                if (msgs.size() == bundleMsgsSetCntThreshold || sum > bundleMsgsSetSizeThreshold) {
-                                                                        if (partition->nextBase != first) {
-                                                                                outputsForBase.push_back({{topicPartition.first, it.partition}, {first, std::move(msgs)}});
-                                                                                outputsOrder.push_back(1);
-                                                                        } else {
-                                                                                outputs.push_back({{topicPartition.first, it.partition}, std::move(msgs)});
-                                                                                outputsOrder.push_back(0);
-                                                                        }
-                                                                        partition->nextBase = partition->last + 1;
-
-                                                                        sum = 0;
-                                                                        msgs.clear();
-                                                                        first = m->seqNum;
-                                                                }
-
-                                                                sum += m->key.len + m->content.len + 32;
-                                                                partition->last = m->seqNum;
-                                                                msgs.push_back({m->content, m->ts, m->key});
-                                                        }
-
-                                                        if (partition->nextBase != first) {
-                                                                outputsForBase.push_back({{topicPartition.first, it.partition}, {first, std::move(msgs)}});
-                                                                partition->nextBase = partition->last + 1;
-                                                                outputsOrder.push_back(1);
-                                                        } else {
-                                                                outputs.push_back({{topicPartition.first, it.partition}, std::move(msgs)});
-                                                                outputsOrder.push_back(0);
-                                                        }
-                                                } else {
-                                                        // could have been if timed out
-                                                        if (!partition->pending) {
-                                                                partition->pending = true;
-                                                                pending.push_back(partition);
-                                                        }
-                                                }
-
-                                                partition->next = it.next.seqNum;
-                                        }
-
-                                        // we need to do this in order
-                                        if (outputsOrder.size()) {
-                                                uint32_t   outputsIt{0}, outputsForBaseIt{0};
-                                                const auto end = outputsOrder.end();
-
-                                                for (auto it = outputsOrder.begin(); it != end;) {
-                                                        const auto base = it;
-                                                        const auto t    = *it;
-
-                                                        for (++it; it != end && *it == t; ++it)
-                                                                continue;
-
-                                                        const auto span = it - base;
-
-                                                        switch (t) {
-                                                                case 0:
-                                                                        reqId2 = dest.produce(outputs.data() + outputsIt, span);
-                                                                        outputsIt += span;
-                                                                        break;
-
-                                                                case 1:
-                                                                        reqId2 = dest.produce_with_base(outputsForBase.data() + outputsForBaseIt, span);
-                                                                        outputsForBaseIt += span;
-                                                                        break;
-                                                        }
-
-                                                        if (!reqId2) {
-                                                                Print("Failed to produce to destination\n");
-                                                                return 1;
-                                                        }
-                                                }
-                                        }
-                                        reqId1 = 0;
-                                }
+                                reqId1 = 0;
                         }
 
-                        if (dest.should_poll()) {
-                                dest.poll(1e2);
+                        if (tank_client.consumed().empty()) {
+                                continue;
+                        }
 
-                                if (dest.faults().size()) {
-                                        for (const auto &it : dest.faults())
-                                                consider_fault(it);
+                        reqId1 = 0;
+                        collected.clear();
+                        collected_withseqnum.clear();
+                        collections_tracker.clear();
 
+
+                        for (const auto &it : tank_client.consumed()) {
+                                const auto partition = all[it.partition];
+                                const auto n         = it.msgs.size();
+
+				partition->fetch_size = std::max<size_t>(min_fetch_size, it.next.minFetchSize);
+
+                                if (0 == n) {
+                                        if (!partition->pending) {
+                                                partition->pending = true;
+                                                pending.emplace_back(partition);
+                                        }
+
+                                        continue;
+                                }
+
+                                const auto data     = it.msgs.offset;
+                                auto       expected = partition->last + 1;
+
+                                if (trace) {
+                                        SLog("n = ", n, ", expected = ", expected, "\n");
+                                }
+
+                                TANK_EXPECT(it.topic);
+                                for (size_t i{0}; i < n;) {
+                                        size_t     sum         = 0;
+                                        const auto upto        = std::min<size_t>(n, i + bundleMsgsSetCntThreshold);
+                                        bool       need_sparse = false;
+                                        auto       k           = i;
+
+                                        // need to figure out if we are going
+                                        // to need a *sparse* bundle or not here
+                                        do {
+                                                const auto &m = data[k];
+
+                                                need_sparse |= (expected != m.seqNum);
+                                                expected = m.seqNum + 1;
+
+                                                sum += m.key.size() + m.content.size();
+                                        } while (++k < upto && sum < bundleMsgsSetSizeThreshold);
+
+                                        const auto span = k - i;
+
+                                        if (trace && false) {
+                                                SLog("span = ", span, ", need_sparse = ", need_sparse, "\n");
+                                        }
+
+                                        if (need_sparse) {
+                                                std::vector<TankClient::consumed_msg> msgs;
+
+                                                msgs.reserve(span);
+                                                while (i < k) {
+                                                        msgs.emplace_back(data[i++]);
+                                                }
+
+                                                TANK_EXPECT(!msgs.empty());
+                                                collected_withseqnum.emplace_back(std::make_pair(std::make_pair(it.topic, it.partition), std::move(msgs)));
+                                                collections_tracker.emplace_back(true);
+                                        } else {
+                                                std::vector<TankClient::msg> msgs;
+
+                                                msgs.reserve(span);
+                                                do {
+                                                        const auto &m = data[i++];
+
+                                                        msgs.emplace_back(TankClient::msg{
+                                                            .content = m.content,
+                                                            .ts      = m.ts,
+                                                            .key     = m.key});
+                                                } while (i < k);
+
+                                                TANK_EXPECT(!msgs.empty());
+                                                collected.emplace_back(std::make_pair(
+                                                    std::make_pair(it.topic, it.partition), std::move(msgs)));
+
+                                                collections_tracker.emplace_back(false);
+                                        }
+                                }
+
+
+                                partition->last       = data[n - 1].seqNum;
+                                partition->next       = it.next.seqNum;
+                        }
+
+                        const auto cnt = collections_tracker.size();
+                        uint32_t   collected_i{0}, collected_withseqnum_i{0};
+
+                        TANK_EXPECT(cnt == collected.size() + collected_withseqnum.size());
+
+                        if (trace) {
+                                SLog("cnt = ", cnt, "\n");
+                        }
+
+                        // we need to do this in order
+                        // for now, we can't guarantee that they will be processed in order and in sequence, rather they will
+                        // likely be processed in parallel, and thus, we can't guarantee that the messages will be persisted in the correct order
+                        // so for now, we 'll just do it one request/time.
+                        // We may support chaining requests in the future in the client though
+                        for (size_t i = 0; i < cnt;) {
+                                const auto base = i;
+                                const auto b    = collections_tracker[i];
+                                uint32_t   req_id;
+
+                                do {
+                                        //
+                                } while (++i < cnt && collections_tracker[i] == b);
+
+                                const auto span = i - base;
+
+                                if (trace) {
+                                        SLog("FOR ", static_cast<bool>(b), " ", span, "\n");
+                                }
+
+                                if (b) {
+                                        req_id = dest.produce_with_seqnum(collected_withseqnum.data() + collected_withseqnum_i, span);
+                                        collected_withseqnum_i += span;
+                                } else {
+                                        req_id = dest.produce(collected.data() + collected_i, span);
+                                        collected_i += span;
+                                }
+
+                                if (!req_id) {
+                                        Print("Failed to produce to destination\n");
                                         return 1;
                                 }
 
-                                for (const auto &it : dest.produce_acks()) {
-                                        const auto partition = it.partition;
-                                        auto       p         = map[partition];
+                                while (dest.should_poll()) {
+                                        dest.poll(1000);
 
-                                        if (!p->pending) {
-                                                p->pending = true;
-                                                pending.push_back(p);
+                                        if (!dest.faults().empty()) {
+                                                for (const auto &it : dest.faults()) {
+                                                        consider_fault(it);
+                                                }
+                                                return 1;
+                                        }
+
+                                        for (const auto &it : dest.produce_acks()) {
+                                                const auto partition = it.partition;
+                                                auto       p         = all[partition];
+
+                                                if (!p->pending) {
+                                                        p->pending = true;
+                                                        pending.emplace_back(p);
+                                                }
                                         }
                                 }
                         }
                 }
 
                 return 0;
-	} else if (cmd.BeginsWith(_S("reload_conf"))) {
-		const auto req_id= tank_client.reload_partition_conf(topicPartition.first, topicPartition.second);
+        } else if (cmd.BeginsWith(_S("reload_conf"))) {
+                const auto req_id = tank_client.reload_partition_conf(topicPartition.first, topicPartition.second);
 
-		if (!req_id) {
-			Print("Unable to schedule partition configuration reload request\n");
-			return 1;
-		}
+                if (!req_id) {
+                        Print("Unable to schedule partition configuration reload request\n");
+                        return 1;
+                }
 
                 while (tank_client.should_poll()) {
                         tank_client.poll(1e3);
@@ -1202,7 +1490,7 @@ int main(int argc, char *argv[]) {
                         }
 
                         for (const auto &it : tank_client.reloaded_partition_configs()) {
-				Print("Reloaded configuration of ", it.topic, "/", it.partition, "\n");
+                                Print("Reloaded configuration of ", it.topic, "/", it.partition, "\n");
                         }
                 }
 
@@ -1218,32 +1506,22 @@ int main(int argc, char *argv[]) {
                 while (tank_client.should_poll()) {
                         tank_client.poll(1e3);
 
-                        for (const auto &it : tank_client.faults())
+                        for (const auto &it : tank_client.faults()) {
                                 consider_fault(it);
+                        }
 
                         for (const auto &it : tank_client.discovered_partitions()) {
-                                uint16_t i{0};
-
-                                EXPECT(it.clientReqId == reqId);
-
-
-#if defined(SWITCH_PHAISTOS) || 1
+                                uint16_t   i{0};
                                 text_table tt;
 
-				tt.set_headers("Partition", "First Available", "Last Assigned");
-				for (const auto wm : it.watermarks) {
-					tt.add_row(i++, wm->first, wm->second);
-				}
+                                TANK_EXPECT(it.clientReqId == reqId);
 
-				Print(tt.draw());
-#else
-                                Print(dotnotation_repr(it.watermarks.len), " partitions for '", topicPartition.first, "'\n");
+                                tt.set_headers("Partition", "First Available", "Last Assigned");
+                                for (const auto wm : it.watermarks) {
+                                        tt.add_row(i++, wm->first, wm->second);
+                                }
 
-                                Print(ansifmt::bold, "Partition", ansifmt::set_col(10), "First Available", ansifmt::set_col(30), "Last Assigned", ansifmt::reset, "\n");
-                                for (const auto wm : it.watermarks)
-                                        Print(ansifmt::bold, i++, ansifmt::reset, ansifmt::set_col(10), dotnotation_repr(wm->first), ansifmt::set_col(30), dotnotation_repr(wm->second), "\n");
-#endif
-
+                                Print(tt.draw());
                         }
                 }
 
@@ -1253,11 +1531,28 @@ int main(int argc, char *argv[]) {
                 size_t   bundleSize{1};
                 bool     asSingleMsg{false}, asKV{false};
                 uint64_t baseSeqNum{0};
+		uint64_t seqnum_advance_step{1}, ts_advance_step{0};
+		bool verbose{false};
+
+		if (1 == argc) {
+			goto help_produce;
+		}
 
                 optind  = 0;
                 path[0] = '\0';
-                while ((r = getopt(argc, argv, "+s:f:F:hS:K")) != -1) {
+                while ((r = getopt(argc, argv, "+s:f:F:hS:Ka:t:v")) != -1) {
                         switch (r) {
+				case 't':
+					ts_advance_step = str_view32(optarg).as_uint64();
+					break;
+
+				case 'a':
+					seqnum_advance_step = str_view32(optarg).as_uint64();
+					if (!seqnum_advance_step) {
+						Print("Invalid seqnum_advance_step\n");
+					}
+					break;
+
                                 case 'K':
                                         asKV = true;
                                         break;
@@ -1274,6 +1569,10 @@ int main(int argc, char *argv[]) {
                                         }
                                         break;
 
+				case 'v':
+					verbose = true;
+					break;
+
                                 case 'F':
                                         asSingleMsg = true;
                                 case 'f': {
@@ -1285,13 +1584,30 @@ int main(int argc, char *argv[]) {
                                 } break;
 
                                 case 'h':
-                                        Print("PRODUCE [options] [message1 message2...]\n");
-                                        Print("Produce messages to Tank\n");
-                                        Print("Options include:\n");
-                                        Print("-s number: The bundle size; how many messages to be grouped into a bundle before producing that to the broker. Default is 1, which means each new message is published as a single bundle\n");
-                                        Print("-f file: The messages are read from `file`, which is expected to contain the mesasges in every new line. The `file` can be \"-\" for stdin. If this option is provided, the messages list is ignored\n");
-                                        Print("-F file: Like '-f file', except that the contents of the file will be stored as a single message\n");
-                                        Print("-K: treat each message in the message list as a key=value pair, instead of as the content(value) of a message\n");
+				help_produce:
+					Print("Usage: ", app, " produce [options] <messages list>\n");
+					Print(Buffer{}.append(left_aligned(5, "Produces 1 or more messages to the specific TANK <topic>/<partition>"_s32, 76)), "\n");
+
+					Print("\nOptions:\n\n"_s32);
+					Print(Buffer{}.append(align_to(3), "-s size"_s32), "\n");
+					Print(Buffer{}.append(left_aligned(5, "The bundle size; how many messages to be grouped into one bundle before producing that to the broker\nThe default value is 1, which means each new message published into its own bundle"_s32, 76)), "\n\n");
+
+					Print(Buffer{}.append(align_to(3), "-f file"_s32), "\n");
+					Print(Buffer{}.append(left_aligned(5, "The messages are read from `file`, which is expected to contain one message per line. You can use \"-\" for stdin.\nIf this option is set, the messages list is ignored"_s32, 76)), "\n\n");
+
+
+					Print(Buffer{}.append(align_to(3), "-F file"_s32), "\n");
+					Print(Buffer{}.append(left_aligned(5, "Like -f, except that the contents of the file are treated a single message"_s32, 76)), "\n\n");
+
+					Print(Buffer{}.append(align_to(3), "-K"_s32), "\n");
+					Print(Buffer{}.append(left_aligned(5, "Treat each message in the messages list as a key=value pair, instead of as content(value) of a message"_s32, 76)), "\n\n");
+
+					Print(Buffer{}.append(align_to(3), "-S sequence number"_s32), "\n");
+					Print(Buffer{}.append(left_aligned(5, "Explicitly sets the base sequence number\nThis is useful for creating sparse bundles"_s32, 76)), "\n\n");
+
+					Print(Buffer{}.append(align_to(3), "-v"_s32), "\n");
+					Print(Buffer{}.append(left_aligned(5, "Displays profiler timings"_s32, 76)), "\n");
+
                                         return 1;
 
                                 default:
@@ -1306,6 +1622,7 @@ int main(int argc, char *argv[]) {
                 std::vector<TankClient::msg> msgs;
                 size_t                       pendingAckAcnt{0};
                 std::set<uint32_t>           pendingResps;
+		size_t total{0}, requests{0};
                 const auto                   poll = [&]() {
                         tank_client.poll(8e2);
 
@@ -1314,23 +1631,40 @@ int main(int argc, char *argv[]) {
                                 if (retry && it.type == TankClient::fault::Type::Network) {
                                         Timings::Milliseconds::Sleep(400);
                                         pendingResps.clear();
-                                } else
+                                } else {
                                         return false;
+                                }
                         }
 
-                        for (const auto &it : tank_client.produce_acks())
+                        for (const auto &it : tank_client.produce_acks()) {
                                 pendingResps.erase(it.clientReqId);
+                        }
 
                         return true;
                 };
                 const auto publish_msgs = [&]() {
                         uint32_t reqId;
 
-                        if (verbose)
-                                Print("Publishing ", msgs.size(), " messages\n");
-
+                        total += msgs.size();
                         if (baseSeqNum) {
-                                reqId      = tank_client.produce_with_base({{topicPartition, {baseSeqNum, msgs}}});
+                                std::vector<TankClient::consumed_msg>                                                      all;
+                                uint64_t                                                                                   next = baseSeqNum;
+                                std::vector<std::pair<TankClient::topic_partition, std::vector<TankClient::consumed_msg>>> v;
+
+                                all.reserve(msgs.size());
+                                for (const auto &it : msgs) {
+                                        all.emplace_back(TankClient::consumed_msg{
+                                            .seqNum  = next,
+                                            .key     = it.key,
+                                            .ts      = it.ts,
+                                            .content = it.content,
+                                        });
+
+                                        next += seqnum_advance_step;
+                                }
+
+                                v.emplace_back(std::make_pair(topicPartition, std::move(all)));
+                                reqId      = tank_client.produce_with_seqnum(v);
                                 baseSeqNum = 0;
                         } else {
                                 reqId = tank_client.produce({{topicPartition, msgs}});
@@ -1339,15 +1673,18 @@ int main(int argc, char *argv[]) {
                         if (!reqId) {
                                 Print("Failed to schedule messages to broker\n");
                                 return false;
-                        } else
+                        } else {
                                 pendingResps.insert(reqId);
+                        }
 
+                        ++requests;
                         pendingAckAcnt += msgs.size();
 
                         if (pendingAckAcnt >= pollInterval) {
                                 while (tank_client.should_poll()) {
-                                        if (!poll())
+                                        if (!poll()) {
                                                 return false;
+                                        }
                                 }
 
                                 pendingAckAcnt = 0;
@@ -1382,6 +1719,7 @@ int main(int argc, char *argv[]) {
                         }
 
                         const auto consider_input = [&](const bool last) {
+				auto ts = Timings::Milliseconds::SysTime();
 
                                 while (range) {
                                         s.Set(buf + range.offset, range.len);
@@ -1391,14 +1729,17 @@ int main(int argc, char *argv[]) {
                                                 auto           data = (char *)malloc(n);
 
                                                 memcpy(data, s.p, n);
-                                                msgs.push_back({{data, n}, Timings::Milliseconds::SysTime(), {}});
+                                                msgs.push_back({{data, n}, ts, {}});
                                                 range.TrimLeft(n + 1);
+
+						ts += ts_advance_step;
 
                                                 if (msgs.size() == bundleSize) {
                                                         const auto r = publish_msgs();
 
-                                                        for (auto &it : msgs)
+                                                        for (auto &it : msgs) {
                                                                 std::free(const_cast<char *>(it.content.p));
+							}
 
                                                         msgs.clear();
 
@@ -1412,22 +1753,27 @@ int main(int argc, char *argv[]) {
                                 if (last && msgs.size()) {
                                         const auto r = publish_msgs();
 
-                                        for (auto &it : msgs)
+                                        for (auto &it : msgs) {
                                                 std::free(const_cast<char *>(it.content.p));
+					}
 
                                         msgs.clear();
 
-                                        if (!r)
+                                        if (!r) {
                                                 return false;
+					}
                                 }
 
-                                if (!range)
+                                if (!range) {
                                         range.reset();
+				}
 
                                 return true;
                         };
 
                         range.reset();
+
+			const auto before = Timings::Microseconds::Tick();
 
                         if (asSingleMsg) {
                                 IOBuffer content;
@@ -1458,8 +1804,9 @@ int main(int argc, char *argv[]) {
                                 if (!reqId) {
                                         Print("Failed to schedule messages to broker\n");
                                         return 1;
-                                } else
+                                } else {
                                         pendingResps.insert(reqId);
+                                }
                         } else {
                                 for (;;) {
                                         const auto capacity = bufSize - range.stop();
@@ -1482,41 +1829,58 @@ int main(int argc, char *argv[]) {
                         }
 
                         while (tank_client.should_poll()) {
-                                if (!poll())
+                                if (!poll()) {
                                         return 1;
+                                }
                         }
+
+			if (verbose) {
+				Print("Took ", duration_repr(Timings::Microseconds::Since(before)), " for ", dotnotation_repr(total), " messages, ", dotnotation_repr(requests), " requests\n");
+			}
                 } else if (!argc) {
                         Print("No messages specified, and no input file was specified with -f. Please see ", app, " produce -h\n");
                         return 1;
                 } else {
+			const auto before = Timings::Microseconds::Tick();
+			auto ts = Timings::Milliseconds::SysTime();
+
                         for (uint32_t i{0}; i != argc; ++i) {
                                 if (asKV) {
                                         const strwlen32_t s(argv[i]);
-                                        const auto        r = s.Divided('=');
+                                        const auto        r = s.divided('=');
 
-                                        msgs.push_back({r.second, Timings::Milliseconds::SysTime(), {r.first.p, uint8_t(r.first.len)}});
+                                        msgs.push_back({r.second, ts, {r.first.p, uint8_t(r.first.len)}});
                                 } else {
-                                        msgs.push_back({strwlen32_t(argv[i]), Timings::Milliseconds::SysTime(), {}});
+                                        msgs.push_back({strwlen32_t(argv[i]), ts, {}});
                                 }
 
+                                ts += ts_advance_step;
                                 if (msgs.size() == bundleSize) {
-                                        if (!publish_msgs())
+                                        if (!publish_msgs()) {
                                                 return 1;
+                                        }
+
                                         msgs.clear();
                                 }
                         }
 
                         if (msgs.size()) {
-                                if (!publish_msgs())
+                                if (!publish_msgs()) {
                                         return 1;
+                                }
 
                                 msgs.clear();
                         }
 
                         while (tank_client.should_poll()) {
-                                if (!poll())
+                                if (!poll()) {
                                         return 1;
+				}
                         }
+
+			if (verbose) {
+				Print("Took ", duration_repr(Timings::Microseconds::Since(before)), " for ", dotnotation_repr(total), " messages, ", dotnotation_repr(requests), " requests\n");
+			}
                 }
         } else if (cmd.Eq(_S("benchmark")) || cmd.Eq(_S("bm"))) {
                 optind = 0;
@@ -1573,7 +1937,7 @@ int main(int argc, char *argv[]) {
                                         case 'h':
                                                 Print("Performs a produce to consumer via Tank latency test. It will produce messages while also 'tailing' the selected topic and will measure how long it takes for the messages to reach the broker, stored, forwarded to the client and received\n");
                                                 Print("Options include:\n");
-                                                Print("-s message contrent length (default 11 bytes)\n");
+                                                Print("-s message content length (default 11 bytes)\n");
                                                 Print("-c total messages to publish (default 1 message)\n");
                                                 Print("-R: do not compress bundle\n");
                                                 Print("-B: batch size(default 1)\n");
@@ -1588,7 +1952,7 @@ int main(int argc, char *argv[]) {
 
                         auto *p = (char *)malloc(size + 16);
 
-                        Defer({ free(p); });
+                        DEFER({ free(p); });
 
                         // A mostly random collection of bytes for each message
                         for (uint32_t i{0}; i != size; ++i)
@@ -1601,8 +1965,6 @@ int main(int argc, char *argv[]) {
                                 Print("Unable to schedule consumer request\n");
                                 return 1;
                         }
-
-                        Defer({ free(p); });
 
                         msgs.reserve(cnt);
 

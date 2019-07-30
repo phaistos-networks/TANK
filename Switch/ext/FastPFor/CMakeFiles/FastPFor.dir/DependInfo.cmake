@@ -8,7 +8,7 @@ set(CMAKE_DEPENDS_CHECK_C
   "/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/src/streamvbyte.c" "/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/FastPFor.dir/src/streamvbyte.c.o"
   "/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/src/varintdecode.c" "/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/FastPFor.dir/src/varintdecode.c.o"
   )
-set(CMAKE_C_COMPILER_ID "GNU")
+set(CMAKE_C_COMPILER_ID "Clang")
 
 # The include file search paths:
 set(CMAKE_C_TARGET_INCLUDE_PATH
@@ -22,7 +22,7 @@ set(CMAKE_DEPENDS_CHECK_CXX
   "/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/src/simdbitpacking.cpp" "/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/FastPFor.dir/src/simdbitpacking.cpp.o"
   "/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/src/simdunalignedbitpacking.cpp" "/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/FastPFor.dir/src/simdunalignedbitpacking.cpp.o"
   )
-set(CMAKE_CXX_COMPILER_ID "GNU")
+set(CMAKE_CXX_COMPILER_ID "Clang")
 
 # The include file search paths:
 set(CMAKE_CXX_TARGET_INCLUDE_PATH

@@ -6,7 +6,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 set(CMAKE_DEPENDS_CHECK_CXX
   "/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/src/partitionbylength.cpp" "/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/partitionbylength.dir/src/partitionbylength.cpp.o"
   )
-set(CMAKE_CXX_COMPILER_ID "GNU")
+set(CMAKE_CXX_COMPILER_ID "Clang")
 
 # The include file search paths:
 set(CMAKE_CXX_TARGET_INCLUDE_PATH

@@ -1,0 +1,22 @@
+#pragma once
+#include "service.h"
+#include <ansifmt.h>
+#include <compress.h>
+#include <csignal>
+#include <date.h>
+#include <fcntl.h>
+#include <fs.h>
+#include <future>
+#include <random>
+#include <set>
+#include <switch_mallocators.h>
+#include <sys/stat.h>
+#include <sys/uio.h>
+#include <text.h>
+#include <thread>
+#include <timings.h>
+#include <unordered_set>
+#include <unistd.h>
+#ifndef LEAN_SWITCH
+#include <switch_debug.h>
+#endif

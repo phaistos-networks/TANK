@@ -1,0 +1,17 @@
+reset_consul.sh
+stress2.sh
+stress.sh
+tank
+tank-cli
+test_client
+test_service
+*.a
+*.o
+CLUSTER.TODO.md
+cluster_invariants.md
+etcd.readme
+notes.local
+notes.md
+conversation.jay
+CLUSTER_AWARE_TODO.md
+.git

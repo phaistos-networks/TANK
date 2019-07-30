@@ -351,6 +351,10 @@ struct strwithlen {
                 p   = ptr;
         }
 
+        constexpr void set(const CT *const ptr) {
+		set(ptr, strlen(ptr));
+        }
+
         typename std::enable_if<std::is_same<char, CT>::value>::type Set(const char *const ptr) {
                 p = ptr;
                 SetLengthExpl(strlen((char *)p));

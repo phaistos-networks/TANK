@@ -6,7 +6,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 set(CMAKE_DEPENDS_CHECK_CXX
   "/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/src/inmemorybenchmark.cpp" "/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/inmemorybenchmark.dir/src/inmemorybenchmark.cpp.o"
   )
-set(CMAKE_CXX_COMPILER_ID "GNU")
+set(CMAKE_CXX_COMPILER_ID "Clang")
 
 # The include file search paths:
 set(CMAKE_CXX_TARGET_INCLUDE_PATH

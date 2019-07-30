@@ -1,13 +1,20 @@
-/*
- *	(C) Phaistos Networks, S.A
- *	http://phaistosnetworks.gr/
- *
- *	Licensed under Apache 2 License
- */
 #pragma once
 #include <switch.h>
 
-#define TANK_VERSION (0 * 100 + 77)
+#define TANK_RUNTIME_CHECKS 1
+
+#ifdef TANK_RUNTIME_CHECKS
+#define TANK_EXPECT(...) EXPECT(__VA_ARGS__)
+#define TANK_NOEXCEPT_IF_NORUNTIME_CHECKS
+#else
+#define TANK_EXPECT(...) \
+        do {             \
+        } while (0)
+#define TANK_NOEXCEPT_IF_NORUNTIME_CHECKS noexcept
+#endif
+
+#define MAKE_TANK_RELEASE(major, minor) ((major)*100 + (minor))
+#define TANK_VERSION (MAKE_TANK_RELEASE(2, 1))
 
 // All kind of if (trace) SLog() calls here, for checks and for debugging. Will be stripped out later
 
@@ -24,10 +31,10 @@ namespace TankFlags {
 }
 
 enum class TankAPIMsgType : uint8_t {
-        Produce    = 0x1,
-        Consume    = 0x2,
-        Ping       = 0x3,
-        RegReplica = 0x4,
+        Produce               = 0x1,
+        Consume               = 0x2,
+        Ping                  = 0x3,
+        __obsolete_RegReplica = 0x4,
 
         // Same as Produce, except that the seq.num of the first msg of the first bundle is going to
         // be explicitly encoded in the request.
@@ -39,8 +46,52 @@ enum class TankAPIMsgType : uint8_t {
         //
         // For example, if the earliest available segment for a partition in origin has a baseSeqNum (1000) (i.e not 1), and we consume from it
         // in order to mirror to another node, and that node has no data for that partition, it will create a new segment with baseSeqNum(0), not 1.
-        ProduceWithBaseSeqNum = 0x5,
-        DiscoverPartitions    = 0x6,
-        CreateTopic           = 0x7,
-        ReloadConf            = 0x8,
+        ProduceWithSeqnum  = 0x5,
+        DiscoverPartitions = 0x6,
+        CreateTopic        = 0x7,
+        ReloadConf         = 0x8,
+        ConsumePeer        = 0x9,
+        Status             = 10,
 };
+
+namespace TANKUtil {
+        template <typename T>
+        inline T minimum(const T &t) noexcept {
+                return t;
+        }
+        template <typename T, typename... P>
+        inline auto minimum(const T &t, const P &... p) noexcept {
+                using res_type = std::common_type_t<T, P...>;
+
+                return std::min(res_type(t), res_type(minimum(p...)));
+        }
+
+	// TODO: figure out a better name
+	namespace produce_request_acks { 
+		// Require ack from all nodes in ISR
+		inline uint8_t ISR() noexcept {
+			return 0;
+		}
+
+		// Require ack from (all nodes in ISR / 2 + 1)
+		inline uint8_t ISR_quorum() noexcept {
+			return 255;
+		}
+
+		inline uint8_t value(const uint8_t v) {
+			TANK_EXPECT(v != ISR());
+			TANK_EXPECT(v != ISR_quorum());
+			return v;
+		}
+	}
+
+	// we need this to guard agains race condition which stem from our deferred _now updates
+	inline constexpr uint32_t time32_delta(const time32_t start, const time32_t end) {
+		return end >= start ? end - start : 0;
+	}
+
+
+	// saniy check
+	static_assert(time32_delta(0, 10) == 10);
+	static_assert(time32_delta(11, 10) == 0);
+} // namespace TANKUtil

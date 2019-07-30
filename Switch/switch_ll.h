@@ -1,7 +1,18 @@
+/*
+ *	switch_ll.h
+ *
+ *	Linked lists
+ *
+ *	TODO: cleanup lists mess(switch_lists.h, containers_fast.h)
+ * 	containers_fast.h is based on the Linux Kernel LL
+ *	switch_ll.h is based on lockless, inc. allocator
+ *
+ *	Use switch_dlist whenever possible as oposed to using (next,prev) for each member - enqueue / dequue operations are cmp free, among other features availed by this API
+ */
 #pragma once
 #include "switch_compiler_aux.h"
 
-struct switch_slist {
+struct switch_slist final {
         struct switch_slist *next;
 };
 
@@ -31,8 +42,37 @@ inline bool switch_slist_any(const switch_slist *const l) {
         return l->next != l;
 }
 
-struct switch_dlist {
+/*
+ * If you visualize a ring, whereas each new list node exists in the ring, understanding the operation semantics immediately makes sense
+ *
+ */
+struct switch_dlist final {
         switch_dlist *prev, *next;
+
+        struct iterator final {
+                const switch_dlist *it;
+
+                auto &operator++() noexcept {
+                        it = it->next;
+			return *this;
+                }
+
+                auto operator*() const noexcept {
+                        return it;
+                }
+
+                bool operator!=(const iterator &o) const noexcept {
+                        return it != o.it;
+                }
+        };
+
+        auto begin() const noexcept {
+		return iterator{.it = next};
+	}
+
+	auto end() const noexcept {
+		return iterator{.it = this};
+	}
 
         void push_back(switch_dlist *const a) noexcept {
                 // See switch_dlist_insert_after()
@@ -66,10 +106,28 @@ struct switch_dlist {
                 dp->next = dn;
         }
 
-        void detach_and_reset() noexcept {
-                detach();
-                reset();
-        }
+	bool try_detach() noexcept {
+		if (!empty()) {
+			detach();
+			return true;
+		} else {
+			return false;
+		}
+	}
+
+	void detach_and_reset() noexcept {
+		detach();
+		reset();
+	}
+
+	bool try_detach_and_reset() noexcept {
+		if (!empty()) {
+			detach_and_reset();
+			return true;
+		} else {
+			return false;
+		}
+	}
 
         constexpr void reset() noexcept {
                 next = this;
@@ -88,6 +146,8 @@ struct switch_dlist {
                 return res;
         }
 };
+
+#define LL_ContainerPtr(ContainerType, LLMemberName, llPtr) switch_list_entry(ContainerType, LLMemberName, llPtr)
 
 static inline void switch_dlist_init(switch_dlist *const l) {
         assume(l);
@@ -192,6 +252,7 @@ static inline uint32_t switch_dlist_size(const switch_dlist *const l) {
         return n;
 }
 
+// Src: folly/folly/AtomicIntrusiveLinkedList.h
 template <typename T>
 static inline auto reverseSinglyList(T *h) {
         T *rh{nullptr};
@@ -205,6 +266,9 @@ static inline auto reverseSinglyList(T *h) {
         }
         return rh;
 }
+
+// See https://youtu.be/o8NPllzkFhE?t=14m35s
+// for Torvalds's implementation of singly list removal algo.
 
 #ifdef __clang__
 #pragma GCC diagnostic push
@@ -226,3 +290,4 @@ static inline auto reverseSinglyList(T *h) {
 #ifdef __clang__
 #pragma GCC diagnostic pop
 #endif
+

@@ -934,8 +934,9 @@ class Buffer {
         void DeleteChunk(const uint32_t pos, uint32_t gapLength) {
                 WillUpdate();
 
-                if (gapLength + pos > length_)
+                if (gapLength + pos > length_) {
                         gapLength = length_ - pos;
+		}
 
                 if (gapLength > 0) {
                         memmove(buffer + pos, buffer + pos + gapLength, length_ - pos - gapLength);
@@ -1631,3 +1632,32 @@ static inline void PrintImpl(Buffer &out, const std::string &s) {
         out.Append(s.data(), s.size());
 }
 
+// https://github.com/facebook/infer/issues/1130
+// until this bug is fixed, and if you plan to use infer, switch to the 
+// values_repr() function branch
+template <typename T>
+struct values_repr final {
+        const T *const s;
+        const T *const e;
+        const char     sep;
+
+        values_repr(const T *a, const uint32_t cnt, const char s = ',') noexcept
+            : s{a}, e{a + cnt}, sep{s} {
+        }
+};
+
+template <typename T>
+static inline void PrintImpl(Buffer &out, const values_repr<T> &r) {
+        const auto *it = r.s;
+        const auto  e  = r.e;
+
+        if (it != e) {
+                const auto sep = r.sep;
+
+                PrintImpl(out, *it);
+                for (++it; it < e; ++it) {
+                        out.append(sep);
+                        PrintImpl(out, *it);
+                }
+        }
+}
