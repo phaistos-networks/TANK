@@ -51,12 +51,12 @@ void Service::gen_partition_nodes_updates(topic_partition **list, const size_t n
         std::priority_queue<tracked_node *, std::vector<tracked_node *>, decltype(tracked_node_replicas_cmp)> pq_for_replicas{tracked_node_replicas_cmp};
         static constexpr size_t                                                                               leadership_threshold = std::numeric_limits<size_t>::max();
         static constexpr size_t                                                                               replica_threshold    = std::numeric_limits<size_t>::max();
-        std::unordered_map<cluster_node *, uint16_t>                                                          map;
-        std::unordered_map<topic_partition *, uint16_t>                                                       map2, map3;
+        robin_hood::unordered_map<cluster_node *, uint16_t>                                                          map;
+        robin_hood::unordered_map<topic_partition *, uint16_t>                                                       map2, map3;
         std::vector<tracked_node *>                                                                           deferred_push;
         std::vector<topic_partition *>                                                                        choose_leader;
         std::unordered_set<nodeid_t>                                                                          set;
-        std::unordered_map<nodeid_t, tracked_node *>                                                          nodes_map;
+        robin_hood::unordered_map<nodeid_t, tracked_node *>                                                          nodes_map;
 
         // we need to _first_ release replicas
         // and _then try to bind replicas because we may haven't been able to do that before

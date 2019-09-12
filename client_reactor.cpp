@@ -406,7 +406,7 @@ bool TankClient::process_srv_in(connection *const c) {
                 TANK_EXPECT(p <= e);
 
                 if (unlikely(p + sizeof(uint8_t) + sizeof(uint32_t) > e)) {
-                        return true;
+			break;
                 }
 
                 const auto msg = decode_pod<uint8_t>(p);

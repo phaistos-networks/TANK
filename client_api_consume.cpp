@@ -8,10 +8,9 @@ TankClient::broker_outgoing_payload *TankClient::build_consume_broker_req_payloa
         auto                  b       = payload->b;
         auto                  api_req = broker_req->api_req;
 
-	if (trace)  {
-		SLog("Building CONSUME request payload for ", broker_req->partitions_list.size(), " partitions\n");
-	}
-	  
+        if (trace) {
+                SLog("Building CONSUME request payload for ", broker_req->partitions_list.size(), " partitions\n");
+        }
 
         TANK_EXPECT(b);
 
@@ -74,9 +73,77 @@ uint32_t TankClient::consume(const std::vector<std::pair<topic_partition,
         static constexpr bool trace{false};
         // fan-out: api_req will coordinate broker api requests
         // NOTE: get_api_request() will update now_ms
-	// TODO: need something more sophisticated for api request's TTL other than max_wait + 1s here. 
-	//	it is arbitrary and confusing. Maybe we should just respect max_wait and just use that even if it's low
-        auto                                                      api_req = get_api_request(max_wait ? max_wait + 1000 : 20 * 1000);
+
+        // We can have the client reactor track the api request for expiration (i.e
+        // after max_wait or so, and if the API request hasn't been processed yet/is still around,
+        // then reactor will explicitly abort it with a timeout error), or not. We can do that
+        // by specifying a timeout in get_api_request() > 0.
+        //
+        // The problem with that otherwise good idea is that there are TANK client applications that may
+        // block for a substantial amount of time between invoking an consume method and invoking poll() - which
+        // is when the reactor runs and gets to check timeouts, network I/O etc - and that can result in
+        // the reactor aborting the API request before TANK (service) even got to process it, just because
+        // it's been too long since it was submitted via get_api_request()
+        // Example:
+        // {
+        //	const auto req_id = tank_client.consume_from(, .. max_wait = 1000, ...);
+        // 	slow_bootstrap_function();
+        //	for (;;)  {   // application main event loop
+        //	 	if (!req_id) { req_id = tank_client.consume_from(); }
+        //		tank_client.poll(1000);
+        //	}
+        // }
+        // In this example, the application first issues a consume request, then intializes state via slow_bootstrap_function()
+        // which is the recommended way to initialize state that may be persisted locally and process all events that
+        // may affect that state since boostrap commenced.
+        // The problem is, if slow_bootstrap_function() takes say over 1s then as soon as tank_client.poll() is executed,
+        // the reactor will likely abort the api request via check_pending_api_responses() because it's been too long
+        // and the request hasn't been ready yet.
+        //
+        // Example:
+        // {
+        //	for (;;) {// application main event loop
+        //		if (!req_id) { req_id = tank_client.consume_from(.., max_wait = 1000, ...); }
+        //
+        //		tank_client.poll(8000);
+        //
+        //		if (!tank_client.faults.empty()) {
+        //			process_faults(tank_client);
+        //			req_id = 0;
+        // 		}
+        //
+        //		if (tank_client.consumed().empty()) { continue; }
+        //
+        // 		for (const auto &part : tank_client.consumed()) {
+        //			for (const auto m : part.msgs()) {
+        //				process_message(m);
+        //			}
+        //		}
+        //		req_id = 0;
+        //	}
+        //
+        // In this example, process_message() may take 1s, so next time poll() is called
+        // the api request will likely be aborted as well.
+        //
+        // So it's probably a good idea to not have the client runtime abort the api request
+        // i.e use get_api_request() with timeout set to 0
+        // The problem with that though is that if the TANK node takes too long to respond (see
+        // below for reasons why that may happen), the client will never know i.e
+        // the api request will never become ready or timeout
+        // Reasons include:
+        // - node stuck for some reason (e.g SIGSTOP signal sent)
+        // - network packets relay problems between the client and the node
+        // - other reasons
+        //
+        // For now, we are not setting an explicitl timeout but this not ideal
+        // We need something better. Perhaps we need to consider how long it's been since
+        // the last call to poll() and adjust the timeout of all pending api requests by that time?
+        // Not sure what's the right way to deal with it, but we need something more there.
+#if 0
+        auto api_req = get_api_request(max_wait ? max_wait + 1000 : 20 * 1000);
+#else
+        auto api_req = get_api_request(0);
+#endif
         std::vector<std::pair<broker *, request_partition_ctx *>> contexts;
 
         if (trace) {
@@ -203,8 +270,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
         bool                        retain_buffer     = false;
         const auto                  topics_cnt        = decode_pod<uint8_t>(p);
         bool                        any_faults        = false;
+        [[maybe_unused]] const auto before            = Timings::Microseconds::Tick();
         std::vector<IOBuffer *>     used_buffers;
-        [[maybe_unused]] const auto before = Timings::Microseconds::Tick();
 
         DEFER({
                 for (auto b : used_buffers) {
@@ -254,7 +321,9 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                         // get rid of all partition contexts associated with this topic
                         do {
-                                auto req_part = switch_list_entry(request_partition_ctx, partitions_list_ll, br_req_partctx_it);
+                                auto req_part = switch_list_entry(request_partition_ctx,
+                                                                  partitions_list_ll,
+                                                                  br_req_partctx_it);
                                 auto next     = br_req_partctx_it->next;
 
                                 if (trace) {
@@ -337,7 +406,9 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 const Switch::endpoint ep{decode_pod<uint32_t>(p), decode_pod<uint16_t>(p)};
 
                                 TANK_EXPECT(br_req_partctx_it != &br_req->partitions_list);
-                                auto req_part = switch_list_entry(request_partition_ctx, partitions_list_ll, br_req_partctx_it);
+                                auto req_part = switch_list_entry(request_partition_ctx,
+                                                                  partitions_list_ll,
+                                                                  br_req_partctx_it);
 
                                 if (trace) {
                                         SLog(ansifmt::color_cyan, "Leader for ", topic_name, "/", partition_id, " is now ", ep, ansifmt::reset, "\n");
@@ -861,7 +932,11 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
         // it should take maybe an order of magnitude less because we will interleave processing with transfer
         // ~25% of the time is spent on snappy decompression
         if (trace) {
-                SLog("any_faults = ", any_faults, ", retry.size = ", retry.size(), ", no_leader.size = ", no_leader.size(), ", ready = ", api_req->ready(), ", broker_requests_list.size = ", api_req->broker_requests_list.size(), "\n");
+                SLog("any_faults = ", any_faults,
+                     ", retry.size = ", retry.size(),
+                     ", no_leader.size = ", no_leader.size(),
+                     ", ready = ", api_req->ready(),
+                     ", broker_requests_list.size = ", api_req->broker_requests_list.size(), "\n");
         }
 
         if (trace) {

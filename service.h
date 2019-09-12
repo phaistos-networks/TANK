@@ -337,7 +337,7 @@ struct topic_partition_log final {
                 bool     nameEncodesTS;
 
                 // make sure we flush when we rotate
-                std::unordered_map<uint64_t, adjust_range_start_cache_value> triangulation_cache;
+                robin_hood::unordered_map<uint64_t, adjust_range_start_cache_value> triangulation_cache;
 
                 struct
                 {
@@ -345,7 +345,7 @@ struct topic_partition_log final {
 
                         // relative sequence number to (absolute base sequence number, file offset)
                         // See https://github.com/phaistos-networks/TANK/issues/63
-                        std::unordered_map<uint64_t, std::pair<uint64_t, uint32_t>> cache;
+                        robin_hood::unordered_map<uint64_t, std::pair<uint64_t, uint32_t>> cache;
 
                         // this is populated by append_bundle().
                         // When it reaches 64k or so entries, it's flushed.
@@ -371,7 +371,7 @@ struct topic_partition_log final {
 
                                 // small cache that help with tailing semantics
                                 // make sure we flush whenever we rotate
-                                std::unordered_map<uint32_t, index_record> cache;
+                                robin_hood::unordered_map<uint32_t, index_record> cache;
 
                                 // last recorded tuple in the index; we need this here
                                 struct
@@ -2122,7 +2122,7 @@ class Service {
                 static constexpr size_t                                     K_max_replicas{8};
                 nodeid_t                                                    leader_id{0};
                 switch_dlist                                                replication_streams{&replication_streams, &replication_streams};
-                std::unordered_map<nodeid_t, std::unique_ptr<cluster_node>> nodes;
+                robin_hood::unordered_map<nodeid_t, std::unique_ptr<cluster_node>> nodes;
                 std::vector<cluster_node *>                                 all_nodes, all_available_nodes;
                 bool                                                        all_nodes_dirty{false};
                 char                                                        _name[64];
@@ -2265,9 +2265,9 @@ class Service {
                         };
 
                         simple_allocator                                                      a;
-                        std::unordered_map<cluster_node *, std::pair<Switch::endpoint, bool>> nodes;
-                        std::unordered_map<topic_partition *, std::unique_ptr<partition>>     pm;
-                        std::unordered_map<::topic *, std::unique_ptr<topic>>                 tm;
+                        robin_hood::unordered_map<cluster_node *, std::pair<Switch::endpoint, bool>> nodes;
+                        robin_hood::unordered_map<topic_partition *, std::unique_ptr<partition>>     pm;
+                        robin_hood::unordered_map<::topic *, std::unique_ptr<topic>>                 tm;
 
                         auto get_partition(topic_partition *tp) {
                                 TANK_EXPECT(tp);
@@ -2309,7 +2309,7 @@ class Service {
                 std::vector<partition_leader_update>                            new_leadership;
                 std::vector<cluster_nodeid_update>                              nodes_updates;
                 std::vector<uint16_t>                                           all_replicas;
-                std::unordered_map<str_view8, bool>                             intern_map;
+                robin_hood::unordered_map<str_view8, bool>                             intern_map;
                 std::vector<partition_isr_info>                                 isr_updates;
                 std::vector<topology_partition>                                 new_topology;
 
@@ -2353,7 +2353,7 @@ class Service {
         std::vector<isr_entry *>                                     reusable_isr_entries;
         simple_allocator                                             isr_entries_allocator{sizeof(isr_entry) * 128};
         Switch::vector<wait_ctx *>                                   waitCtxPool[255];
-        std::unordered_map<strwlen8_t, Switch::shared_refptr<topic>> topics;
+        robin_hood::unordered_map<strwlen8_t, Switch::shared_refptr<topic>> topics;
         size_t                                                       partitions_io_failed_cnt{0};
         std::vector<topic_partition *>                               partitions_v;
 	std::mutex partitions_v_lock;

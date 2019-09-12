@@ -62,7 +62,7 @@ TankClient::~TankClient() {
 // - may wind up dereferencing memory that's been released here but something in the memory region lingers
 //
 // reset() may be invoked fairly frequently e.g when a fault fault::Type::TIMEOUT is returned to the client
-// so it's important that we get this right. It's common to get a timeout when e.g your max_wait for consume() is low. 
+// so it's important that we get this right. It's common to get a timeout when e.g your max_wait for consume() is low.
 //
 // However, it is also invoked in the dtor, so even if it is never invoked by the TANK client application,
 // make sure there are no leaks is important.
@@ -317,19 +317,6 @@ void TankClient::interrupt_poll() {
         }
 }
 
-#define _BUFFERS_PRESSURE_THRESHOLD (4 * 1024 * 1024)
-#define _BUFFERS_POOL_THRESHOLD 512
-
-void TankClient::put_buffer(IOBuffer *const b) {
-        TANK_EXPECT(b);
-
-        if (reusable_buffers.size() > _BUFFERS_POOL_THRESHOLD) {
-                delete b;
-        } else {
-                b->clear();
-                reusable_buffers.emplace_back(std::move(b));
-        }
-}
 
 void TankClient::set_default_leader(const Switch::endpoint e) {
         if (!e) {

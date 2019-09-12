@@ -107,17 +107,9 @@ bool materialize_discover_partitions_requests(api_request *);
 
 bool materialize_api_response(api_request *);
 
-msgs_bucket *get_msgs_bucket() {
-	auto b = static_cast<msgs_bucket *>(malloc(sizeof(msgs_bucket)));
+msgs_bucket *get_msgs_bucket();
 
-	TANK_EXPECT(b);
-	b->next = nullptr;
-	return b;
-}
-
-void put_msgs_bucket(msgs_bucket *b) {
-	std::free(b);
-}
+void put_msgs_bucket(msgs_bucket *);
 
 void end_reactor_loop_iteration();
 
@@ -143,6 +135,10 @@ void release_mb(managed_buf *b) {
                 put_managed_buffer(b);
         }
 }
+
+managed_buf *get_managed_buffer();
+
+void put_managed_buffer(managed_buf *);
 
 void retain_conn_inbuf(connection *, api_request *);
 
@@ -184,88 +180,18 @@ bool schedule_broker_payload(broker_api_request *, broker_outgoing_payload *);
 
 bool schedule_broker_req(broker_api_request *);
 
-auto get_api_request(const uint64_t expiration) {
-        std::unique_ptr<api_request> req;
+std::unique_ptr<api_request> get_api_request(const uint64_t expiration);
 
-	++rsrc_tracker.api_request;
+void put_api_request(std::unique_ptr<api_request> );
 
-        // it is important that we always update
-        // now_ms before any method that in turn calls get_api_request()
-        // may hace been invoked outside the reactor loop, and we need now_ms to be correct
-        now_ms = Timings::Milliseconds::Tick();
+broker_api_request *get_broker_api_request();
 
-        if (!reusable_api_requests.empty()) {
-                req = std::move(reusable_api_requests.back());
-                reusable_api_requests.pop_back();
-        } else {
-                req.reset(new api_request());
-        }
+void put_broker_api_request(broker_api_request *);
 
-        req->reset();
-        req->api_reqs_expirations_tree_node.key = expiration ? now_ms + expiration : 0;
+request_partition_ctx *get_request_partition_ctx();
 
-#ifdef TANK_RUNTIME_CHECKS
-	req->init_ms = now_ms;
-#endif
+void put_request_partition_ctx(request_partition_ctx *);
 
-        return req;
-}
-
-void put_api_request(std::unique_ptr<api_request> req) {
-        TANK_EXPECT(req);
-	TANK_EXPECT(req->managed_bufs.empty());
-
-	TANK_EXPECT(rsrc_tracker.api_request);
-	--rsrc_tracker.api_request;
-
-        reusable_api_requests.emplace_back(std::move(req));
-}
-
-auto get_broker_api_request() {
-        broker_api_request *req;
-
-	++rsrc_tracker.broker_api_request;
-
-        if (!reusable_broker_api_requests.empty()) {
-                req = reusable_broker_api_requests.back();
-                reusable_broker_api_requests.pop_back();
-        } else {
-                req = static_cast<broker_api_request *>(reqs_allocator.Alloc(sizeof(broker_api_request)));
-        }
-        req->reset();
-        return req;
-}
-
-void put_broker_api_request(broker_api_request *req) {
-        TANK_EXPECT(req);
-	TANK_EXPECT(rsrc_tracker.broker_api_request);
-	--rsrc_tracker.broker_api_request;
-
-        reusable_broker_api_requests.emplace_back(req);
-}
-
-auto get_request_partition_ctx() {
-        request_partition_ctx *ctx;
-
-	++rsrc_tracker.request_partition_ctx;
-
-        if (!reusable_request_partition_contexts.empty()) {
-                ctx = reusable_request_partition_contexts.back();
-                reusable_request_partition_contexts.pop_back();
-        } else {
-                ctx = static_cast<request_partition_ctx *>(reqs_allocator.Alloc(sizeof(request_partition_ctx)));
-        }
-        ctx->reset();
-        return ctx;
-}
-
-void put_request_partition_ctx(request_partition_ctx *ctx) {
-        TANK_EXPECT(ctx);
-	TANK_EXPECT(rsrc_tracker.request_partition_ctx);
-	--rsrc_tracker.request_partition_ctx;
-	
-        reusable_request_partition_contexts.emplace_back(ctx);
-}
 void poll_outavail(connection *);
 
 void stop_poll_outavail(connection *);
@@ -302,41 +228,6 @@ broker_outgoing_payload *build_srv_status_broker_req_payload(const broker_api_re
 
 bool process_msg(connection *const c, const uint8_t msg, const uint8_t *const content, const size_t len);
 
-auto get_buffer() {
-	++rsrc_tracker.buffer;
-
-        if (!reusable_buffers.empty()) {
-                auto b = reusable_buffers.back().release();
-
-                reusable_buffers.pop_back();
-                return b;
-        } else {
-                return new IOBuffer();
-        }
-}
-
-auto get_managed_buffer() {
-	++rsrc_tracker.managed_buf;
-
-        if (!reusable_managed_buffers.empty()) {
-                auto b = reusable_managed_buffers.back().release();
-
-                reusable_managed_buffers.pop_back();
-                b->clear();
-		b->rc = 1;
-                return b;
-        } else {
-                return new managed_buf();
-        }
-}
-
-void put_managed_buffer(managed_buf *b) {
-        TANK_EXPECT(b);
-	TANK_EXPECT(rsrc_tracker.managed_buf);
-	--rsrc_tracker.managed_buf;
-
-        reusable_managed_buffers.emplace_back(std::move(b));
-}
 
 bool rcv(connection *const c);
 
@@ -347,6 +238,8 @@ bool tx(connection *const c);
 bool try_tx(connection *const c) {
         return tx(c);
 }
+
+IOBuffer *get_buffer();
 
 void put_buffer(IOBuffer *const b);
 

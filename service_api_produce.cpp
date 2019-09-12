@@ -33,7 +33,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
         [[maybe_unused]] const auto         ack_timeout      = decode_pod<uint32_t>(p); // TODO:
         const auto                          topics_cnt       = decode_pod<uint8_t>(p);
         auto                                pr               = get_produce_response();
-        std::unordered_map<str_view8, bool> intern_map;
+        robin_hood::unordered_map<str_view8, bool> intern_map;
 
         if (trace) {
                 SLog(ansifmt::bold, ansifmt::color_red, "NEW produce request ", request_id, ", required_acks = ", op_required_acks, ", ack_timeout = ", ack_timeout, ", topics_cnt = ", topics_cnt, ansifmt::reset, "\n");

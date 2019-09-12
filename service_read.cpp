@@ -178,7 +178,7 @@ uint32_t search_before_offset(uint64_t base_seqnum, const uint32_t max_size, con
 // it encodes the sequence number of its first message in its header)
 //
 // See also search_before_offset()
-bool adjust_range_start(lookup_res &res, const uint64_t abs_seq_num, std::unordered_map<uint64_t, adjust_range_start_cache_value> *const cache) {
+bool adjust_range_start(lookup_res &res, const uint64_t abs_seq_num, robin_hood::unordered_map<uint64_t, adjust_range_start_cache_value> *const cache) {
         static constexpr bool trace{false};
         uint64_t              base_seqnum = res.absBaseSeqNum;
 

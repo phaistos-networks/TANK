@@ -146,7 +146,10 @@ class TankClient {
         };
 
         struct consumed_msg final {
-                uint64_t    seqNum;
+                union {
+                        uint64_t seqNum;
+                        uint64_t seq_num;
+                };
                 uint64_t    ts;
                 strwlen8_t  key;
                 strwlen32_t content;
@@ -994,10 +997,10 @@ class TankClient {
         std::vector<request_partition_ctx *>      reusable_request_partition_contexts;
 
         CompressionStrategy                                           compressionStrategy{CompressionStrategy::CompressIntelligently};
-        std::unordered_map<Switch::endpoint, std::unique_ptr<broker>> brokers;
+        robin_hood::unordered_map<Switch::endpoint, std::unique_ptr<broker>> brokers;
         switch_dlist                                                  all_brokers{&all_brokers, &all_brokers};
-        std::unordered_map<topic_partition, Switch::endpoint>         leaders;
-        std::unordered_map<str_view8, bool>                           topics_intern_map;
+        robin_hood::unordered_map<topic_partition, Switch::endpoint>         leaders;
+        robin_hood::unordered_map<str_view8, bool>                           topics_intern_map;
         bool                                                          allowStreamingConsumeResponses{false};
         int                                                           sndBufSize{128 * 1024}, rcvBufSize{1 * 1024 * 1024};
         strwlen8_t                                                    clientId{"c++"};
@@ -1015,8 +1018,8 @@ class TankClient {
         std::vector<created_topic>               created_topics_v;
         std::vector<srv_status>                  collected_cluster_status_v;
 
-        std::unordered_map<uint32_t, broker_api_request *>         pending_brokers_requests;
-        std::unordered_map<uint32_t, std::unique_ptr<api_request>> pending_responses;
+        robin_hood::unordered_map<uint32_t, broker_api_request *>         pending_brokers_requests;
+        robin_hood::unordered_map<uint32_t, std::unique_ptr<api_request>> pending_responses;
         std::vector<std::unique_ptr<api_request>>                  ready_responses;
 
         EPoller                                   poller;

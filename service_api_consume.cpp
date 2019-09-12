@@ -1,6 +1,6 @@
 #include "service_common.h"
 
-bool adjust_range_start(lookup_res &res, const uint64_t abs_seq_num, std::unordered_map<uint64_t, adjust_range_start_cache_value> *const cache);
+bool adjust_range_start(lookup_res &res, const uint64_t abs_seq_num, robin_hood::unordered_map<uint64_t, adjust_range_start_cache_value> *const cache);
 
 // we need to discriminate between requests originating from peers and clients
 // requests originating from clients are subject to a partitions' high water mark, that is the committed offset

@@ -1154,7 +1154,7 @@ int main(int argc, char *argv[]) {
                 };
 
                 simple_allocator                                                                           allocator{4096};
-                std::unordered_map<uint16_t, partition_ctx *>                                              map;
+                robin_hood::unordered_map<uint16_t, partition_ctx *>                                              map;
                 std::vector<partition_ctx *>                                                               pending;
                 std::vector<std::pair<TankClient::topic_partition, std::pair<uint64_t, uint32_t>>>         inputs;
                 std::vector<uint8_t>                                                                       outputsOrder;

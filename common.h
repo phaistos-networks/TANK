@@ -1,5 +1,6 @@
 #pragma once
 #include <switch.h>
+#include <ext/martinus/robin_hood.h>
 
 #define TANK_RUNTIME_CHECKS 1
 
