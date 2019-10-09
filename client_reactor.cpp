@@ -377,6 +377,19 @@ bool TankClient::tx_tank(connection *const c) {
         }
 }
 
+bool TankClient::any_requests_pending_delivery() const noexcept {
+	// XXX: this is not optimal, but given how and when it's meant to be used, that's OK
+        for (auto &it : brokers) {
+                auto br = it.second.get();
+
+                if (!br->outgoing_content.empty()) {
+                        return true;
+                }
+        }
+
+        return false;
+}
+
 bool TankClient::process_srv_in(connection *const c) {
         static constexpr bool trace{false};
         TANK_EXPECT(c);
@@ -609,7 +622,6 @@ bool TankClient::rcv(connection *const c) {
 void TankClient::begin_reactor_loop_iteration() {
         // Reset state / buffers used for tracking collected content and responses in last poll() call
         [[maybe_unused]] static constexpr bool trace{false};
-
 
         gc_ready_responses();
 

@@ -244,7 +244,7 @@ void topic_partition_log::consider_ro_segments() {
                         sum += it->fileSize;
                 }
 
-                const double cleanable_ratio = double(dirtyBytes) / double(sum);
+                const double cleanable_ratio = sum ? (double(dirtyBytes) / double(sum)) : 0;
 
                 if (trace) {
                         SLog(ansifmt::color_blue, "dirtyBytes = ", dirtyBytes, ", sum = ", sum, ", cleanable_ratio = ", cleanable_ratio, ansifmt::reset, "\n");

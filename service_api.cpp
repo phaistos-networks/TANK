@@ -85,6 +85,10 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
                         try {
                                 parse_partition_config(config, &partitionConfig);
                         } catch (...) {
+				if (trace) {
+					SLog("Invalid configuration\n");
+				}
+
                                 resp->Serialize<uint8_t>(4); // Invalid configuration
                                 goto l1;
                         }
@@ -93,6 +97,10 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
                 if (read_only) {
                         resp->pack(static_cast<uint8_t>(5));
                 } else if (topic_by_name(topicName)) {
+			if (trace) {
+				SLog("Topic already exists\n");
+			}
+
                         resp->pack(static_cast<uint8_t>(1)); // already exists
                 } else {
                         if (cluster_aware()) {
@@ -114,8 +122,16 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
                                 return true;
                         }
 
+			// we are going to create .<topic-name>
+			// and when we are done with it, we are going to rename it to <topic-name>
+			// this is important because for any reason we may not get the chance to create 
+			// all partitions directories/files in there, and we don't want to leave a mess if that happens
                         char       topicPath[PATH_MAX];
-                        const auto topicPathLen = Snprint(topicPath, sizeof(topicPath), basePath_, "/", topicName, "/");
+                        const auto topicPathLen = Snprint(topicPath, sizeof(topicPath), basePath_, "/.", topicName, "/");
+
+			if (trace) {
+				SLog("Will try to create ", str_view32(topicPath, topicPathLen), "\n");
+			}
 
                         if (mkdir(topicPath, 0775) == -1) {
                                 if (trace) {
@@ -124,16 +140,28 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
 
                                 resp->pack(static_cast<uint8_t>(2));
                         } else {
+				const auto cleanup = [&]() {
+					// TODO: https://github.com/phaistos-networks/TANK/issues/70
+				};
+
                                 try {
                                         auto t = Switch::make_sharedref<topic>(topicName, partitionConfig);
 
                                         TANK_EXPECT(t->use_count() == 1);
+					// see Service::open_partition_log()
+					t->flags |= unsigned(topic::Flags::under_construction);
 
                                         for (uint16_t i{0}; i < partitionsCnt; ++i) {
-                                                auto _p = init_local_partition(i, t.get(), partitionConfig).release();
+                                                try {
+                                                        auto _p = init_local_partition(i, t.get(), partitionConfig).release();
 
-                                                TANK_EXPECT(_p->use_count() == 1);
-                                                list.emplace_back(_p);
+                                                        TANK_EXPECT(_p->use_count() == 1);
+                                                        list.emplace_back(_p);
+                                                } catch (...) {
+                                                        cleanup();
+                                                        resp->pack(static_cast<uint8_t>(2));
+                                                        goto l1;
+                                                }
                                         }
 
                                         if (config) {
@@ -145,14 +173,18 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
                                                         if (trace) {
                                                                 SLog("open(", topicPath, ") failed:", strerror(errno), "\n");
                                                         }
+
+							cleanup();
                                                         resp->pack(static_cast<uint8_t>(2));
                                                         goto l1;
                                                 } else if (write(fd, config.p, config.len) != config.len) {
                                                         if (trace) {
                                                                 SLog("write for (", topicPath, ") failed:", strerror(errno), "\n");
                                                         }
+
                                                         close(fd);
                                                         unlink(topicPath);
+							cleanup();
                                                         resp->pack(static_cast<uint8_t>(2));
                                                         goto l1;
                                                 } else {
@@ -160,6 +192,23 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
                                                 }
                                         }
 
+					topicPath[topicPathLen - 1] = '\0';
+                                        if (rename(topicPath, Buffer{}.append(basePath_, "/", topicName).c_str()) == -1) {
+						if (trace) {
+							SLog("Failed to commit topic, unable to rename ", topicPath, ": ", strerror(errno), "\n");
+						}
+
+                                                cleanup();
+                                                resp->pack(static_cast<uint8_t>(2));
+                                                goto l1;
+                                        }
+
+					if (trace) {
+						SLog("Created topic\n");
+					}
+
+					EXPECT(t->flags & unsigned(topic::Flags::under_construction));
+                                        t->flags ^= unsigned(topic::Flags::under_construction);
                                         t->register_partitions(list.data(), list.size());
                                         list.clear();
 
@@ -171,6 +220,8 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
                                         if (trace) {
                                                 SLog("Exception caught:", e.what(), "\n");
                                         }
+
+					cleanup();
                                         resp->pack(static_cast<uint8_t>(2));
                                 }
                         }
@@ -193,6 +244,10 @@ l1:
         payload->buf     = resp;
         payload->iov_cnt = 1;
         payload->iov[0]  = {static_cast<void *>(resp->data()), resp->size()};
+
+	if (trace) {
+		SLog("Responding\n");
+	}
 
         return try_tx(c);
 }

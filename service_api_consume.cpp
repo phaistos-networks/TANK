@@ -10,7 +10,7 @@ bool adjust_range_start(lookup_res &res, const uint64_t abs_seq_num, robin_hood:
 // will guard against malformed requests
 bool Service::process_consume(const TankAPIMsgType _msg, connection *const c, const uint8_t *p, const size_t _len) {
         static constexpr bool trace{false};
-	static constexpr bool trace_faults{true};
+	static constexpr bool trace_faults{false};
         const bool            consume_peer_req = _msg == TankAPIMsgType::ConsumePeer;
         const auto            consume_req      = !consume_peer_req;
         const auto            ca               = cluster_aware();

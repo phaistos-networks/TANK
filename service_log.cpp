@@ -208,8 +208,9 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
         static constexpr bool trace{false};
         char                  basePath[PATH_MAX];
         auto                  topic       = partition->owner;
-        const auto            basePathLen = snprintf(basePath, sizeof(basePath), "%.*s/%.*s/%u/",
+        const auto            basePathLen = snprintf(basePath, sizeof(basePath), "%.*s/%s%.*s/%u/",
                                           static_cast<int>(::basePath_.size()), ::basePath_.data(),
+                                          (topic->flags & unsigned(topic::Flags::under_construction)) ? "." : "",
                                           static_cast<int>(topic->name_.size()),
                                           topic->name_.data(), partition->idx);
 
@@ -745,9 +746,11 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                 std::mt19937                            rng(dev());
                                 std::uniform_int_distribution<uint32_t> distr(0, max);
 
-                                l->cur.rollJitterSecs = distr(rng);
+                                l->cur.rollJitterSecs = std::max<uint32_t>(distr(rng),
+                                                                           Timings::Hours::ToSeconds(1));
                         } else {
-                                l->cur.rollJitterSecs = 0;
+                                // something sensible
+                                l->cur.rollJitterSecs = std::max<uint32_t>(Timings::Hours::ToSeconds(1), Timings::Weeks::ToSeconds(1));
                         }
 
                         const auto now = time(nullptr);

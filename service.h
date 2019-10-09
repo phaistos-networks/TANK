@@ -274,7 +274,7 @@ enum class CleanupPolicy : uint8_t {
 
 extern struct partition_config final {
         // Kafka defaults
-        size_t        roSegmentsCnt{0};
+        size_t        roSegmentsCnt{0}; // maximum segments to retain (0 all)
         uint64_t      roSegmentsSize{0};
         uint64_t      maxSegmentSize{1 * 1024 * 1024 * 1024};
         size_t        indexInterval{4096};
@@ -285,7 +285,7 @@ extern struct partition_config final {
         size_t        flushIntervalMsgs{0};        // never
         size_t        flushIntervalSecs{0};        // never
         CleanupPolicy logCleanupPolicy{CleanupPolicy::DELETE};
-        float         logCleanRatioMin{0.5};
+        float         logCleanRatioMin{0.5}; //
 } config;
 
 static void PrintImpl(Buffer &out, const lookup_res &res) {
@@ -330,10 +330,10 @@ struct topic_partition_log final {
                 uint32_t sinceLastUpdate;
 
                 // Computed whenever we roll/create a new mutable segment
-                uint32_t rollJitterSecs;
+                uint32_t rollJitterSecs{0};
 
                 // When this was created, in seconds
-                uint32_t createdTS;
+                uint32_t createdTS{0};
                 bool     nameEncodesTS;
 
                 // make sure we flush when we rotate
@@ -1174,6 +1174,12 @@ struct topic
         // but an update in topology excluded this topic
         // We do not erase topics, but we set enabled to false
         bool enabled{true};
+
+        enum class Flags : uint8_t {
+                under_construction = 1u << 0,
+        };
+
+        uint8_t flags{0};
 
         // for Prometheus metrics
         struct metrics_struct final {

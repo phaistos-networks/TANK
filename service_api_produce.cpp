@@ -8,7 +8,7 @@
 // so we can't have the same partition more than once there.
 bool Service::process_produce(const TankAPIMsgType msg, connection *const c, const uint8_t *p, const size_t len) {
         static constexpr bool trace{false};
-	static constexpr bool trace_faults{true};
+	static constexpr bool trace_faults{false};
         if (unlikely(len < sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint8_t))) {
                 return shutdown(c, __LINE__);
         }

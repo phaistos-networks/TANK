@@ -374,6 +374,8 @@ bool any_responses() const noexcept {
 	return produce_with_seqnum(req.data(), req.size());
 }
 
+[[gnu::warn_unused_result, nodiscard]] uint32_t consume(const std::pair<topic_partition, std::pair<uint64_t, uint32_t>> *, const std::size_t, const uint64_t maxWait, const uint32_t minSize);
+
 [[gnu::warn_unused_result, nodiscard]] uint32_t consume(const std::vector<std::pair<topic_partition, std::pair<uint64_t, uint32_t>>> &req, const uint64_t maxWait, const uint32_t minSize);
 
 [[gnu::warn_unused_result, nodiscard]] uint32_t consume_from(const topic_partition &from, const uint64_t seqNum, const uint32_t minFetchSize, const uint64_t maxWait, const uint32_t minSize);
@@ -385,6 +387,8 @@ bool any_responses() const noexcept {
 [[gnu::warn_unused_result, nodiscard]] uint32_t create_topic(const strwlen8_t topic, const uint16_t numPartitions, const strwlen32_t configuration);
 
 [[gnu::warn_unused_result, nodiscard]] uint32_t service_status();
+
+bool any_requests_pending_delivery() const noexcept;
 
 void reset(const bool dtor_context = false);
 
@@ -427,3 +431,10 @@ bool should_poll() const noexcept;
 // or any fault - and if it fails, it will throw an exception..
 // This is mostly useful for produce responses
 void wait_scheduled(const uint32_t reqID);
+
+// Another utility method
+// It attempts to determine the sequence number of the message in (topic_partition) that's closest to event_time, by using binary search among the messages space
+// cut_off_threshold is time, in milliseconds, that determines how far from the target event time the event, identified by the returned sequence number, can be
+// The lower that value, the fewer binary search probles it will take. Depending on the size of your messages, you may want to
+// set this very high or very low -- and then just consume messages until you have reached or exceeded that target event_time
+uint64_t sequence_number_by_event_time(const topic_partition &, const uint64_t event_time, const uint64_t cut_off_threshold = Timings::Minutes::ToMillis(5));

@@ -70,6 +70,13 @@ uint32_t TankClient::consume(const std::vector<std::pair<topic_partition,
                                                          std::pair<uint64_t, uint32_t>>> &sources,
                              const uint64_t                                               max_wait,
                              const uint32_t                                               min_size) {
+
+	return consume(sources.data(), sources.size(), max_wait, min_size);
+}
+
+uint32_t TankClient::consume(const std::pair<topic_partition, std::pair<uint64_t, uint32_t>> *sources, const size_t total_sources,
+                             const uint64_t max_wait,
+                             const uint32_t min_size) {
         static constexpr bool trace{false};
         // fan-out: api_req will coordinate broker api requests
         // NOTE: get_api_request() will update now_ms
@@ -147,7 +154,7 @@ uint32_t TankClient::consume(const std::vector<std::pair<topic_partition,
         std::vector<std::pair<broker *, request_partition_ctx *>> contexts;
 
         if (trace) {
-                SLog(ansifmt::bold, ansifmt::color_red, ansifmt::inverse, "Will consume from ", sources.size(), " sources", ansifmt::reset, "\n");
+                SLog(ansifmt::bold, ansifmt::color_red, ansifmt::inverse, "Will consume from ", total_sources, " sources", ansifmt::reset, "\n");
         }
 
         // initialize the api request for consume
@@ -158,10 +165,11 @@ uint32_t TankClient::consume(const std::vector<std::pair<topic_partition,
         // we could have a generic method that returns
         // a decltype(contexts) and then we would
         // initialize the respective request partition context, but it's not currently necessary
-        for (const auto &it : sources) {
-                auto topic     = intern_topic(it.first.first);
-                auto partition = it.first.second;
-                auto req_part  = get_request_partition_ctx();
+        for (unsigned i = 0; i < total_sources; ++i) {
+                const auto &it        = sources[i];
+                auto        topic     = intern_topic(it.first.first);
+                auto        partition = it.first.second;
+                auto        req_part  = get_request_partition_ctx();
                 // if we have a leader for this topic, choose it, explicitly
                 // otherwise, select any broker and we 'll get to update assignments later
                 // and potentially retry the request on another broker

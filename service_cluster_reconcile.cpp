@@ -246,6 +246,7 @@ void Service::consider_updated_consul_configs(const std::vector<std::pair<str_vi
 // this is a somewhat convoluted impl. because we need to take care of too much state and transitions
 //
 // (topic, partition, gen, replica...)
+// TODO: https://github.com/phaistos-networks/TANK/issues/70
 void Service::reconcile_cluster_topology(std::vector<topology_partition> *const new_topology) {
         static constexpr bool                                           trace{false};
         partition_config                                                pc;

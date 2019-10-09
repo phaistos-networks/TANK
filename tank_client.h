@@ -26,7 +26,6 @@
 // more-fresh packets to process
 //#define TANK_CLIENT_FAST_CONSUME 1
 
-
 // The problem we want to solve is how to *reliably* abort broker requests
 //
 // We need to abort a broker request if:
@@ -304,8 +303,8 @@ class TankClient {
                 uint16_t     partition;
                 switch_dlist partitions_list_ll;
 
-		// for no_leader, retry chaining where it makes sense
-		request_partition_ctx *_next;
+                // for no_leader, retry chaining where it makes sense
+                request_partition_ctx *_next;
 
                 union Op final {
                         struct {
@@ -353,23 +352,23 @@ class TankClient {
                                 uint64_t first_msg_seqnum;
                         } produce;
 
-			struct {
-				struct {
-					uint32_t nodes;
-					uint32_t topics;
-					uint32_t partitions;
-				} counts;
+                        struct {
+                                struct {
+                                        uint32_t nodes;
+                                        uint32_t topics;
+                                        uint32_t partitions;
+                                } counts;
 
-				struct {
-					char data[64];
-					uint8_t len; // 0 if not cluster aware
-				} cluster_name;
-			} srv_status;
+                                struct {
+                                        char    data[64];
+                                        uint8_t len; // 0 if not cluster aware
+                                } cluster_name;
+                        } srv_status;
                 } as_op;
 
                 void reset() {
                         partitions_list_ll.reset();
-			_next = nullptr;
+                        _next                                  = nullptr;
                         as_op.discover_partitions.response.all = nullptr;
                 }
         };
@@ -437,12 +436,12 @@ class TankClient {
                         DiscoverPartitions,
                         CreateTopic,
                         ReloadConfig,
-			SrvStatus,
+                        SrvStatus,
                 } type;
                 uint32_t request_id; // client request ID
 
-#ifdef TANK_RUNTIME_CHECKS 
-		uint64_t init_ms;
+#ifdef TANK_RUNTIME_CHECKS
+                uint64_t init_ms;
 #endif
                 eb64_node api_reqs_expirations_tree_node;
 
@@ -550,7 +549,7 @@ class TankClient {
                 }
 
                 void serialize(int8_t *ptr, const size_t l) {
-			TANK_EXPECT(locks_ == 0);
+                        TANK_EXPECT(locks_ == 0);
 
                         reserve(l);
                         memcpy(data_ + length, ptr, l);
@@ -594,7 +593,7 @@ class TankClient {
                 }
 
                 void clear() TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
-			TANK_EXPECT(locks_ == 0);
+                        TANK_EXPECT(locks_ == 0);
 
                         length  = 0;
                         locks_  = 0;
@@ -615,7 +614,7 @@ class TankClient {
                 void erase_chunk(const uint32_t o, const uint32_t s) {
                         auto p = data_ + o;
 
-			TANK_EXPECT(locks_ == 0);
+                        TANK_EXPECT(locks_ == 0);
                         TANK_EXPECT(o + s <= size());
                         memmove(p, p + s, size() - (o + s));
                         length -= s;
@@ -691,48 +690,48 @@ class TankClient {
                                 };
 
 #ifdef TANK_CLIENT_FAST_CONSUME
-				// this is used exclusively for consume responses
-				struct Response final {
-					enum class State : uint8_t {
-						ParseHeader = 0,
-						ParseTopic,
-						ParseFirstTopicPartition,
-						ParsePartition,
-						ParsePartitionBundle,
-						ParsePartitionBundleMsgSet,
-						Drain,
-						Ready,
-					} state;
+                                // this is used exclusively for consume responses
+                                struct Response final {
+                                        enum class State : uint8_t {
+                                                ParseHeader = 0,
+                                                ParseTopic,
+                                                ParseFirstTopicPartition,
+                                                ParsePartition,
+                                                ParsePartitionBundle,
+                                                ParsePartitionBundleMsgSet,
+                                                Drain,
+                                                Ready,
+                                        } state;
 
-					request_partition_ctx *no_leader_l, *retry_l;
-					bool any_faults;
-					bool retain_buf;
-					uint32_t resp_end_offset;
-                                        broker_api_request *breq;
-                                        uint32_t            req_id;
-                                        uint32_t            hdr_size;
-                                        uint8_t             topics_cnt;
-                                        uint8_t             topic_partitions_cnt;
-                                        switch_dlist *      br_req_partctx_it;
-                                        buf_llhdr *         used_bufs;
+                                        request_partition_ctx *no_leader_l, *retry_l;
+                                        bool                   any_faults;
+                                        bool                   retain_buf;
+                                        uint32_t               resp_end_offset;
+                                        broker_api_request *   breq;
+                                        uint32_t               req_id;
+                                        uint32_t               hdr_size;
+                                        uint8_t                topics_cnt;
+                                        uint8_t                topic_partitions_cnt;
+                                        switch_dlist *         br_req_partctx_it;
+                                        buf_llhdr *            used_bufs;
                                         struct {
-                                                char data_[256];
-						uint8_t len;
+                                                char    data_[256];
+                                                uint8_t len;
 
-						auto size() const noexcept {
-							return len;
-						}
+                                                auto size() const noexcept {
+                                                        return len;
+                                                }
 
-						const char *data() const noexcept {
-							return data_;
-						}
+                                                const char *data() const noexcept {
+                                                        return data_;
+                                                }
                                         } topic_name;
 
                                         struct {
-                                                uint64_t     highwater_mark;
-                                                uint32_t     bundles_chunk_len;
-                                                uint64_t     log_base_seqnum;
-                                                uint32_t     need_upto, need_from;
+                                                uint64_t highwater_mark;
+                                                uint32_t bundles_chunk_len;
+                                                uint64_t log_base_seqnum;
+                                                uint32_t need_upto, need_from;
 
                                                 struct {
                                                         msgs_bucket *first_bucket, *last_bucket;
@@ -753,11 +752,11 @@ class TankClient {
 
                                                 struct {
                                                         uint8_t  codec;
-							bool sparse;
-							bool any_captured;
-							uint64_t first_msg_seqnum, last_msg_seqnum;
-							uint32_t size;
-							uint32_t conumed;
+                                                        bool     sparse;
+                                                        bool     any_captured;
+                                                        uint64_t first_msg_seqnum, last_msg_seqnum;
+                                                        uint32_t size;
+                                                        uint32_t conumed;
 
                                                         union MsgSetContent final {
                                                                 struct {
@@ -774,7 +773,7 @@ class TankClient {
                                                                 uint64_t ts;
                                                                 uint32_t msg_idx;
                                                                 uint64_t min_accepted_seqnum;
-								uint32_t size;
+                                                                uint32_t size;
                                                         } cur_msg_set;
                                                 } cur_bundle;
                                         } cur_partition;
@@ -790,16 +789,14 @@ class TankClient {
                                 } cur_resp;
 #endif
 
-
                                 uint8_t flags;
                                 broker *br;
-
 
                                 void reset() {
                                         flags = 0;
                                         br    = nullptr;
 #ifdef TANK_CLIENT_FAST_CONSUME
-					cur_resp.reset();
+                                        cur_resp.reset();
 #endif
                                 }
                         } tank;
@@ -810,7 +807,6 @@ class TankClient {
                         fd   = -1;
                         list.reset();
                         all_conns_list_ll.reset();
-
 
 #ifdef HAVE_NETIO_THROTTLE
                         throttler.read.reset();
@@ -830,7 +826,7 @@ class TankClient {
                 const Switch::endpoint  ep;
                 uint8_t                 consequtive_connection_failures{0};
                 switch_dlist            all_brokers_ll{&all_brokers_ll, &all_brokers_ll};
-		uint8_t flags{0};
+                uint8_t                 flags{0};
 
                 enum class Flags : uint8_t {
                         Important = 0,
@@ -996,19 +992,19 @@ class TankClient {
         std::vector<broker_api_request *>         reusable_broker_api_requests;
         std::vector<request_partition_ctx *>      reusable_request_partition_contexts;
 
-        CompressionStrategy                                           compressionStrategy{CompressionStrategy::CompressIntelligently};
+        CompressionStrategy                                                  compressionStrategy{CompressionStrategy::CompressIntelligently};
         robin_hood::unordered_map<Switch::endpoint, std::unique_ptr<broker>> brokers;
-        switch_dlist                                                  all_brokers{&all_brokers, &all_brokers};
+        switch_dlist                                                         all_brokers{&all_brokers, &all_brokers};
         robin_hood::unordered_map<topic_partition, Switch::endpoint>         leaders;
         robin_hood::unordered_map<str_view8, bool>                           topics_intern_map;
-        bool                                                          allowStreamingConsumeResponses{false};
-        int                                                           sndBufSize{128 * 1024}, rcvBufSize{1 * 1024 * 1024};
-        strwlen8_t                                                    clientId{"c++"};
-        switch_dlist                                                  conns_pend_est_list{&conns_pend_est_list, &conns_pend_est_list};
-        uint64_t                                                      conns_pend_est_next_expiration{std::numeric_limits<uint64_t>::max()};
-        switch_dlist                                                  all_conns_list{&all_conns_list, &all_conns_list};
-        uint64_t                                                      next_conns_gen{1};
-        simple_allocator                                              resultsAllocator{2 * 1024 * 1024};
+        bool                                                                 allowStreamingConsumeResponses{false};
+        int                                                                  sndBufSize{128 * 1024}, rcvBufSize{1 * 1024 * 1024};
+        strwlen8_t                                                           clientId{"c++"};
+        switch_dlist                                                         conns_pend_est_list{&conns_pend_est_list, &conns_pend_est_list};
+        uint64_t                                                             conns_pend_est_next_expiration{std::numeric_limits<uint64_t>::max()};
+        switch_dlist                                                         all_conns_list{&all_conns_list, &all_conns_list};
+        uint64_t                                                             next_conns_gen{1};
+        simple_allocator                                                     resultsAllocator{2 * 1024 * 1024};
 
         std::vector<partition_content>           consumed_content;
         std::vector<fault>                       all_captured_faults;
@@ -1020,10 +1016,10 @@ class TankClient {
 
         robin_hood::unordered_map<uint32_t, broker_api_request *>         pending_brokers_requests;
         robin_hood::unordered_map<uint32_t, std::unique_ptr<api_request>> pending_responses;
-        std::vector<std::unique_ptr<api_request>>                  ready_responses;
+        std::vector<std::unique_ptr<api_request>>                         ready_responses;
 
         EPoller                                   poller;
-	int interrupt_fd{-1};
+        int                                       interrupt_fd{-1};
         std::atomic<bool>                         sleeping{false};
         uint64_t                                  now_ms{0};
         uint64_t                                  next_curtime_update{0};

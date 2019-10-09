@@ -159,6 +159,10 @@ help:
                 return 1;
         }
 
+	if (trace) {
+		SLog("cluster_aware() = ", cluster_aware(), ", basePath_ = ", basePath_, "\n");
+	}
+
         if (basePath_.empty()) {
                 Print("Base path not specified. Use -p path to specify it\n");
                 return 1;
@@ -184,6 +188,10 @@ help:
 
                         if (trace) {
                                 before = Timings::Microseconds::Tick(); 
+			}
+
+			if (trace) {
+				SLog("Attempting to iterate names in ", basePath_, "\n");
 			}
 
                         for (const auto &&name : DirectoryEntries(basePath_.data())) {
@@ -242,6 +250,9 @@ help:
                                                 throw Switch::system_error("Failed to stat(", fullPath, "): ", strerror(errno));
                                         else if (!S_ISDIR(st.st_mode)) {
                                                 // Just ignore whatever isn't a directory
+						if (trace) {
+							SLog("Ignoring [", name, "]: not a directory\n");
+						}
                                         } else {
                                                 collectedTopics.emplace_back(a.CopyOf(name.p, name.len), name.len);
                                         }
@@ -249,7 +260,7 @@ help:
                         }
 
                         if (trace) {
-                                SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " for initial walk ", collectedTopics.size(), "\n");
+                                SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " for initial walk ", collectedTopics.size(), " topics\n");
 			}
 
                         for (const auto &it : collectedTopics) {
@@ -296,7 +307,9 @@ help:
                                                         pendingPartitions.emplace_back(t.get(), partitionsCnt);
                                                         register_topic(t.get());
                                                         collectLock.unlock();
-                                                }
+                                                } else if (trace) {
+							SLog("NO partitions for ", path, "\n");
+						}
                                         }
                                 },
                                                              it));

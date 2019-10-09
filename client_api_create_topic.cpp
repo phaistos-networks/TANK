@@ -85,6 +85,7 @@ bool TankClient::process_create_topic(connection *const c, const uint8_t *const 
                 put_request_partition_ctx(req_part);
         } else if (err == 2) {
                 // system error
+		capture_system_fault(api_req, req_part->topic, req_part->partition);
                 clear_request_partition_ctx(api_req, req_part);
                 put_request_partition_ctx(req_part);
         } else if (err == 1) {

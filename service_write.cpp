@@ -5,7 +5,7 @@ int Unlink(const char *pathname);
 
 bool topic_partition_log::should_roll(const uint32_t now) const {
         static constexpr bool trace{false};
-        static constexpr bool trace_yes{true};
+        static constexpr bool trace_yes{false};
 
 	cur.sanity_checks();
 
@@ -37,12 +37,18 @@ bool topic_partition_log::should_roll(const uint32_t now) const {
 
 		cur.sanity_checks();
 
-                if (const auto v = config.curSegmentMaxAge) {
+                if (const auto v = cur.rollJitterSecs) {
 			// XXX: it is important to use time32_delta() to guard against the race that stems from _now updates semantics
 			if (const auto since_seconds = TANKUtil::time32_delta(cur.createdTS, now); since_seconds  > cur.rollJitterSecs) {
                                 // Soft limit
                                 if (trace || trace_yes) {
-                                        SLog(ansifmt::bold, "now - cur.createdTS(", since_seconds, "s ago) > (", v - cur.rollJitterSecs, ") cur.rollJitterSecs = ", cur.rollJitterSecs, ",  cur.createdTS = ", cur.createdTS, "(", Date::ts_repr(cur.createdTS), "), now = ", now, " (", Date::ts_repr(now), ")", ansifmt::reset, "\n");
+                                        SLog(ansifmt::bold, "now - cur.createdTS(",
+                                             since_seconds, "s ago) > (", v - cur.rollJitterSecs,
+                                             ") cur.rollJitterSecs = ", cur.rollJitterSecs,
+                                             ",  cur.createdTS = ", cur.createdTS,
+                                             "(", Date::ts_repr(cur.createdTS),
+                                             "), now = ", now,
+                                             " (", Date::ts_repr(now), ")", ansifmt::reset, "\n");
                                 }
 
                                 return true;
@@ -237,14 +243,17 @@ void topic_partition_log::roll(const uint64_t absSeqNum) {
                 std::uniform_int_distribution<uint32_t> distr(0, max);
 
 		// make sure this is not low
-                cur.rollJitterSecs = std::max<uint32_t>(distr(rng), Timings::Hours::ToSeconds(1));
+                cur.rollJitterSecs = std::max<uint32_t>(distr(rng), 
+			Timings::Hours::ToSeconds(1));
         } else {
 		// something sensible
-                cur.rollJitterSecs =  Timings::Weeks::ToSeconds(1);
+                cur.rollJitterSecs = std::max<uint32_t>(Timings::Hours::ToSeconds(1), Timings::Weeks::ToSeconds(1));
         }
 
         cur.flush_state.pendingFlushMsgs = 0;
-        cur.flush_state.nextFlushTS      = config.flushIntervalSecs ? time(nullptr) + config.flushIntervalSecs : UINT32_MAX;
+        cur.flush_state.nextFlushTS      = config.flushIntervalSecs
+                                          ? time(nullptr) + config.flushIntervalSecs
+                                          : UINT32_MAX;
 
         if (trace) {
                 SLog("Switched\n");

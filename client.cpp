@@ -1,29 +1,6 @@
 #include "client_common.h"
 #include <sys/eventfd.h>
 
-void TankClient::wait_scheduled(const uint32_t req_id) {
-        TANK_EXPECT(req_id);
-
-        while (should_poll()) {
-                poll(1000);
-
-                if (unlikely(!faults().empty())) {
-                        throw Switch::data_error("Fault while waiting responses");
-                }
-
-                for (const auto &it : produce_acks()) {
-                        if (it.clientReqId == req_id) {
-                                return;
-                        }
-                }
-
-                for (const auto &it : consumed()) {
-                        if (it.clientReqId == req_id) {
-                                return;
-                        }
-                }
-        }
-}
 
 TankClient::TankClient(const strwlen32_t endpoints) {
         interrupt_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
