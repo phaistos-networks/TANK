@@ -4,6 +4,10 @@ void rebuild_partition_tracked_isrs(topic_partition *);
 void isr_touch(isr_entry *, const uint64_t);
 #endif
 
+void schedule_compaction(std::unique_ptr<pending_compaction> &&);
+
+void schedule_compaction(const char *, topic_partition_log *);
+
 void track_accessed_partition(topic_partition *, const time_t);
 
 void consider_active_partitions();
@@ -119,6 +123,8 @@ void disable_listener();
 bool consider_idle_consul_connection(connection *);
 
 bool register_with_cluster();
+
+static void rm_tankdir(const char *);
 
 static void parse_partition_config(const char *, partition_config *);
 

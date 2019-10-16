@@ -15,7 +15,7 @@
 #endif
 
 #define MAKE_TANK_RELEASE(major, minor) ((major)*100 + (minor))
-#define TANK_VERSION (MAKE_TANK_RELEASE(2, 1))
+#define TANK_VERSION (MAKE_TANK_RELEASE(2, 2))
 
 // All kind of if (trace) SLog() calls here, for checks and for debugging. Will be stripped out later
 
@@ -67,32 +67,31 @@ namespace TANKUtil {
                 return std::min(res_type(t), res_type(minimum(p...)));
         }
 
-	// TODO: figure out a better name
-	namespace produce_request_acks { 
-		// Require ack from all nodes in ISR
-		inline uint8_t ISR() noexcept {
-			return 0;
-		}
+        // TODO: figure out a better name
+        namespace produce_request_acks {
+                // Require ack from all nodes in ISR
+                inline uint8_t ISR() noexcept {
+                        return 0;
+                }
 
-		// Require ack from (all nodes in ISR / 2 + 1)
-		inline uint8_t ISR_quorum() noexcept {
-			return 255;
-		}
+                // Require ack from (all nodes in ISR / 2 + 1)
+                inline uint8_t ISR_quorum() noexcept {
+                        return 255;
+                }
 
-		inline uint8_t value(const uint8_t v) {
-			TANK_EXPECT(v != ISR());
-			TANK_EXPECT(v != ISR_quorum());
-			return v;
-		}
-	}
+                inline uint8_t value(const uint8_t v) {
+                        TANK_EXPECT(v != ISR());
+                        TANK_EXPECT(v != ISR_quorum());
+                        return v;
+                }
+        } // namespace produce_request_acks
 
-	// we need this to guard agains race condition which stem from our deferred _now updates
-	inline constexpr uint32_t time32_delta(const time32_t start, const time32_t end) {
-		return end >= start ? end - start : 0;
-	}
+        // we need this to guard agains race condition which stem from our deferred _now updates
+        inline constexpr uint32_t time32_delta(const time32_t start, const time32_t end) {
+                return end >= start ? end - start : 0;
+        }
 
-
-	// saniy check
-	static_assert(time32_delta(0, 10) == 10);
-	static_assert(time32_delta(11, 10) == 0);
+        // saniy check
+        static_assert(time32_delta(0, 10) == 10);
+        static_assert(time32_delta(11, 10) == 0);
 } // namespace TANKUtil

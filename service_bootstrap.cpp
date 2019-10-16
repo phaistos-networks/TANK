@@ -6,11 +6,11 @@ extern std::condition_variable          mbox_cv;
 
 // TODO(markp): https://github.com/phaistos-networks/TANK/issues/7
 int Service::start(int argc, char **argv) {
-	static constexpr bool trace{false};
-        sockaddr_in   sa;
-        int           r;
-        struct stat64 st;
-        size_t        totalPartitions{0};
+        static constexpr bool trace{false};
+        sockaddr_in           sa;
+        int                   r;
+        struct stat64         st;
+        size_t                totalPartitions{0};
 
 #ifndef LEAN_SWITCH
         // See: https://github.com/markpapadakis/BacktraceResolver
@@ -24,15 +24,15 @@ int Service::start(int argc, char **argv) {
 
         prom_endpoint.unset();
 
-	if (argc == 1) {
-		goto help;
-	}
+        if (argc == 1) {
+                goto help;
+        }
 
         while ((r = getopt(argc, argv, "p:l:hvP:rC:")) != -1) {
                 switch (r) {
                         case 'C': {
                                 auto [id_repr, cluster_name] = str_view32(optarg).divided('@');
-				str_view32 endpoint_repr;
+                                str_view32 endpoint_repr;
 
                                 if (const auto p = cluster_name.Search('|')) {
                                         endpoint_repr = cluster_name.SuffixFrom(p + 1);
@@ -72,15 +72,15 @@ int Service::start(int argc, char **argv) {
                                         consul_state.srv.endpoint = e;
                                 }
 
-				if (int fd = open("tank_consul.token", O_RDONLY); -1 == fd) {
-					Print(ansifmt::color_red, "Failed to access tank_consul.token: ", ansifmt::reset, strerror(errno), "\n");
-					Print("The consul agent API token should be stored in that file so that interfacing with the Consul Cluster can be accomplished.\n");
-					return 1;
-				} else if (const auto file_size= lseek(fd, 0, SEEK_END); file_size == 0 || file_size > 64) {
-					close(fd);
-					Print("Not valid consul agent API token found in tank_consul.token.\n");
-					Print("That file should only contain a valid consul API token\n");
-					return 1;
+                                if (int fd = open("tank_consul.token", O_RDONLY); - 1 == fd) {
+                                        Print(ansifmt::color_red, "Failed to access tank_consul.token: ", ansifmt::reset, strerror(errno), "\n");
+                                        Print("The consul agent API token should be stored in that file so that interfacing with the Consul Cluster can be accomplished.\n");
+                                        return 1;
+                                } else if (const auto file_size = lseek(fd, 0, SEEK_END); file_size == 0 || file_size > 64) {
+                                        close(fd);
+                                        Print("Not valid consul agent API token found in tank_consul.token.\n");
+                                        Print("That file should only contain a valid consul API token\n");
+                                        return 1;
                                 } else {
                                         char buf[file_size];
 
@@ -90,7 +90,7 @@ int Service::start(int argc, char **argv) {
                                                 return 1;
                                         }
 
-					const auto token = str_view32(buf, file_size).ws_trimmed();
+                                        const auto token = str_view32(buf, file_size).ws_trimmed();
 
                                         memcpy(consul_state._token, token.data(), token.size());
                                         consul_state._token_len = token.size();
@@ -124,21 +124,20 @@ int Service::start(int argc, char **argv) {
                                 break;
 
                         case 'h':
-help:
-				Print("Usage: ./tank <settings> [-h] [-v] [-C <spec>]\n\n");
-				Print("Settings:\n");
-				Print(Buffer{}.append(align_to(5), "-p <path>"_s32, align_to(24), "Specifies the base path for all TANK data"_s32), "\n");
-				Print(Buffer{}.append(align_to(5), "-l <endpoint>"_s32, align_to(24), "Specifies the endpoint to to listen for incoming connections."_s32), "\n", Buffer{}.append(align_to(24), "Endpoint notation is [address:]port"_s32), "\n");
-				Print(Buffer{}.append(align_to(5), "-C <spec>"_s32, align_to(24), "Have this node join a TANK cluster. spec notation is nodeid@cluster_name"_s32), "\n", Buffer{}.append(left_aligned(24, "This is how TANK clusters are built. One or more TANK nodes can form clusters. Multiple TANK clusters can be defined. Each TANK node is identified by a unique node id that is specified using this option.\nCurrently, Consul is supported for leadership election and metadata storage, so TANK will connect to the local Consul node.\nFor more information about Consul, please see https://www.consul.io/ and TANK's Documentation", 76), "\n\n"));
+                        help:
+                                Print("Usage: ./tank <settings> [-h] [-v] [-C <spec>]\n\n");
+                                Print("Settings:\n");
+                                Print(Buffer{}.append(align_to(5), "-p <path>"_s32, align_to(24), "Specifies the base path for all TANK data"_s32), "\n");
+                                Print(Buffer{}.append(align_to(5), "-l <endpoint>"_s32, align_to(24), "Specifies the endpoint to to listen for incoming connections."_s32), "\n", Buffer{}.append(align_to(24), "Endpoint notation is [address:]port"_s32), "\n");
+                                Print(Buffer{}.append(align_to(5), "-C <spec>"_s32, align_to(24), "Have this node join a TANK cluster. spec notation is nodeid@cluster_name"_s32), "\n", Buffer{}.append(left_aligned(24, "This is how TANK clusters are built. One or more TANK nodes can form clusters. Multiple TANK clusters can be defined. Each TANK node is identified by a unique node id that is specified using this option.\nCurrently, Consul is supported for leadership election and metadata storage, so TANK will connect to the local Consul node.\nFor more information about Consul, please see https://www.consul.io/ and TANK's Documentation", 76), "\n\n"));
 
-
-				Print("\nOther Options:\n");
-				Print(Buffer{}.append(align_to(5), "-v"_s32, align_to(24), "Enable verbose messages output"_s32), "\n");
-				Print(Buffer{}.append(align_to(5), "-h"_s32, align_to(24), "This help message"_s32), "\n");
-				Print("\n\nExamples:\n");
-				Print(Buffer{}.append(left_aligned(7, "./tank -p /data/TANK -l :11011 :Starts a TANK node where the TANK data files are stored in /tmp/TANK and accepts requests at localhost:11011"_s32, 76)), "\n\n");
-				Print(Buffer{}.append(left_aligned(7, "./tank -p /data/TANK -l 10.5.5.10:11011 :Starts a TANK node where the TANK data files are stored in /tmp/TANK and accepts requests at 10.5.5.10:11011"_s32, 76)), "\n");
-				Print(Buffer{}.append(left_aligned(7, "./tank -p /data/TANK -l 10.5.5.10:11011 -C 1@my_cluster: Starts a TANK node where the TANK data files are stored in /tmp/TANK and accepts requests at 10.5.5.10:11011, and joins or creates the TANK cluster 'my_cluster'\nThe node maybe become the cluster leader and may replicate data from existing topic parttiions immediately. Please see TANK's documentation for Clusters terminology and guides"_s32, 76)), "\n");
+                                Print("\nOther Options:\n");
+                                Print(Buffer{}.append(align_to(5), "-v"_s32, align_to(24), "Enable verbose messages output"_s32), "\n");
+                                Print(Buffer{}.append(align_to(5), "-h"_s32, align_to(24), "This help message"_s32), "\n");
+                                Print("\n\nExamples:\n");
+                                Print(Buffer{}.append(left_aligned(7, "./tank -p /data/TANK -l :11011 :Starts a TANK node where the TANK data files are stored in /tmp/TANK and accepts requests at localhost:11011"_s32, 76)), "\n\n");
+                                Print(Buffer{}.append(left_aligned(7, "./tank -p /data/TANK -l 10.5.5.10:11011 :Starts a TANK node where the TANK data files are stored in /tmp/TANK and accepts requests at 10.5.5.10:11011"_s32, 76)), "\n");
+                                Print(Buffer{}.append(left_aligned(7, "./tank -p /data/TANK -l 10.5.5.10:11011 -C 1@my_cluster: Starts a TANK node where the TANK data files are stored in /tmp/TANK and accepts requests at 10.5.5.10:11011, and joins or creates the TANK cluster 'my_cluster'\nThe node maybe become the cluster leader and may replicate data from existing topic parttiions immediately. Please see TANK's documentation for Clusters terminology and guides"_s32, 76)), "\n");
                                 return 0;
 
                         case 'v':
@@ -159,9 +158,9 @@ help:
                 return 1;
         }
 
-	if (trace) {
-		SLog("cluster_aware() = ", cluster_aware(), ", basePath_ = ", basePath_, "\n");
-	}
+        if (trace) {
+                SLog("cluster_aware() = ", cluster_aware(), ", basePath_ = ", basePath_, "\n");
+        }
 
         if (basePath_.empty()) {
                 Print("Base path not specified. Use -p path to specify it\n");
@@ -187,12 +186,12 @@ help:
                         char                                                                 fullPath[PATH_MAX];
 
                         if (trace) {
-                                before = Timings::Microseconds::Tick(); 
-			}
+                                before = Timings::Microseconds::Tick();
+                        }
 
-			if (trace) {
-				SLog("Attempting to iterate names in ", basePath_, "\n");
-			}
+                        if (trace) {
+                                SLog("Attempting to iterate names in ", basePath_, "\n");
+                        }
 
                         for (const auto &&name : DirectoryEntries(basePath_.data())) {
                                 if (name.Eq(_S(".cleanup.log"))) {
@@ -239,7 +238,9 @@ help:
                                                         cleanupCheckpoints.push_back({{{a.CopyOf(topicName.p, topicName.len), topicName.len}, partition}, seqNum});
                                                 }
                                         }
-                                } else if (*name.p != '.') {
+                                } else if (name == "."_s8 || name == ".."_s8) {
+                                        continue;
+                                } else {
                                         struct stat64 st;
 
                                         basePath_.ToCString(fullPath, sizeof(fullPath));
@@ -250,69 +251,88 @@ help:
                                                 throw Switch::system_error("Failed to stat(", fullPath, "): ", strerror(errno));
                                         else if (!S_ISDIR(st.st_mode)) {
                                                 // Just ignore whatever isn't a directory
-						if (trace) {
-							SLog("Ignoring [", name, "]: not a directory\n");
-						}
+                                                if (trace) {
+                                                        SLog("Ignoring [", name, "]: not a directory\n");
+                                                }
                                         } else {
-                                                collectedTopics.emplace_back(a.CopyOf(name.p, name.len), name.len);
+                                                if (name.front() == '.') {
+                                                        if (false) {
+                                                                Print(ansifmt::color_red, "Found stray topic '", name, "'. Will attempt to delete it", ansifmt::reset, "\n");
+                                                                rm_tankdir(fullPath);
+                                                        } else {
+								// TODO: https://github.com/phaistos-networks/TANK/issues/70
+                                                                Print(ansifmt::color_red, "Found stray topic '", name, "'. Will NOT attempt to delete it", ansifmt::reset, "\n");
+                                                        }
+                                                } else {
+                                                        collectedTopics.emplace_back(a.CopyOf(name.p, name.len), name.len);
+                                                }
                                         }
                                 }
                         }
 
                         if (trace) {
                                 SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " for initial walk ", collectedTopics.size(), " topics\n");
-			}
+                        }
 
                         for (const auto &it : collectedTopics) {
-                                futures.push_back(std::async(std::launch(std::launch::async), [&collectLock, this, &pendingPartitions](const strwlen8_t name) {
-                                        char          path[PATH_MAX];
-                                        struct stat64 st;
-                                        const auto    len = Snprint(path, sizeof(path), basePath_, "/", name, "/");
+                                futures.push_back(std::async(
+                                    std::launch(std::launch::async), [&collectLock, this, &pendingPartitions](const strwlen8_t name) {
+                                            char          path[PATH_MAX];
+                                            struct stat64 st;
+                                            const auto    len = Snprint(path, sizeof(path), basePath_, "/", name, "/");
 
-                                        if (stat64(path, &st) == -1) {
-                                                throw Switch::system_error("Failed to stat(", basePath_, "): ", strerror(errno));
-                                        } else if (st.st_mode & S_IFDIR) {
-                                                uint32_t         partitionsCnt{0}, min{UINT32_MAX}, max{0};
-                                                partition_config partitionConfig;
+                                            if (stat64(path, &st) == -1) {
+                                                    throw Switch::system_error("Failed to stat(", basePath_, "): ", strerror(errno));
+                                            } else if (st.st_mode & S_IFDIR) {
+                                                    uint32_t         partitionsCnt{0}, min{UINT32_MAX}, max{0};
+                                                    partition_config partitionConfig;
 
-                                                for (const auto &&name : DirectoryEntries(path)) {
-                                                        name.ToCString(path + len);
+                                                    for (const auto &&name : DirectoryEntries(path)) {
+                                                            name.ToCString(path + len);
 
-                                                        if (name.Eq(_S("config"))) {
-                                                                // topic overrides defaults
-                                                                parse_partition_config(path, &partitionConfig);
-                                                        } else if (name.IsDigits()) {
-                                                                if (stat64(path, &st) == -1) {
-                                                                        throw Switch::system_error("Failed to stat(", basePath_, "): ", strerror(errno));
-                                                                } else if (st.st_mode & S_IFDIR) {
-                                                                        const auto id = name.AsUint32();
+                                                            if (name.Eq(_S("config"))) {
+                                                                    // topic overrides defaults
+                                                                    parse_partition_config(path, &partitionConfig);
+                                                            } else if (name.IsDigits()) {
+                                                                    if (stat64(path, &st) == -1) {
+                                                                            throw Switch::system_error("Failed to stat(", basePath_, "): ", strerror(errno));
+                                                                    } else if (st.st_mode & S_IFDIR) {
+                                                                            const auto id = name.AsUint32();
 
-                                                                        min = std::min<uint32_t>(min, id);
-                                                                        max = std::max<uint32_t>(max, id);
-                                                                        ++partitionsCnt;
-                                                                }
-                                                        }
-                                                }
+                                                                            min = std::min<uint32_t>(min, id);
+                                                                            max = std::max<uint32_t>(max, id);
+                                                                            ++partitionsCnt;
+                                                                    }
+                                                            }
+                                                    }
 
-                                                if (partitionsCnt) {
-                                                        if (min != 0 && max != partitionsCnt - 1) {
-                                                                throw Switch::system_error("Unexpected partitions list; expected [0, ", partitionsCnt - 1, "]");
-                                                        }
+                                                    if (partitionsCnt) {
+                                                            if (min != 0 && max != partitionsCnt - 1) {
+                                                                    throw Switch::system_error("Unexpected partitions list; expected [0, ", partitionsCnt - 1, "]");
+                                                            }
 
-                                                        auto t = Switch::make_sharedref<topic>(name, partitionConfig);
+                                                            auto t = Switch::make_sharedref<topic>(name, partitionConfig);
 
-                                                        TANK_EXPECT(t->use_count() == 1);
+                                                            TANK_EXPECT(t->use_count() == 1);
 
-                                                        collectLock.lock();
-                                                        pendingPartitions.emplace_back(t.get(), partitionsCnt);
-                                                        register_topic(t.get());
-                                                        collectLock.unlock();
-                                                } else if (trace) {
-							SLog("NO partitions for ", path, "\n");
-						}
-                                        }
-                                },
-                                                             it));
+                                                            collectLock.lock();
+                                                            pendingPartitions.emplace_back(t.get(), partitionsCnt);
+                                                            register_topic(t.get());
+                                                            collectLock.unlock();
+                                                    } else {
+                                                            path[len] = '\0'; // this is important
+
+                                                            if (false) {
+                                                                    Print(ansifmt::color_red, "No partions found in ", path, ": Will delete topic", ansifmt::reset, "\n");
+                                                                    rm_tankdir(path);
+                                                            } else {
+								    // TODO: https://github.com/phaistos-networks/TANK/issues/70
+                                                                    Print(ansifmt::color_red, "No partions found in ", path, ": Will NOT delete topic", ansifmt::reset, "\n");
+                                                            }
+                                                    }
+                                            }
+                                    },
+                                    it));
                         }
 
                         for (auto &it : futures) {
@@ -323,7 +343,7 @@ help:
 
                         if (trace) {
                                 SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " for topics\n");
-			}
+                        }
 
                         if (!pendingPartitions.empty()) {
                                 static constexpr bool                                                   trace{false};
@@ -331,22 +351,23 @@ help:
 
                                 if (trace) {
                                         SLog("pendingPartitions.size() = ", pendingPartitions.size(), "\n");
-				}
+                                }
 
                                 futures.clear();
                                 for (auto &it : pendingPartitions) {
                                         auto t = it.first;
 
                                         for (uint16_t i{0}; i != it.second; ++i) {
-                                                futures.push_back(std::async(std::launch(std::launch::async), [&list, &collectLock, this](topic *t, const uint16_t partition) {
-							TANK_EXPECT(t);
-                                                        auto p = init_local_partition(partition, t, t->partitionConf);
+                                                futures.push_back(std::async(
+                                                    std::launch(std::launch::async), [&list, &collectLock, this](topic *t, const uint16_t partition) {
+                                                            TANK_EXPECT(t);
+                                                            auto p = init_local_partition(partition, t, t->partitionConf);
 
-                                                        collectLock.lock();
-                                                        list.emplace_back(t, std::move(p));
-                                                        collectLock.unlock();
-                                                },
-                                                                             t, i));
+                                                            collectLock.lock();
+                                                            list.emplace_back(t, std::move(p));
+                                                            collectLock.unlock();
+                                                    },
+                                                    t, i));
                                         }
                                 }
 
@@ -357,11 +378,11 @@ help:
 
                                 for (auto &it : futures) {
                                         it.get();
-				}
+                                }
 
                                 if (trace) {
                                         SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " for all partitions\n");
-				}
+                                }
 
                                 std::sort(list.begin(), list.end(), [](const auto &a, const auto &b) noexcept {
                                         return uintptr_t(a.first) < uintptr_t(b.first);
@@ -372,7 +393,7 @@ help:
 
                                 if (trace) {
                                         before = Timings::Microseconds::Tick();
-				}
+                                }
 
                                 for (uint32_t i{0}; i != n;) {
                                         auto t = list[i].first;
@@ -407,7 +428,7 @@ help:
 
                                 if (trace) {
                                         SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " to initialize all partitions\n");
-				}
+                                }
                         }
                 } catch (const std::exception &e) {
                         Print("Failed to initialize topics and partitions:", e.what(), "\n");
@@ -418,10 +439,10 @@ help:
         Print(ansifmt::bold, "<=TANK=>", ansifmt::reset, " v", TANK_VERSION / 100, ".", TANK_VERSION % 100, " | ", dotnotation_repr(topics.size()), " topics registered, ", dotnotation_repr(totalPartitions), " partitions; will listen for new connections at ", tank_listen_ep, "\n");
         if (prom_endpoint) {
                 Print("> Prometheus Exporter enabled, will respond to http://", prom_endpoint, "/metrics\n");
-	}
+        }
         if (read_only) {
                 Print("> Read-Only mode; some functionality/APIs will be unavailable\n");
-	}
+        }
         Print("(C) Phaistos Networks, S.A. - ", ansifmt::color_green, "http://phaistosnetworks.gr/", ansifmt::reset, ". Licensed under the Apache License\n\n");
 
         if (topics.empty()) {

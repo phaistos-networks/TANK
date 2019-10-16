@@ -28,7 +28,9 @@ std::pair<uint32_t, uint32_t> ro_segment::snap_ceil(const uint64_t abs_seqnum) c
 // and offset is the offset in the file where that bundle is serialized
 //
 // it looks for the last bundle that may include the message with sequence number abs_seqnum
-std::pair<uint32_t, uint32_t> ro_segment::snap_floor(const uint64_t abs_seqnum) const {
+//
+// It "snaps" to the last messages set tracked in the index where its first msg seqnunce number <= abs_seqnum
+std::pair<uint32_t, uint32_t> ro_segment::snap_floor(const uint64_t abs_seqnum) const  TANK_NOEXCEPT_IF_NORUNTIME_CHECKS{
         static constexpr bool trace{false};
 
         if (haveWideEntries) {
@@ -38,6 +40,7 @@ std::pair<uint32_t, uint32_t> ro_segment::snap_floor(const uint64_t abs_seqnum) 
         const auto rel_seqnum = static_cast<uint32_t>(abs_seqnum - baseSeqNum);
 
         if (trace) {
+                SLog("In snap_floor(): will determine to determine the (bundle, offset) in the RO segment where (bundle.msgset.firstmsg.seq_num <= ", abs_seqnum, ") and offset is the offset in the file where the bundle is serialized\n");
                 SLog("abs_seqnum = ", abs_seqnum, ", rel_seqnum = ", rel_seqnum, "\n");
         }
 
@@ -55,22 +58,24 @@ std::pair<uint32_t, uint32_t> ro_segment::snap_floor(const uint64_t abs_seqnum) 
                 }
 
                 return {0, 0};
-        } else {
-                if (trace) {
-                        SLog("Found in SL (relSeqNum = ", it->relSeqNum, ", absPhysical = ", it->absPhysical, "}\n");
+        }
 
+        if (trace) {
+                SLog("Found rel_seq_num(", rel_seqnum, ") in skip-list snapped to: (relSeqNum = ", it->relSeqNum, ", absPhysical = ", it->absPhysical, "}\n");
+
+                if (false) {
                         for (unsigned i = 0; i < index.fileSize / sizeof(index_record); ++i) {
                                 const auto &it = all[i];
 
                                 SLog(">> ", i, " ", it.relSeqNum, " ", it.absPhysical, "\n");
                         }
                 }
-
-                return {it->relSeqNum, it->absPhysical};
         }
+
+        return {it->relSeqNum, it->absPhysical};
 }
 
-ro_segment_lookup_res ro_segment::translate_floor(const uint64_t absSeqNum, const uint32_t max) const {
+ro_segment_lookup_res ro_segment::translate_floor(const uint64_t absSeqNum, const uint32_t max) const TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
         const auto res = snap_floor(absSeqNum);
 
         return {{res.first, res.second}, fileSize - res.second};
@@ -78,20 +83,35 @@ ro_segment_lookup_res ro_segment::translate_floor(const uint64_t absSeqNum, cons
 
 // Searches forward starting from `file_offset`, in order to determine how far ahead it should read based on `max_abs_seq_num` and `file_size`
 // in order to reduce the size of the chunk to be streamed.
-// TODO(markp): read in 4k chunks/time or something more appropriate
-uint32_t search_before_offset(uint64_t base_seqnum, const uint32_t max_size, const uint64_t max_abs_seq_num, int fd, const uint32_t file_size, uint32_t file_offset) {
-        static constexpr bool   trace{false};
-        uint8_t                 buf[64];
-        uint64_t                last_msg_seqnum;
-        int                     r;
-        const auto              limit = max_size != std::numeric_limits<uint32_t>::max()
-                               ? std::min<uint32_t>(file_size, file_offset + max_size)
+//
+// TODO(markp): read in 4k chunks/time or something more appropriate, reading 64bytes/time is just too expensive(need to trampoline to the kernel)
+uint32_t search_before_offset(uint64_t       base_seqnum,
+                              const uint32_t max_size,
+                              const uint64_t max_abs_seq_num,
+                              int            fd,
+                              const uint32_t file_size,
+                              uint32_t       file_offset) {
+        static constexpr bool trace{false};
+        uint8_t               buf[64];
+        uint64_t              last_msg_seqnum;
+        int                   r;
+        const auto            limit = max_size != std::numeric_limits<uint32_t>::max()
+                               ? std::min<uint32_t>(file_size, std::max<uint32_t>(file_offset + max_size, 8192))
                                : file_size;
 
         if (trace) {
-                SLog("Searching for offset ", max_abs_seq_num, ", limit = ", limit, "(max_size = ", max_size, ", base_seqnum = ", base_seqnum, ", file_offset = ", file_offset, ", file_size = ", file_size, ")\n");
+                SLog(ansifmt::color_brown, "Searching forward starting from file_offset(", file_offset, ") in order to determine how far ahead we should read based on max_abs_seq_num(", max_abs_seq_num, ") and file_size(", file_size, ") in order to reduce the size of the chunk to be streamed", ansifmt::reset, "\n");
+                SLog("Searching for max_abs_seq_num =  ",
+                     max_abs_seq_num,
+                     ", limit = ", limit,
+                     "(max_size = ", max_size,
+                     ", base_seqnum = ", base_seqnum,
+                     ", file_offset = ", file_offset,
+                     ", file_size = ", file_size, ")\n");
         }
 
+	// we used snap_floor() to snap to a message set
+	// so we can safely read assuming we are at the beginning of a message set
         while (file_offset < limit) {
                 // read bundle header
                 // we may wind up reading a partial header, and that's OK
@@ -112,12 +132,16 @@ uint32_t search_before_offset(uint64_t base_seqnum, const uint32_t max_size, con
                 if (unlikely(r < 4)) {
                         // we didn't get to read enough
                         // point to the end of file
-                        return file_size;
+                        if (trace) {
+                                SLog("ODD, read just ", r, " bytes, expected at least 4\n");
+                        }
+
+			break;
                 }
 
                 const auto *   p                       = buf;
                 const auto     bundle_len              = Compression::decode_varuint32(p);
-                const auto     encoded_bundle_len_len  = std::distance(buf, const_cast<uint8_t *>(p));
+                const auto     encoded_bundle_len_len  = std::distance(buf, const_cast<uint8_t *>(p)); // how many bytes used to varint encode the bundle length
                 const auto     bundle_hdr_flags        = decode_pod<uint8_t>(p);
                 const bool     bundlehdr_sparsebit_set = bundle_hdr_flags & (1u << 6);
                 const uint32_t msgset_size             = ((bundle_hdr_flags >> 2) & 0xf) ?: Compression::decode_varuint32(p);
@@ -137,30 +161,52 @@ uint32_t search_before_offset(uint64_t base_seqnum, const uint32_t max_size, con
                 }
 
                 if (trace) {
-                        SLog("abs = ", base_seqnum, "(msgset_size = ", msgset_size, ") VS ", max_abs_seq_num, " at ", file_offset, "\n");
+                        SLog("Now at abs = ", base_seqnum, "(msgset_size = ", msgset_size, ") VS ", max_abs_seq_num, " at ", file_offset, "\n");
                 }
 
                 if (base_seqnum > max_abs_seq_num) {
                         // stop at bundle serialized at `file_offset`
-			if (trace) {
-				SLog("Stopping at bundle serialized at ", file_offset, " with first msg.seqnum = ", base_seqnum, "\n");
-			}
-                        break;
-                } else {
-                        // skip past this bundle
-                        if (bundlehdr_sparsebit_set) {
-                                base_seqnum = last_msg_seqnum + 1;
-                        } else {
-                                base_seqnum += msgset_size;
+                        if (trace) {
+                                SLog("Stopping at bundle serialized at ", file_offset, " with first msg.seqnum = ", base_seqnum, "\n");
                         }
 
-                        file_offset += bundle_len + encoded_bundle_len_len;
+                        break;
                 }
+
+                // skip past this bundle
+                if (trace) {
+                        SLog(ansifmt::bold,"Skipping past this bundle, because base_seqnum(", base_seqnum, " <= ", max_abs_seq_num, "), to advance by ", bundle_len + encoded_bundle_len_len, ansifmt::reset, "\n");
+                }
+
+                if (bundlehdr_sparsebit_set) {
+                        base_seqnum = last_msg_seqnum + 1;
+                } else {
+                        base_seqnum += msgset_size;
+                }
+
+                // Skip to the next message set
+                file_offset += bundle_len + encoded_bundle_len_len;
         }
 
         if (trace) {
                 SLog("Returning file_offset = ", file_offset, "\n");
         }
+
+
+#if 0 // actually, disregard all that
+	// This is an important fix
+	// 1. Assume we are looking for sequence number 12921505518
+	// 2. We found a RO Segment with base sequence number 12911987799. Relative seqnum of 12921505518 in it is 9517719
+	// 3. We snapped 9517719 via the skip-list to (rel_seqnum = 9517687, file_offset = 1073738775, abs_seq_num = 12921505486) in that RO Segment. span (i.e file_size - file_offset) = 4380
+	// 4. In this function, we search starting at offset 1073738775 in order to determine the ceiling
+	//
+	// To accomplish this, we read from [1073738775, 1073743155). 1073743155 is the file size of the RO segmnet
+	// The problem is, there is no other message set past the message set at 1073738775
+	// so our (base_seqnum > max_abs_seq_num)
+#endif
+
+
+
 
         return file_offset;
 }
@@ -178,11 +224,18 @@ uint32_t search_before_offset(uint64_t base_seqnum, const uint32_t max_size, con
 // it encodes the sequence number of its first message in its header)
 //
 // See also search_before_offset()
-bool adjust_range_start(lookup_res &res, const uint64_t abs_seq_num, robin_hood::unordered_map<uint64_t, adjust_range_start_cache_value> *const cache) {
+bool adjust_range_start(lookup_res &                                                               res,
+                        const uint64_t                                                             abs_seq_num,
+                        robin_hood::unordered_map<uint64_t, adjust_range_start_cache_value> *const cache) {
         static constexpr bool trace{false};
         uint64_t              base_seqnum = res.absBaseSeqNum;
 
-	TANK_EXPECT(res.fault == lookup_res::Fault::NoFault);
+        TANK_EXPECT(res.fault == lookup_res::Fault::NoFault);
+
+        if (trace) {
+                SLog(ansifmt::color_green, "We are working on index boundaries, so our res.file_offset is aligned on an index boundary, which means we may stream (0, partition_config::indexInterval) excess bytes\n");
+                SLog("We will scan AHEAD from that file offset until we find a more appropriate file offset to begin streaming for, and adjust res.file_offset and res.base_seqnum if possible", ansifmt::reset, "\n");
+        }
 
         if (trace == false) {
                 // explicitly allow so that we can verify it does the right thing when tracing
@@ -200,7 +253,7 @@ bool adjust_range_start(lookup_res &res, const uint64_t abs_seq_num, robin_hood:
 
         if (cache) {
                 // we only use this for the current segment
-		// this should help with a thundering herd of consume requests
+                // this should help with a thundering herd of consume requests
                 cache_res = cache->emplace(abs_seq_num, adjust_range_start_cache_value{});
 
                 if (!cache_res.second) {
@@ -243,9 +296,9 @@ bool adjust_range_start(lookup_res &res, const uint64_t abs_seq_num, robin_hood:
                         }
                 }
 
-		if (unlikely(r < 32)) {
-			// TODO: what do we do?
-		}
+                if (unlikely(r < 32)) {
+                        // TODO: what do we do?
+                }
 
                 const auto *const base_buf   = tiny_buf;
                 const uint8_t *   p          = base_buf;
@@ -253,7 +306,7 @@ bool adjust_range_start(lookup_res &res, const uint64_t abs_seq_num, robin_hood:
 
                 TANK_EXPECT(bundle_len);
 
-                const auto     encoded_bundle_len_len     = std::distance(base_buf, p);
+                const auto     encoded_bundle_len_len     = std::distance(base_buf, p); // how many bytes used to varint encode the bundle length
                 const auto     bundleheader_flags         = decode_pod<uint8_t>(p);
                 const bool     bundleheader_sparsebit_set = bundleheader_flags & (1u << 6);
                 const uint32_t msgset_size                = ((bundleheader_flags >> 2) & 0xf) ?: Compression::decode_varuint32(p);
@@ -276,10 +329,16 @@ bool adjust_range_start(lookup_res &res, const uint64_t abs_seq_num, robin_hood:
                         first_bundle_is_sparse = false;
                 }
 
-                const auto next_bundle_base_seqnum = bundleheader_sparsebit_set ? last_msg_seqnum + 1 : base_seqnum + msgset_size;
+                const auto next_bundle_base_seqnum = bundleheader_sparsebit_set
+                                                         ? last_msg_seqnum + 1
+                                                         : base_seqnum + msgset_size;
 
                 if (trace) {
-                        SLog("Now at bundle(", base_seqnum, "), msgset_size(", msgset_size, "), bundleheader_flags(", bundleheader_flags, "), next_bundle_base_seqnum = ", next_bundle_base_seqnum, "\n");
+                        SLog("Now at bundle(base_seqnum = ", base_seqnum,
+                             "), msgset_size(", msgset_size,
+                             "), bundleheader_flags(", bundleheader_flags,
+                             "), next_bundle_base_seqnum = ",
+                             next_bundle_base_seqnum, "\n");
                 }
 
                 if (abs_seq_num >= next_bundle_base_seqnum) {
@@ -288,7 +347,10 @@ bool adjust_range_start(lookup_res &res, const uint64_t abs_seq_num, robin_hood:
                         base_seqnum = next_bundle_base_seqnum;
 
                         if (trace) {
-                                SLog("Target in later bundle, advanced to = ", o, "\n");
+                                SLog("Target abs_seqnum(", abs_seq_num,
+                                     ") >= next_bundle_base_seqnum(", next_bundle_base_seqnum,
+                                     ") in later bundle, advanced offset by ", bundle_len + encoded_bundle_len_len,
+                                     " to = ", o, "\n");
                         }
                 } else {
                         // Our target is in this bundle
@@ -303,7 +365,10 @@ bool adjust_range_start(lookup_res &res, const uint64_t abs_seq_num, robin_hood:
         }
 
         if (trace) {
-                SLog(ansifmt::color_blue, "After adjustement, file_offset ", res.fileOffset, ", absBaseSeqNum(", res.absBaseSeqNum, "), took  ", duration_repr(Timings::Microseconds::Since(before)), ansifmt::reset, "\n");
+                SLog(ansifmt::inverse, ansifmt::color_blue, "After adjustement, file_offset ", res.fileOffset,
+                     ", fileOffsetCeiling = ", res.fileOffsetCeiling,
+                     ", absBaseSeqNum(", res.absBaseSeqNum,
+                     "), took  ", duration_repr(Timings::Microseconds::Since(before)), ansifmt::reset, "\n");
         }
 
         if (cache) {
@@ -466,12 +531,15 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
                 // XXX: shouldn't we be looking for (res.fileOffset + maxSize) ?
                 //WAS: res.fileOffsetCeiling = search_before_offset(cur.baseSeqNum, maxSize, max_abs_seq_num, cur.fdh->fd, cur.fileSize, ref.absPhysical);
 
-		if (trace) {
-			SLog("Got ref.relSeqNum = ", ref.relSeqNum, ", ref.absPhysical = ", ref.absPhysical, ", cur.fileSize = ", cur.fileSize, ", cur.baseSeqNum = ", cur.baseSeqNum, "\n");
-		}
+                if (trace) {
+                        SLog("Got ref.relSeqNum = ", ref.relSeqNum, ", ref.absPhysical = ", ref.absPhysical, ", cur.fileSize = ", cur.fileSize, ", cur.baseSeqNum = ", cur.baseSeqNum, "\n");
+                }
 
-
-                res.fileOffsetCeiling = search_before_offset(cur.baseSeqNum + ref.relSeqNum, maxSize, max_abs_seq_num, cur.fdh->fd, cur.fileSize, ref.absPhysical);
+                res.fileOffsetCeiling = search_before_offset(cur.baseSeqNum + ref.relSeqNum,
+                                                             maxSize,
+                                                             max_abs_seq_num,
+                                                             cur.fdh->fd, cur.fileSize,
+                                                             ref.absPhysical);
 #endif
 
                 if (trace) {
@@ -520,10 +588,10 @@ lookup_res topic_partition_log::range_for(uint64_t abs_seqnum, const uint32_t ma
                 }
         }
 
-	// if (max_abs_seq_num != std::numeric_limits<uint64_t>::max())
-	// then we are supposed to respect the highwater mark
-	//
-	// callees should special-case Fault::PastMax
+        // if (max_abs_seq_num != std::numeric_limits<uint64_t>::max())
+        // then we are supposed to respect the highwater mark
+        //
+        // callees should special-case Fault::PastMax
         if (abs_seqnum > max_abs_seq_num) {
                 if (trace) {
                         SLog(abs_seqnum, " is past max_abs_seq_num = ", max_abs_seq_num, "\n");
@@ -561,17 +629,34 @@ lookup_res topic_partition_log::range_for(uint64_t abs_seqnum, const uint32_t ma
         return range_for_immutable_segments(abs_seqnum, max_size, max_abs_seq_num);
 }
 
+// Consider all RO segments. Look for the segment which includes abs_seqnum
+// i.e where abs_seqnum is in the range [first_abs_seq_num, last_abs_seq_num] 
+// 
+// It dels with 'gaps' and other edge cases
 lookup_res topic_partition_log::range_for_immutable_segments(uint64_t abs_seqnum, const uint32_t max_size, uint64_t max_abs_seq_num) {
         static constexpr bool trace{false};
         auto                  prevSegments = roSegments;
         const auto            end          = prevSegments->end();
         auto                  it           = std::upper_bound_or_match(prevSegments->begin(), end, abs_seqnum, [](const auto s, const auto abs_seqnum) noexcept {
                 // we need that <=> operator
+		// TODO: use C++20 spaceship operator
                 return TrivialCmp(abs_seqnum, s->baseSeqNum);
         });
 
+#if 0
+	for (const auto it : *prevSegments) {
+		if (abs_seqnum >= it->baseSeqNum) {
+			SLog(ansifmt::bold, ansifmt::color_red, "MATCHED baseSeqNum = ", it->baseSeqNum, ", lastAssignedSeqNum = ", it->lastAvailSeqNum, " IN:", abs_seqnum <= it->lastAvailSeqNum, ansifmt::reset, "\n");
+		}
+	}
+#endif
+
+
         if (trace) {
-                SLog("Looking for abs_seqnum = ", abs_seqnum, ", max_size = ", max_size, ", max_abs_seq_num = ", max_abs_seq_num, " among ", prevSegments->size(), " RO segments\n");
+                SLog("Looking for abs_seqnum = ", abs_seqnum,
+                     ", max_size = ", max_size,
+                     ", max_abs_seq_num = ", max_abs_seq_num,
+                     " among ", prevSegments->size(), " RO segments\n");
         }
 
         if (it != end) {
@@ -593,35 +678,45 @@ lookup_res topic_partition_log::range_for_immutable_segments(uint64_t abs_seqnum
                         abs_seqnum = f->baseSeqNum;
                 }
 
-		if (trace) {
-			SLog("Found abs_seqnum ", abs_seqnum, " in immutable segment with base seqnum ", f->baseSeqNum, "\n");
-		}
+                if (trace) {
+                        SLog(ansifmt::bold, "Found abs_seqnum ", abs_seqnum, " in immutable segment with base seqnum ", f->baseSeqNum, ", lastAvailSeqNum = ", f->lastAvailSeqNum, ansifmt::reset, "\n");
+                }
 
                 const auto res = f->translate_floor(abs_seqnum, UINT32_MAX);
                 uint32_t   offsetCeil;
 
-		if (trace) {
-			SLog("Snapped down to relSeqNum = ", res.record.relSeqNum, ", absPhysical = ", res.record.absPhysical, ", span = ", res.span, "\n");
-		}
-
+                if (trace) {
+                        SLog(ansifmt::bold, "Snapped down to relSeqNum = ", res.record.relSeqNum,
+                             ", absSeqNum = ", res.record.relSeqNum + f->baseSeqNum,
+                             ", absPhysical = ", res.record.absPhysical,
+                             ", span = ", res.span,
+                             " (i.e bytes from absPhysical until the end of the file)", ansifmt::reset, "\n");
+                }
 
                 TANK_EXPECT(f->fdh.use_count());
                 TANK_EXPECT(f->fdh->fd != -1);
+                TANK_EXPECT(abs_seqnum >= f->baseSeqNum && abs_seqnum <= f->lastAvailSeqNum);
 
                 if (trace) {
                         SLog("Found in RO segment (f.baseSeqNum = ", f->baseSeqNum, ", f.lastAvailSeqNum = ", f->lastAvailSeqNum, ")\n");
 
-                        for (const auto &it : *prevSegments) {
-                                SLog(">> (", it->baseSeqNum, ", ", it->lastAvailSeqNum, ")\n");
+                        if (false) {
+                                for (const auto &it : *prevSegments) {
+                                        SLog(">> (", it->baseSeqNum, ", ", it->lastAvailSeqNum, ")\n");
+                                }
                         }
                 }
 
                 if (max_abs_seq_num != std::numeric_limits<uint64_t>::max()) {
                         // Scan forward for the last message with (abs_seqnum < max_abs_seq_num)
+                        if (trace) {
+                                SLog("Will scan forward for the last message with (", abs_seqnum, " < ", max_abs_seq_num, ")\n");
+                        }
+
                         const auto r = f->snap_floor(max_abs_seq_num);
 
                         if (trace) {
-                                SLog("max_abs_seq_num = ", max_abs_seq_num, " => ", r, "\n");
+                                SLog("snap_floor(", max_abs_seq_num, ") => ", r, "\n");
                         }
 
 #if 0
@@ -629,22 +724,35 @@ lookup_res topic_partition_log::range_for_immutable_segments(uint64_t abs_seqnum
 #else
                         // Yes, incur some tiny I/O overhead so that we 'll properly cut-off the content
                         // WAS: offsetCeil = search_before_offset(f->baseSeqNum, max_size, max_abs_seq_num, f->fdh->fd, f->fileSize, r.second);
-                        offsetCeil = search_before_offset(f->baseSeqNum + r.first, max_size, max_abs_seq_num, f->fdh->fd, f->fileSize, r.second);
+
+                        if (trace) {
+                                SLog("Will now search_before_offset()\n");
+                        }
+
+                        offsetCeil = search_before_offset(f->baseSeqNum + r.first,
+                                                          max_size,
+                                                          max_abs_seq_num,
+                                                          f->fdh->fd,
+                                                          f->fileSize,
+                                                          r.second);
 #endif
                 } else {
                         offsetCeil = f->fileSize;
                 }
 
                 if (trace) {
-                        SLog("Returning offsetCeil = ", offsetCeil, ", f.baseSeqNum + ", res.record.relSeqNum, " = ", f->baseSeqNum + res.record.relSeqNum, ", absPhysical = ", res.record.absPhysical, "\n");
-		}
+                        SLog("Returning offsetCeil = ", offsetCeil,
+                             ", f.baseSeqNum + ", res.record.relSeqNum,
+                             " = ", f->baseSeqNum + res.record.relSeqNum,
+                             ", absPhysical = ", res.record.absPhysical, "\n");
+                }
 
-
-                return {f->fdh, offsetCeil, f->baseSeqNum + res.record.relSeqNum, res.record.absPhysical};
+                return {f->fdh, offsetCeil,
+                        f->baseSeqNum + res.record.relSeqNum,
+                        res.record.absPhysical};
         } else if (trace) {
-		SLog("*NOT found in SL*\n");
-	}
-
+                SLog("*NOT found in SL*\n");
+        }
 
         if (trace) {
                 SLog("No segment suitable for abs_seqnum\n");

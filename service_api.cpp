@@ -140,9 +140,10 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
 
                                 resp->pack(static_cast<uint8_t>(2));
                         } else {
-				const auto cleanup = [&]() {
-					// TODO: https://github.com/phaistos-networks/TANK/issues/70
-				};
+                                const auto cleanup = [&]() {
+                                        topicPath[topicPathLen] = '\0';
+                                        rm_tankdir(topicPath);
+                                };
 
                                 try {
                                         auto t = Switch::make_sharedref<topic>(topicName, partitionConfig);

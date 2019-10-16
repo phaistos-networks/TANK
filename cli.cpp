@@ -579,7 +579,7 @@ int main(int argc, char *argv[]) {
                 for (const auto time_range_end = time_range.offset + time_range.size();;) {
                         if (!pendingResp) {
                                 if (verbose) {
-                                        Print("Requesting from ", next, "\n");
+                                        Print("Requesting from ", next, " ", minFetchSize, "\n");
                                 }
 
                                 pendingResp = tank_client.consume({{topicPartition, {next, minFetchSize}}}, drain_and_exit ? 0 : 8e3, 0);
@@ -622,7 +622,7 @@ int main(int argc, char *argv[]) {
                         pendingResp = 0;
                         for (const auto &it : tank_client.consumed()) {
                                 if (verbose) {
-                                        SLog("Drained:", it.drained, "\n");
+                                        SLog("Drained:", it.drained, ", msgs = ", it.msgs.size(), "\n");
                                 }
 
                                 if (drain_and_exit && it.drained) {
@@ -832,8 +832,12 @@ int main(int argc, char *argv[]) {
                                         }
                                 }
 
-                                minFetchSize = Max<size_t>(it.next.minFetchSize, defaultMinFetchSize);
-                                next         = it.next.seqNum;
+				SLog("Current = ", next, " ", it.next.seq_num, " ", minFetchSize, " ", it.next.min_fetch_size, "\n");
+
+                                minFetchSize = std::max<std::size_t>(it.next.min_fetch_size, defaultMinFetchSize);
+                                next         = it.next.seq_num;
+
+				SLog("exiting\n"); exit(0);
                         }
                 }
 

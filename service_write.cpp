@@ -4,16 +4,20 @@ int Rename(const char *oldpath, const char *newpath);
 int Unlink(const char *pathname);
 
 bool topic_partition_log::should_roll(const uint32_t now) const {
-        static constexpr bool trace{false};
-        static constexpr bool trace_yes{false};
+        static constexpr const bool trace = false, trace_yes = false;
 
-	cur.sanity_checks();
+        cur.sanity_checks();
 
         if (cur.fileSize == UINT32_MAX) {
                 return true;
         } else if (cur.fileSize) {
                 if (trace) {
-                        SLog(ansifmt::color_green, " Consider roll:cur.fileSize(", cur.fileSize, "), config.maxSegmentSize(", config.maxSegmentSize, "), skipList.size(", cur.index.skipList.size(), "), config.curSegmentMaxAge (", config.curSegmentMaxAge, "), ", Timings::Seconds::SysTime() - cur.createdTS, " old,  cur.rollJitterSecs = ", cur.rollJitterSecs, ansifmt::reset, "\n");
+                        SLog(ansifmt::color_green, " Consider roll:cur.fileSize(", cur.fileSize,
+                             "), config.maxSegmentSize(", config.maxSegmentSize,
+                             "), skipList.size(", cur.index.skipList.size(),
+                             "), config.curSegmentMaxAge (", config.curSegmentMaxAge,
+                             "), ", Timings::Seconds::SysTime() - cur.createdTS,
+                             " old,  cur.rollJitterSecs = ", cur.rollJitterSecs, ansifmt::reset, "\n");
                 }
 
                 if (cur.fileSize > config.maxSegmentSize) {
@@ -35,11 +39,11 @@ bool topic_partition_log::should_roll(const uint32_t now) const {
                         return true;
                 }
 
-		cur.sanity_checks();
+                cur.sanity_checks();
 
                 if (const auto v = cur.rollJitterSecs) {
-			// XXX: it is important to use time32_delta() to guard against the race that stems from _now updates semantics
-			if (const auto since_seconds = TANKUtil::time32_delta(cur.createdTS, now); since_seconds  > cur.rollJitterSecs) {
+                        // XXX: it is important to use time32_delta() to guard against the race that stems from _now updates semantics
+                        if (const auto since_seconds = TANKUtil::time32_delta(cur.createdTS, now); since_seconds > cur.rollJitterSecs) {
                                 // Soft limit
                                 if (trace || trace_yes) {
                                         SLog(ansifmt::bold, "now - cur.createdTS(",
@@ -77,18 +81,21 @@ bool topic_partition_log::may_switch_index_wide(const uint64_t lastMsgSeqNum) {
         return false;
 }
 
-void topic_partition_log::roll(const uint64_t absSeqNum) {
+void topic_partition_log::roll(const uint64_t absSeqNum, const uint64_t saved_last_assigned_seqnum) {
         static constexpr bool trace{false};
         Buffer                basePath;
         int                   fd;
-        const auto            savedLastAssignedSeqNum = lastAssignedSeqNum;
 
         basePath.append(basePath_, "/", partition->owner->name(), "/", partition->idx, "/");
 
         const auto basePathLen = basePath.size();
 
         if (trace) {
-                SLog("Need to switch to another commit log (cur.fileSize = ", cur.fileSize, "> config.maxSegmentSize = ", config.maxSegmentSize, ") cur.index.skipList.size = ", cur.index.skipList.size(), " basePath = ", basePath, "\n");
+                SLog("Need to switch to another commit log (cur.fileSize = ", cur.fileSize,
+                     "> config.maxSegmentSize = ", config.maxSegmentSize,
+                     ") cur.index.skipList.size = ", cur.index.skipList.size(),
+                     ", lastAssignedSeqNum = ", lastAssignedSeqNum,
+                     " basePath = ", basePath, "\n");
         }
 
         cur.sanity_checks();
@@ -107,7 +114,7 @@ void topic_partition_log::roll(const uint64_t absSeqNum) {
                 const uint64_t freezeTs = st.st_mtime;
 #endif
                 auto       newROFiles = std::make_unique<std::vector<ro_segment *>>();
-                auto       newROFile  = std::make_unique<ro_segment>(cur.baseSeqNum, savedLastAssignedSeqNum, freezeTs);
+                auto       newROFile  = std::make_unique<ro_segment>(cur.baseSeqNum, saved_last_assigned_seqnum, freezeTs);
                 const auto n          = cur.fdh.use_count();
 
                 TANK_EXPECT(n >= 1);
@@ -127,11 +134,11 @@ void topic_partition_log::roll(const uint64_t absSeqNum) {
                 // support sparse sequence numbers space
                 if (cur.nameEncodesTS) {
                         if (Rename(Buffer::build(basePath, "/", cur.baseSeqNum, "_", cur.createdTS, ".log").data(),
-                                   Buffer::build(basePath, "/", cur.baseSeqNum, "-", savedLastAssignedSeqNum, "_", freezeTs, ".ilog").data()) == -1) {
+                                   Buffer::build(basePath, "/", cur.baseSeqNum, "-", saved_last_assigned_seqnum, "_", freezeTs, ".ilog").data()) == -1) {
                                 throw Switch::system_error("Failed to Rename():", strerror(errno));
                         }
                 } else if (Rename(Buffer::build(basePath, "/", cur.baseSeqNum, ".log").data(),
-                                  Buffer::build(basePath, "/", cur.baseSeqNum, "-", savedLastAssignedSeqNum, "_", freezeTs, ".ilog").data()) == -1) {
+                                  Buffer::build(basePath, "/", cur.baseSeqNum, "-", saved_last_assigned_seqnum, "_", freezeTs, ".ilog").data()) == -1) {
                         throw Switch::system_error("Failed to Rename():", strerror(errno));
                 }
 
@@ -242,11 +249,11 @@ void topic_partition_log::roll(const uint64_t absSeqNum) {
                 std::mt19937                            rng(dev());
                 std::uniform_int_distribution<uint32_t> distr(0, max);
 
-		// make sure this is not low
-                cur.rollJitterSecs = std::max<uint32_t>(distr(rng), 
-			Timings::Hours::ToSeconds(1));
+                // make sure this is not low
+                cur.rollJitterSecs = std::max<uint32_t>(distr(rng),
+                                                        Timings::Hours::ToSeconds(1));
         } else {
-		// something sensible
+                // something sensible
                 cur.rollJitterSecs = std::max<uint32_t>(Timings::Hours::ToSeconds(1), Timings::Weeks::ToSeconds(1));
         }
 
@@ -297,10 +304,15 @@ void topic_partition_log::flush_index_skiplist() {
 }
 
 // if (firstMsgSeqNum != 0 && lastMsgSeqNum != 0), we have expicitly specified message sequence numbers for the bundle first/last message
-append_res topic_partition_log::append_bundle(const time_t now, const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt, const uint64_t firstMsgSeqNum, const uint64_t lastMsgSeqNum) {
+append_res topic_partition_log::append_bundle(const time_t   now,
+                                              const void *   bundle,
+                                              const size_t   bundleSize,
+                                              const uint32_t bundleMsgsCnt,
+                                              const uint64_t firstMsgSeqNum,
+                                              const uint64_t lastMsgSeqNum) {
         static constexpr bool trace{false};
-        const auto            savedLastAssignedSeqNum = lastAssignedSeqNum;
-        const auto            absSeqNum               = firstMsgSeqNum ?: lastAssignedSeqNum + 1;
+        const auto            saved_last_assigned_seqnum = lastAssignedSeqNum;
+        const auto            absSeqNum                  = firstMsgSeqNum ?: lastAssignedSeqNum + 1;
 
         if (unlikely(absSeqNum < cur.baseSeqNum && cur.baseSeqNum != std::numeric_limits<uint64_t>::max())) {
                 // This is odd
@@ -309,7 +321,7 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
 
         TANK_EXPECT(bundleMsgsCnt);
 
-	cur.sanity_checks();
+        cur.sanity_checks();
 
         if (lastMsgSeqNum) {
                 // Sparse bundle; last message seqNum encoded in the bundle header
@@ -323,11 +335,14 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
         }
 
         if (trace) {
-                SLog("firstMsgSeqNum(", firstMsgSeqNum, "), lastMsgSeqNum(", lastMsgSeqNum, "), bundleMsgsCnt(", bundleMsgsCnt, ") => lastAssignedSeqNum = ", lastAssignedSeqNum, "\n");
+                SLog("firstMsgSeqNum(", firstMsgSeqNum,
+                     "), lastMsgSeqNum(", lastMsgSeqNum,
+                     "), bundleMsgsCnt(", bundleMsgsCnt,
+                     ") => lastAssignedSeqNum = ", lastAssignedSeqNum, "\n");
         }
 
         if (unlikely(should_roll(now))) {
-                roll(absSeqNum);
+                roll(absSeqNum, saved_last_assigned_seqnum);
         } else {
                 if (lastMsgSeqNum && !cur.index.haveWideEntries) {
                         // This may be necessary
@@ -358,7 +373,7 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
 
         // https://github.com/phaistos-networks/TANK/issues/14
         if (unlikely(writev(fd, iov, sizeof_array(iov)) != entryLen)) {
-                lastAssignedSeqNum = savedLastAssignedSeqNum;
+                lastAssignedSeqNum = saved_last_assigned_seqnum;
                 this_service->track_io_fail(partition);
                 return {nullptr, {}, {}};
         } else {
@@ -370,7 +385,8 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
                 // 1. we can always rebuild the index 2. we use the index to locate the closest bundle to the target sequence number
                 if (cur.sinceLastUpdate > config.indexInterval) {
                         TANK_EXPECT(absSeqNum >= cur.baseSeqNum); // sanity check
-                        const uint32_t out[] = {uint32_t(absSeqNum - cur.baseSeqNum), cur.fileSize};
+                        const uint32_t out[] = {static_cast<uint32_t>(absSeqNum - cur.baseSeqNum),
+                                                cur.fileSize};
 
                         cur.index.skipList.push_back({out[0], out[1]});
 
@@ -379,7 +395,7 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
                         }
 
                         if (unlikely(write(cur.index.fd, out, sizeof(out)) != sizeof(out))) {
-                                // don't restore neither lastAssignedSeqNum from savedLastAssignedSeqNum,  nor fileSize
+                                // don't restore neither lastAssignedSeqNum from saved_last_assigned_seqnum,  nor fileSize
                                 // because this has been accepted
                                 this_service->track_io_fail(partition);
                                 return {nullptr, {}, {}};
@@ -389,6 +405,7 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
                                 // Make sure we get that first record synced
                                 fsync(cur.index.fd);
                         }
+
                         cur.sinceLastUpdate = 0;
                 }
 
@@ -398,7 +415,9 @@ append_res topic_partition_log::append_bundle(const time_t now, const void *bund
                 cur.flush_state.pendingFlushMsgs += bundleMsgsCnt;
 
                 if (trace) {
-                        SLog("cur.flush_state.pendingFlushMsgs = ", cur.flush_state.pendingFlushMsgs, ", config.flushIntervalMsgs = ", config.flushIntervalMsgs, ", config.flushIntervalMsgs = ", config.flushIntervalMsgs, "\n");
+                        SLog("cur.flush_state.pendingFlushMsgs = ", cur.flush_state.pendingFlushMsgs,
+                             ", config.flushIntervalMsgs = ", config.flushIntervalMsgs,
+                             ", config.flushIntervalMsgs = ", config.flushIntervalMsgs, "\n");
                 }
 
                 if (config.flushIntervalMsgs && cur.flush_state.pendingFlushMsgs >= config.flushIntervalMsgs) {

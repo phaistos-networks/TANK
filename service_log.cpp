@@ -134,6 +134,14 @@ bool Service::close_partition_log(topic_partition *partition) {
         TANK_EXPECT(partition);
         auto log = partition->_log.get();
 
+        if (log->compacting.load()) {
+                // can't touch this while a compaction is on-going
+		// XXX: may need to use CAS to set this to some other magic value
+		// so that we won't be attempting to compacting them while its closed
+		// i.e tri-state(open, close, open-compacting)
+                return false;
+        }
+
         // need to make sure we are no longer tracking this
         if (partition->access.ll.try_detach_and_reset() && active_partitions.empty()) {
                 next_active_partitions_check = std::numeric_limits<uint64_t>::max();
@@ -542,7 +550,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
 					SLog("Empty index, but datafile is not empty: will need to rebuild\n");
 				}
 
-                                Service::rebuild_index(l->cur.fdh->fd, fd);
+                                Service::rebuild_index(l->cur.fdh->fd, fd, curLogSeqNum);
                         } else if (l->cur.fileSize == 0) {
                                 if (trace) {
                                         SLog("Got a dummy/empty current segment, will reset\n");

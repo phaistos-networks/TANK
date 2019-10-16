@@ -1,7 +1,7 @@
 #include "service_common.h"
 
 int Rename(const char *oldpath, const char *newpath) {
-	static constexpr bool trace{false};
+        static constexpr bool trace{false};
 
         if (trace) {
                 SLog("rename(", oldpath, ", ", newpath, ")\n");
@@ -11,7 +11,7 @@ int Rename(const char *oldpath, const char *newpath) {
 }
 
 int Unlink(const char *pathname) {
-	static constexpr bool trace{false};
+        static constexpr bool trace{false};
 
         if (trace) {
                 SLog("unlink(", pathname, ")\n");
@@ -19,7 +19,6 @@ int Unlink(const char *pathname) {
 
         return unlink(pathname);
 }
-
 
 static void compact_partition(topic_partition_log *const log, const char *const basePartitionPath, std::vector<ro_segment *> prevSegments) {
         struct msg final {
@@ -29,7 +28,10 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                 strwlen32_t content;
         };
 
-        static constexpr bool                  trace{false};
+        enum {
+                trace      = false,
+                trace_msgs = false,
+        };
         uint64_t                               firstMsgSeqNum, lastMsgSeqNum, msgSeqNum;
         range_base<const uint8_t *, size_t>    msgSetContent;
         strwlen8_t                             key;
@@ -38,9 +40,9 @@ static void compact_partition(topic_partition_log *const log, const char *const 
         std::vector<std::unique_ptr<IOBuffer>> pool;
         IOBuffer *                             cur{nullptr};
         size_t                                 base{0};
-        static constexpr uint64_t              ptrBit{uint64_t(1) << (sizeof(uintptr_t) * 8 - 1)};
+        static constexpr const uint64_t        ptrBit{uint64_t(1) << (sizeof(uintptr_t) * 8 - 1)};
 
-        const auto compact = [&anyDropped](Switch::vector<msg> &msgs) {
+        const auto compact = [&anyDropped](std::vector<msg> &msgs) {
                 std::sort(msgs.begin(), msgs.end(), [](const auto &a, const auto &b) noexcept {
                         return a.key.Cmp(b.key) < 0;
                 });
@@ -53,12 +55,12 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         if (!k) {
                                 do {
                                         *out++ = *it;
-                                } while (++it != e && !it->key);
+                                } while (++it < e && !it->key);
                         } else {
                                 auto last = it->seqNum;
                                 auto sel  = it;
 
-                                for (++it; it != e && it->key == k; ++it) {
+                                for (++it; it < e && it->key == k; ++it) {
                                         if (it->seqNum > last) {
                                                 last = it->seqNum;
                                                 sel  = it;
@@ -88,8 +90,9 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                 return true;
         };
 
-        Switch::vector<msg>                    msgs;
+        std::vector<msg>                       msgs;
         std::vector<std::pair<void *, size_t>> vmas;
+        const auto                             before = Timings::Microseconds::Tick();
 
         DEFER(
             {
@@ -102,43 +105,43 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                     }
             });
 
-        if (trace)
+        if (trace) {
                 SLog(prevSegments.size(), " segments\n");
+        }
 
         for (auto it : prevSegments) {
+                EXPECT(it->fdh);
                 int         fd         = it->fdh->fd;
                 const auto  fileSize   = it->fileSize;
                 const auto  baseSeqNum = it->baseSeqNum;
                 auto *const fileData   = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, fd, 0);
 
-                if (fileData == MAP_FAILED)
+                if (fileData == MAP_FAILED) {
                         throw Switch::system_error("mmap() failed:", strerror(errno));
+                }
 
                 madvise(fileData, fileSize, MADV_DONTDUMP);
-
                 vmas.emplace_back(fileData, fileSize);
 
-                if (trace)
+                if (trace_msgs) {
                         SLog("baseSeqNum for segment ", baseSeqNum, "\n");
+                }
 
                 msgSeqNum = baseSeqNum;
-                for (const auto *p = static_cast<const uint8_t *>(fileData), *const e = p + fileSize; p != e;) {
-                        const auto bundleLen          = Compression::decode_varuint32(p);
-                        const auto nextBundle         = p + bundleLen;
-                        const auto bundleFlags        = *p++;
-                        const auto codec              = bundleFlags & 3;
-                        const bool sparseBundleBitSet = bundleFlags & (1u << 6);
-                        uint32_t   msgsSetSize        = (bundleFlags >> 2) & 0xf;
+                for (const auto *p = static_cast<const uint8_t *>(fileData), *const e = p + fileSize; p < e;) {
+                        const auto     bundleLen          = Compression::decode_varuint32(p);
+                        const auto     nextBundle         = p + bundleLen;
+                        const auto     bundleFlags        = *p++; // header flags
+                        const auto     codec              = bundleFlags & 3;
+                        const bool     sparseBundleBitSet = bundleFlags & (1u << 6);
+                        const uint32_t msgsSetSize        = ((bundleFlags >> 2) & 0xf) ?: Compression::decode_varuint32(p);
 
-                        if (!msgsSetSize)
-                                msgsSetSize = Compression::decode_varuint32(p);
-
-                        if (trace)
+                        if (trace_msgs) {
                                 SLog("New bundle msgSetSize = ", msgsSetSize, ", bundleFlags = ", bundleFlags, ", codec = ", codec, "\n");
+                        }
 
                         if (sparseBundleBitSet) {
-                                firstMsgSeqNum = *(uint64_t *)p;
-                                p += sizeof(uint64_t);
+                                firstMsgSeqNum = decode_pod<uint64_t>(p);
 
                                 if (msgsSetSize != 1) {
                                         lastMsgSeqNum = firstMsgSeqNum + Compression::decode_varuint32(p) + 1;
@@ -146,167 +149,198 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                         lastMsgSeqNum = firstMsgSeqNum;
                                 }
 
-                                if (trace)
+                                if (trace_msgs) {
                                         SLog("sparse bundle (first ", firstMsgSeqNum, ", last ", lastMsgSeqNum, ")\n");
-                        }
+                                }
+
+				//next_seqnum = lastMsgSeqNum + 1;
+                        } 
 
                         if (codec) {
-                                if (!cur || cur->Reserved() > 64 * 1024 * 1024) // XXX: arbitrary
-                                {
-                                        const auto n = msgs.size();
+                                if (!cur || cur->Reserved() > 64 * 1024 * 1024) { // XXX: arbitrary
+                                        auto       cur_data = cur ? cur->data() : nullptr;
+                                        const auto n        = msgs.size();
 
-                                        while (base != n) {
+                                        while (base < n) {
                                                 auto &     it  = msgs[base++];
-                                                const auto ptr = uintptr_t(it.content.p);
-                                                const auto to  = ptr & (~ptrBit);
+                                                const auto ptr = reinterpret_cast<uintptr_t>(it.content.data());
 
-                                                if (ptr != to)
-                                                        it.content.p = cur->At(to);
+                                                if (const auto to = ptr & ~ptrBit; ptr != to) {
+                                                        it.content.p = cur_data + to;
+                                                }
 
                                                 if (it.key) {
-                                                        const auto ptr = uintptr_t(it.key.p);
-                                                        const auto to  = ptr & (~ptrBit);
+                                                        const auto ptr = reinterpret_cast<uintptr_t>(it.key.data());
 
-                                                        if (ptr != to)
-                                                                it.key.p = cur->At(to);
+                                                        if (const auto to = ptr & ~ptrBit; ptr != to) {
+                                                                it.key.p = cur_data + to;
+                                                        }
                                                 }
                                         }
 
+
+					// TODO:  https://github.com/phaistos-networks/TANK/issues/72
+					// spill to disk?
                                         auto owner = std::make_unique<IOBuffer>();
 
                                         cur = owner.get();
-                                        pool.push_back(std::move(owner));
+                                        pool.emplace_back(std::move(owner));
                                 }
 
-                                const auto len = cur->size();
+                                const auto len  = cur->size();
+                                const auto span = std::distance(p, nextBundle);
 
-                                if (!Compression::UnCompress(Compression::Algo::SNAPPY, p, nextBundle - p, cur))
+                                if (!Compression::UnCompress(Compression::Algo::SNAPPY, p, span, cur)) {
                                         throw Switch::system_error("failed to decompress message set");
+                                } else if (trace_msgs) {
+                                        SLog("Decompressed ", size_repr(span), " ", size_repr(cur->size() - len), " at ", len, "\n");
+                                }
 
-                                msgSetContent.Set(reinterpret_cast<const uint8_t *>(cur->at(len)), cur->size() - len);
+                                msgSetContent.set(reinterpret_cast<const uint8_t *>(cur->data() + len), cur->size() - len);
                         } else {
-                                msgSetContent.Set(p, nextBundle - p);
+                                msgSetContent.set(p, std::distance(p, nextBundle));
                         }
 
-                        p = nextBundle;
+                        p = nextBundle; // advance p past this bundle
 
-                        uint64_t          msgTs{0};
-                        uint32_t          msgIdx{0};
-                        const auto *const ptrBase = cur ? cur->data() : nullptr;
+                        uint64_t    msgTs{0};
+                        uint32_t    msgIdx{0};
+                        const char *ptrBase = cur ? cur->data() : nullptr;
 
-                        if (trace)
-                                SLog("Parsing Message Set\n");
+                        if (trace_msgs) {
+                                SLog("Parsing Message Set(codec = ", codec, ") of size ", size_repr(msgSetContent.size()), "\n");
+                        }
 
-                        for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.len; p != e; ++msgIdx, ++msgSeqNum) {
-                                const auto flags = *p++;
+                        for (const auto *p = msgSetContent.offset, *const e = p + msgSetContent.size(); p < e; ++msgIdx, ++msgSeqNum) {
+                                const auto flags = decode_pod<uint8_t>(p);
 
-                                if (trace)
+                                if (trace_msgs) {
                                         SLog("Message ", msgIdx, ", flags ", flags, "\n");
+                                }
 
                                 if (sparseBundleBitSet) {
-                                        if (msgIdx == 0)
+                                        if (msgIdx == 0) {
                                                 msgSeqNum = firstMsgSeqNum;
-                                        else if (msgIdx == msgsSetSize - 1)
+                                        } else if (msgIdx == msgsSetSize - 1) {
                                                 msgSeqNum = lastMsgSeqNum;
-                                        else if (flags & uint8_t(TankFlags::BundleMsgFlags::SeqNumPrevPlusOne)) {
+                                        } else if (flags & uint8_t(TankFlags::BundleMsgFlags::SeqNumPrevPlusOne)) {
                                                 // incremented in for() (in previous loop iteration)
-                                                if (trace)
+                                                if (trace_msgs) {
                                                         SLog("SeqNumPrevPlusOne set\n");
+                                                }
                                         } else {
                                                 // we encode delta from last - 1, but we already ++msgSeqNum in for() (in previous iteration)
                                                 msgSeqNum += Compression::decode_varuint32(p);
 
-                                                if (trace)
+                                                if (trace_msgs) {
                                                         SLog("Adjusting delta\n");
+                                                }
                                         }
                                 }
 
-                                if (trace)
+                                if (trace_msgs) {
                                         SLog("SeqNum = ", msgSeqNum, "\n");
+                                }
 
-                                if (!(flags & uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS))) {
-                                        msgTs = *(uint64_t *)p;
-                                        p += sizeof(uint64_t);
+                                if (0 == (flags & uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS))) {
+                                        msgTs = decode_pod<uint64_t>(p);
                                 }
 
                                 if (flags & uint8_t(TankFlags::BundleMsgFlags::HaveKey)) {
-                                        key.Set((char *)p + 1, *p);
-                                        p += key.len + sizeof(uint8_t);
+                                        key.set(reinterpret_cast<const char *>(p) + 1, *p);
+                                        p += key.size() + sizeof(uint8_t);
 
-                                        if (trace)
+                                        if (trace_msgs) {
                                                 SLog("MSG ", msgSeqNum, ", key [", key, "] ", Date::ts_repr(Timings::Milliseconds::ToSeconds(msgTs)), "\n");
+                                        }
 
-                                        if (codec)
-                                                key.p = (char *)uintptr_t(key.p - ptrBase);
+                                        if (codec) {
+                                                key.p = reinterpret_cast<const char *>(static_cast<uintptr_t>(std::distance(ptrBase, key.data())) | ptrBit);
+                                        }
                                 } else {
                                         key.reset();
                                 }
 
                                 const auto msgLen = Compression::decode_varuint32(p);
 
-                                if (msgLen || !key) {
-                                        msgValue.Set((char *)p, msgLen);
+                                if (msgLen || key) {
+                                        msgValue.set(reinterpret_cast<const char *>(p), msgLen);
                                         p += msgLen;
 
-                                        if (trace)
+                                        if (trace_msgs) {
                                                 SLog("value [", msgValue, "]\n");
+                                        }
 
-                                        if (codec)
-                                                msgValue.p = (char *)uintptr_t(msgValue.p - ptrBase);
+                                        if (codec) {
+                                                msgValue.p = reinterpret_cast<const char *>(static_cast<uintptr_t>(std::distance(ptrBase, msgValue.data())) | ptrBit);
+                                        }
 
-                                        msgs.push_back({key, msgSeqNum, msgTs, msgValue});
+                                        msgs.push_back({key,
+                                                        msgSeqNum,
+                                                        msgTs,
+                                                        msgValue});
                                 } else {
                                         // Drop deleted messages(messages with a key and no content)
                                         anyDropped = true;
                                 }
                         }
                 }
+
+                if (trace) {
+                        SLog("Preocessing segment of size ", size_repr(fileSize), "\n");
+                }
         }
 
         if (cur) {
-                const auto n = msgs.size();
+                // patch
+                const auto n        = msgs.size();
+                const auto cur_data = cur->data();
 
-                while (base != n) {
+                while (base < n) {
                         auto &     it  = msgs[base++];
-                        const auto ptr = uintptr_t(it.content.p);
-                        const auto to  = ptr & (~ptrBit);
+                        const auto ptr = reinterpret_cast<uintptr_t>(it.content.data());
 
-                        if (ptr != to)
-                                it.content.p = cur->At(to);
+                        if (const auto to = ptr & ~ptrBit; ptr != to) {
+                                it.content.p = cur_data + to;
+                        }
 
                         if (it.key) {
-                                const auto ptr = uintptr_t(it.key.p);
-                                const auto to  = ptr & (~ptrBit);
+                                const auto ptr = reinterpret_cast<uintptr_t>(it.key.data());
 
-                                if (ptr != to)
-                                        it.key.p = cur->At(to);
+                                if (const auto to = ptr & ~ptrBit; ptr != to) {
+                                        it.key.p = cur_data + to;
+                                }
                         }
                 }
         }
 
+        if (trace) {
+                SLog("Done collecting segments. Took ", duration_repr(Timings::Microseconds::Since(before)), ", ", dotnotation_repr(msgs.size()), " msgs\n");
+        }
+
         if (!compact(msgs)) {
-#if 1
-                if (trace)
-                        SLog("No need for compaction\n");
+		// TODO: https://github.com/phaistos-networks/TANK/issues/72
+		// maybe just do this anyway if we can reduce the number of RO Logs
+                if (trace) {
+                        SLog("No need for compaction, prevSegments.size() = ", prevSegments.size(), "\n");
+                }
 
                 run_on_main_thread([log]() {
-                        log->compacting = false;
+                        log->compacting.store(false);
                         Print("Did not need to compact log\n");
                 });
 
                 return;
-#else
-                Print("ENABLE AGAIN\n");
+        }
 
-                std::sort(msgs.begin(), msgs.end(), [](const auto &a, const auto &b) {
-                        return a.seqNum < b.seqNum;
-                });
-#endif
+        if (trace_msgs) {
+                for (const auto &it : msgs) {
+                        Print(it.seqNum, " [", it.key, "] [", it.content, "]\n");
+                }
         }
 
         if (trace) {
-                for (const auto &it : msgs)
-                        Print(it.seqNum, " [", it.key, "] [", it.content, "]\n");
+                SLog(dotnotation_repr(msgs.size()), " messages\n");
         }
 
         // go through all segments, rebuild each of them by keeping only the messages that existed in that segment (we can just use a range check for first available, last assigned)
@@ -323,26 +357,24 @@ static void compact_partition(topic_partition_log *const log, const char *const 
         struct iovec              iov[1024];
         uint32_t                  iovLen{0};
         const auto                flush = [&iovLen, &iov, &out, &cbuf, &fd]() {
-                for (uint32_t i{0}; i != iovLen; ++i) {
+                for (uint32_t i{0}; i < iovLen; ++i) {
                         auto &it  = iov[i];
-                        auto  ptr = uintptr_t(it.iov_base);
+                        auto  ptr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(it.iov_base));
 
                         if (ptr & (1u << 31)) {
-                                ptr &= ~(1u << 31);
-                                it.iov_base = out.At(ptr);
+                                ptr ^= (1u << 31);
+                                it.iov_base = out.data() + ptr;
                         } else {
                                 ptr &= ~(1u << 30);
-                                it.iov_base = cbuf.At(ptr);
+                                it.iov_base = cbuf.data() + ptr;
                         }
                 }
 
-                if (trace)
-                        SLog("Flushing ", iovLen, "\n");
-
                 const auto r = writev(fd, iov, iovLen);
 
-                if (unlikely(r == -1))
+                if (unlikely(r == -1)) {
                         throw Switch::system_error("writev() failed:", strerror(errno));
+                }
 
                 out.clear();
                 cbuf.clear();
@@ -353,19 +385,15 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                 const char *destPartitionPath;
                 uint32_t    curSegmentIdx{0};
 
-#if 0
-                if (getenv("FOOOOO"))
-                        destPartitionPath = "/tmp/foo/0/";
-                else
-		{
-                        destPartitionPath = "/tmp/tankREPO/msgs/0/";
-		}
-#else
                 destPartitionPath = basePartitionPath;
-#endif
+
+                //destPartitionPath = "/tmp/foo/0/"; // XXX:
 
                 // Process all collected messages, pack into segments
-                for (uint32_t i{0}; i != n;) {
+                // XXX: this is not ideal
+                // we are now generating as many new segments as we have previously
+                // because we process messages for one one previous segment/time in order to produce a new matching segment
+                for (uint32_t i{0}; i < n;) {
                         uint8_t      bundleFlags;
                         size_t       outFileSize{0};
                         size_t       sinceLastUpdateBytes{UINT32_MAX}, sinceLastUpdateMsgsCnt{UINT32_MAX};
@@ -375,8 +403,9 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         index_record indexLastRecorded;
                         auto         expected = all[i].seqNum;
 
-                        if (trace)
+                        if (trace) {
                                 SLog(ansifmt::bold, ansifmt::color_blue, "Now processing segment ", curSegmentIdx, "/", prevSegments.size(), " (", baseSeqNum, ", ", curSegment->lastAvailSeqNum, ")", ansifmt::reset, "\n");
+                        }
 
                         // new segment
                         index.clear();
@@ -386,35 +415,39 @@ static void compact_partition(topic_partition_log *const log, const char *const 
 
                         Snprint(logPath, sizeof(logPath), destPartitionPath, baseSeqNum, "-", 0, "_", 0, ".ilog.cleaned");
                         fd = open(logPath, O_RDWR | O_CREAT | O_LARGEFILE | O_TRUNC, 0775);
-                        require(fd != -1);
+                        EXPECT(fd != -1);
 
                         DEFER({
-                                if (fd != -1)
+                                if (fd != -1) {
                                         close(fd);
+                                }
                         });
 
                         for (;;) {
                                 // new bundle
                                 const auto base{i};
-                                const auto upto = Min<size_t>(n, i + maxBundleMsgsSetSize);
+                                const auto upto = std::min<size_t>(n, i + maxBundleMsgsSetSize);
                                 bool       asSparse{false};
                                 size_t     sum{0};
 
                                 do {
                                         const auto n = all[i].seqNum;
 
-                                        if (n != expected)
-                                                asSparse = true;
+                                        asSparse |= (n != expected);
 
-                                        if (trace)
+                                        if (trace_msgs) {
                                                 SLog("consider ", i, " ", all[i].seqNum, "\n");
+                                        }
 
                                         expected = n + 1;
-                                        sum += all[i].key.len + all[i].content.len + 8;
-                                } while (++i != upto && sum < maxBundleMsgsSetSizeBytes && all[i].seqNum <= curSegmentLastAvailSeqNum);
+                                        sum += all[i].key.size() + all[i].content.size() + 8;
+                                } while (++i < upto &&
+                                         sum < maxBundleMsgsSetSizeBytes &&
+                                         all[i].seqNum <= curSegmentLastAvailSeqNum);
 
-                                if (trace)
+                                if (trace_msgs) {
                                         SLog("expected = ", expected, ", asSparse = ", asSparse, "\n");
+                                }
 
                                 if (sinceLastUpdateBytes > sinceLastUpdateBytesThreshold || sinceLastUpdateMsgsCnt > sinceLastUpdateMsgsCntThreshold) {
                                         // TODO(markp): if (all[base].seqNum - baseSeqNum > threshold, need to
@@ -446,12 +479,14 @@ static void compact_partition(topic_partition_log *const log, const char *const 
 
                                         const auto first = all[base].seqNum, last = all[i - 1].seqNum;
 
-                                        if (trace)
+                                        if (trace_msgs) {
                                                 SLog("Sparse bundle first = ", first, ", last = ", last, ", set size = ", msgSetSize, "\n");
+                                        }
 
                                         out.Serialize<uint64_t>(first);
-                                        if (msgSetSize != 1)
+                                        if (msgSetSize != 1) {
                                                 out.SerializeVarUInt32(last - first - 1);
+                                        }
                                 } else {
                                         bundleFlags = 0;
 
@@ -474,10 +509,11 @@ static void compact_partition(topic_partition_log *const log, const char *const 
 
                                 iov[iovLen++] = {(void *)uintptr_t(bundleHeaderFlagsOffset | (1u << 31)), bundleHeaderLength};
 
-                                if (trace)
+                                if (trace_msgs) {
                                         SLog("Encoding Messages Set asSparse = ", asSparse, "\n");
+                                }
 
-                                for (uint32_t k{base}; k != i; ++k) {
+                                for (uint32_t k{base}; k < i; ++k) {
                                         const auto &m        = all[k];
                                         uint8_t     msgFlags = m.key ? uint8_t(TankFlags::BundleMsgFlags::HaveKey) : uint8_t(0);
                                         bool        encodeTS, encodeSparseDelta;
@@ -486,14 +522,16 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                                 if (m.seqNum == all[k - 1].seqNum + 1) {
                                                         msgFlags |= uint8_t(TankFlags::BundleMsgFlags::SeqNumPrevPlusOne);
                                                         encodeSparseDelta = false;
-                                                } else
+                                                } else {
                                                         encodeSparseDelta = true;
+                                                }
                                         } else {
                                                 encodeSparseDelta = false;
                                         }
 
-                                        if (trace)
+                                        if (trace_msgs) {
                                                 SLog("message ", k - base, " ", m.seqNum, ", asSparse = ", asSparse, ", encodeSparseDelta = ", encodeSparseDelta, "\n");
+                                        }
 
                                         if (m.ts == lastTS && k != base) {
                                                 msgFlags |= uint8_t(TankFlags::BundleMsgFlags::UseLastSpecifiedTS);
@@ -507,8 +545,9 @@ static void compact_partition(topic_partition_log *const log, const char *const 
 
                                         if (encodeSparseDelta) {
                                                 out.SerializeVarUInt32(m.seqNum - all[k - 1].seqNum - 1);
-                                                if (trace)
+                                                if (trace_msgs) {
                                                         SLog("Serializing delta ", m.seqNum - all[k - 1].seqNum - 1, "\n");
+                                                }
                                         }
 
                                         if (encodeTS) {
@@ -516,32 +555,34 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                         }
 
                                         if (m.key) {
-                                                out.Serialize(m.key.len);
-                                                out.Serialize(m.key.p, m.key.len);
+                                                out.Serialize(m.key.size());
+                                                out.Serialize(m.key.data(), m.key.size());
                                         }
 
-                                        out.SerializeVarUInt32(m.content.len);
-                                        out.Serialize(m.content.p, m.content.len);
+                                        out.SerializeVarUInt32(m.content.size());
+                                        out.Serialize(m.content.data(), m.content.size());
                                 }
 
                                 const auto msgSetLen = out.size() - msgSetOffset;
 
-                                if (trace)
+                                if (trace_msgs) {
                                         SLog("msgSetLen = ", msgSetLen, ", bundleFlags = ", bundleFlags, "\n");
+                                }
 
-                                if (msgSetLen > 1024) // XXX: arbitrary
-                                {
+                                if (msgSetLen > 1024) { // XXX: arbitrary
                                         const auto offset = cbuf.size();
 
-                                        if (!Compression::Compress(Compression::Algo::SNAPPY, out.At(msgSetOffset), msgSetLen, &cbuf))
+                                        if (!Compression::Compress(Compression::Algo::SNAPPY, out.data() + msgSetOffset, msgSetLen, &cbuf)) {
                                                 throw Switch::system_error("Compression failed");
+                                        }
 
                                         const auto span = cbuf.size() - offset;
 
                                         if (span >= msgSetLen) {
                                                 // not worth it
-                                                if (trace)
+                                                if (trace_msgs) {
                                                         SLog("Not worth compressing bundle msgs set\n");
+                                                }
 
                                                 cbuf.resize(offset);
                                                 goto l10;
@@ -549,11 +590,12 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                                 iov[iovLen++] = {(void *)uintptr_t(offset | (1u << 30)), span};
                                                 out.resize(msgSetOffset);
 
-                                                *reinterpret_cast<uint8_t *>(out.At(bundleHeaderFlagsOffset)) |= 1; // set codec
+                                                *reinterpret_cast<uint8_t *>(out.data() + bundleHeaderFlagsOffset) |= 1; // set codec
                                                 outFileSize += span;
 
-                                                if (trace)
+                                                if (trace_msgs) {
                                                         SLog(">> Compressed ", msgSetLen, " ", span, "\n");
+                                                }
                                         }
                                 } else {
                                 l10:
@@ -571,15 +613,17 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                 outFileSize += bundleLengthReprLen;
 
                                 sinceLastUpdateBytes += bundleLength;
-                                if (iovLen > sizeof_array(iov) - 16)
+                                if (iovLen > sizeof_array(iov) - 16) {
                                         flush();
+                                }
 
                                 if (i == n) {
                                         // done and done
                                         break;
                                 } else if (all[i].seqNum > curSegmentLastAvailSeqNum) {
-                                        if (trace)
+                                        if (trace_msgs) {
                                                 SLog("Consumed current segment ", curSegmentIdx, "\n");
+                                        }
 
                                         ++curSegmentIdx;
                                         if (outFileSize > minSegmentLogFileSize) {
@@ -622,41 +666,45 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         // but we'd rather not do this
                         if (Rename(logPath, Buffer::build(destPartitionPath, baseSeqNum, "-", lastAvailSeqNum, "_", curSegment->createdTS, ".ilog.cleaned")) == -1) {
                                 throw Switch::system_error("Failed to rename segment:", strerror(errno));
-			}
+                        }
 
                         auto newSegment = std::make_unique<ro_segment>(baseSeqNum, lastAvailSeqNum, curSegment->createdTS);
 
                         newSegment->fdh.reset(new fd_handle(logFd));
-                        require(newSegment->fdh.use_count() == 2);
+                        EXPECT(newSegment->fdh.use_count() == 2);
                         newSegment->fdh->Release();
                         newSegment->fileSize           = outFileSize;
                         newSegment->index.data         = reinterpret_cast<const uint8_t *>(mmap(nullptr, index.size(), PROT_READ, MAP_SHARED, fd, 0));
                         newSegment->index.fileSize     = index.size();
                         newSegment->index.lastRecorded = indexLastRecorded;
 
-                        if (trace)
+                        if (trace) {
                                 SLog(newSegment->fileSize, " ", lseek64(newSegment->fdh->fd, 0, SEEK_END), "\n");
+                        }
 
-                        require(newSegment->index.fileSize == lseek64(fd, 0, SEEK_END));
-                        require(newSegment->fileSize == lseek64(newSegment->fdh->fd, 0, SEEK_END));
+                        EXPECT(newSegment->index.fileSize == lseek64(fd, 0, SEEK_END));
+                        EXPECT(newSegment->fileSize == lseek64(newSegment->fdh->fd, 0, SEEK_END));
 
                         close(fd);
                         fd = -1;
 
-                        if (newSegment->index.data == MAP_FAILED)
+                        if (newSegment->index.data == MAP_FAILED) {
                                 throw Switch::system_error("mmap() failed:", strerror(errno));
+                        }
 
                         madvise((void *)newSegment->index.data, index.size(), MADV_DONTDUMP);
 
-                        require(newSegment->fdh.use_count() == 1);
+                        EXPECT(newSegment->fdh.use_count() == 1);
                         newSegments.push_back(newSegment.release());
 
-                        if (trace)
+                        if (trace) {
                                 SLog("Out segment, output ", outFileSize, "(", size_repr(outFileSize), ") ", dotnotation_repr(index.size()), " index entries\n");
+                        }
                 }
 
-                if (trace)
+                if (trace) {
                         SLog("Done scanning RO segments\n");
+                }
 
                 // We have created a new set of segments, so we need to replace their .cleaned extension with a .swap extension
                 // During startup, if we find any *.cleaned files, then we'll delete them and will also remove any .swap files left around
@@ -710,17 +758,20 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         char   path[PATH_MAX];
                         size_t pathLen;
 
-                        if (const auto createdTS = it->createdTS)
+                        if (const auto createdTS = it->createdTS) {
                                 pathLen = Snprint(path, sizeof(path), basePartitionPath, "/", it->baseSeqNum, "-", it->lastAvailSeqNum, "_", createdTS, ".ilog.old");
-                        else
+                        } else {
                                 pathLen = Snprint(path, sizeof(path), basePartitionPath, "/", it->baseSeqNum, "-", it->lastAvailSeqNum, ".ilog.old");
+                        }
 
-                        if (Unlink(path) == -1)
+                        if (Unlink(path) == -1) {
                                 throw Switch::system_error("Failed to remove ", strwlen32_t(path, pathLen), ": ", strerror(errno));
+                        }
 
                         Snprint(path, sizeof(path), basePartitionPath, "/", it->baseSeqNum, ".index.old");
-                        if (Unlink(path) == -1)
+                        if (Unlink(path) == -1) {
                                 throw Switch::system_error("Failed to unlink file:", strerror(errno));
+                        }
                 }
 
                 // Replace segments
@@ -731,6 +782,10 @@ static void compact_partition(topic_partition_log *const log, const char *const 
 
                         TANK_EXPECT(it != roSegments->end());
 
+                        if (trace) {
+                                SLog("Now running on main thread\n");
+                        }
+
                         // remove segments from current roSegments[]
                         std::for_each(it, it + segments.size(), [](auto ptr) { delete ptr; });
                         roSegments->erase(it, it + segments.size());
@@ -738,20 +793,31 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         // replace removed segments with new segments
                         roSegments->insert(it, newSegments.begin(), newSegments.end());
 
-                        log->compacting = false;
+                        if (trace) {
+                                SLog("roSegments->size() now = ", roSegments->size(), "\n");
+                        }
+
+                        log->compacting.store(false);
                         if (!log->lastCleanupMaxSeqNum) {
                                 this_service->track_log_cleanup(log);
                         }
                         log->lastCleanupMaxSeqNum = upto;
 
-                        this_service->schedule_cleanup();
-
                         if (trace) {
-                                for (auto it : *roSegments)
-                                        SLog("(", it->baseSeqNum, ", ", it->lastAvailSeqNum, ") ", it->fdh.use_count(), " ", it->fdh->fd, "\n");
+                                SLog("Scheduling cleanup\n");
                         }
 
-                        Print("Compacted partition segments\n");
+                        this_service->schedule_cleanup();
+
+                        if (trace && false) {
+                                for (auto it : *roSegments) {
+                                        SLog("rosegment (base_seqnum:", it->baseSeqNum, ", last_avail_seqnum:", it->lastAvailSeqNum, ") fdh.use_count()", it->fdh.use_count(), " fd:", it->fdh->fd, "\n");
+                                }
+                        }
+
+                        if (trace) {
+                                Print("Compacted partition segments\n");
+                        }
                 });
         } catch (...) {
                 while (!newSegments.empty()) {
@@ -761,78 +827,85 @@ static void compact_partition(topic_partition_log *const log, const char *const 
 
                 run_on_main_thread([log]() {
                         Print("Failed to compact partition segments\n");
-                        log->compacting = false;
+                        log->compacting.store(false);
                 });
         }
 }
 
-void topic_partition_log::compact(const char *const basePartitionPath) {
-	static constexpr bool trace{false};
-        std::vector<ro_segment *>      prevSegments;
-        static std::once_flag          onceFlag;
-        static std::condition_variable workCond;
-        static std::mutex              workLock;
+void Service::schedule_compaction(std::unique_ptr<pending_compaction> &&compaction) {
+        static std::once_flag onceFlag;
 
-        struct pending_compaction final {
-                pending_compaction *      next;
-                char                      basePartitionPath[PATH_MAX];
-                std::vector<ro_segment *> prevSegments;
-                topic_partition_log *     log;
-        };
-
-        Drequire(compacting == false);
-
-        static PubSubQueue<pending_compaction> pendingCompactions;
-        auto                                   compaction = new pending_compaction();
-        const auto                             l          = strlen(basePartitionPath);
-
-        require(l < sizeof(compaction->basePartitionPath));
-        compaction->log = this;
-        strwlen32_t(basePartitionPath, l).ToCString(compaction->basePartitionPath);
-        compaction->prevSegments.reserve(roSegments->size());
-        for (auto it : *roSegments)
-                compaction->prevSegments.push_back(it);
-
-        if (trace) {
-                SLog("Compaction for [", basePartitionPath, "]\n");
-	}
-
-        TANK_EXPECT(compaction->prevSegments.size());
-
-        std::call_once(onceFlag, [] {
-                std::thread([]() {
+        std::call_once(onceFlag, [this] {
+                compactions.compaction_thread.reset(new std::thread([this]() {
                         std::vector<pending_compaction *> localWork;
                         sigset_t                          mask;
 
                         sigfillset(&mask);
                         pthread_sigmask(SIG_SETMASK, &mask, nullptr);
-                        for (;;) {
-                                std::unique_lock<std::mutex> lock(workLock);
+                        for (bool done = false; !done;) {
+                                std::unique_lock<std::mutex> lock(compactions.workLock);
 
-                                workCond.wait(lock, [] { return pendingCompactions.any(); });
-                                for (auto it = pendingCompactions.drain(); it; it = it->next) {
+                                compactions.workCond.wait(lock, [this] { return compactions.pendingCompactions.any(); });
+                                for (auto it = compactions.pendingCompactions.drain(); it; it = it->next) {
                                         localWork.push_back(it);
                                 }
-
                                 lock.unlock();
 
                                 while (!localWork.empty()) {
                                         auto c = localWork.back();
 
-                                        try {
-                                                compact_partition(c->log, c->basePartitionPath, std::move(c->prevSegments));
-                                        } catch (...) {
+                                        if (c->log) {
+                                                try {
+                                                        compact_partition(c->log, c->basePartitionPath, std::move(c->prevSegments));
+                                                } catch (...) {
+                                                        //
+                                                }
+                                        } else {
+                                                done = true;
                                         }
 
                                         localWork.pop_back();
                                         delete c;
                                 }
                         }
-                })
-                    .detach();
+                }));
         });
 
-        compacting = true;
-        pendingCompactions.push_back(compaction);
-        workCond.notify_one();
+        compactions.pendingCompactions.push_back(compaction.release());
+        compactions.workCond.notify_one();
+}
+
+void Service::schedule_compaction(const char *base_partitition_path, topic_partition_log *log) {
+	TANK_EXPECT(base_partitition_path);
+	TANK_EXPECT(log);
+        static constexpr bool     trace{false};
+        std::vector<ro_segment *> prevSegments;
+
+        if (bool expected{false}; !log->compacting.compare_exchange_weak(expected, true,
+                                                                         std::memory_order_release,
+                                                                         std::memory_order_relaxed)) {
+                // TODO: do something that makes more sense here
+                std::abort();
+        }
+
+        auto       compaction = std::make_unique<pending_compaction>();
+        const auto l          = strlen(base_partitition_path);
+
+        EXPECT(l < sizeof(compaction->basePartitionPath));
+
+        compaction->log = log;
+        strwlen32_t(base_partitition_path, l).ToCString(compaction->basePartitionPath);
+        compaction->prevSegments.reserve(log->roSegments->size());
+
+        for (auto it : *log->roSegments) {
+                EXPECT(it->fdh);
+                compaction->prevSegments.emplace_back(it);
+        }
+
+        if (trace) {
+                SLog("Compaction for [", base_partitition_path, "]\n");
+        }
+
+        TANK_EXPECT(compaction->prevSegments.size());
+        schedule_compaction(std::move(compaction));
 }

@@ -54,6 +54,16 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
                 throw Switch::system_error("Failed to access log file ", path.as_s32(), ":", strerror(saved));
         }
 
+#if 0
+	if (const auto l = Service::segment_lastmsg_seqnum(fd, absSeqNum); l != lastAbsSeqNum) {
+		Print("Unexpected last message abs. seqnum(", lastAbsSeqNum, ") for ", path, ", expected ", l, "\n");
+	} else {
+		Print(path, " OK\n");
+	}
+#endif
+
+
+
         fdh.reset(new fd_handle(fd));
         TANK_EXPECT(fdh.use_count() == 2);
         fdh->Release();
@@ -99,7 +109,7 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
                         IMPLEMENT_ME();
                 }
 
-                Service::rebuild_index(fdh->fd, indexFd);
+                Service::rebuild_index(fdh->fd, indexFd, absSeqNum);
         }
 
         size = lseek64(indexFd, 0, SEEK_END);
@@ -145,7 +155,9 @@ ro_segment::ro_segment(const uint64_t absSeqNum, const uint64_t lastAbsSeqNum, c
 }
 
 void topic_partition_log::consider_ro_segments() {
-        if (compacting) {
+	enum {trace = false };
+
+	if (compacting.load()) {
                 // Busy compacting
                 if (trace) {
                         SLog("Compacting\n");
@@ -251,7 +263,7 @@ void topic_partition_log::consider_ro_segments() {
                 }
 
                 if (cleanable_ratio >= config.logCleanRatioMin) {
-                        compact(Buffer::build(basePath_, "/", partition->owner->name(), "/", partition->idx, "/").data());
+                        this_service->schedule_compaction(Buffer::build(basePath_, "/", partition->owner->name(), "/", partition->idx, "/").data(), this);
                 }
         }
 }
@@ -770,6 +782,12 @@ void Service::tear_down() {
                 t->join();
                 delete t;
         }
+
+        if (compactions.compaction_thread) {
+                compactions.pendingCompactions.push_back(new pending_compaction{.log = nullptr});
+		compactions.workCond.notify_one();
+                compactions.compaction_thread->join();
+        }
 }
 
 void Service::cleanup_scheduled_logs() {
@@ -827,8 +845,8 @@ void Service::consider_active_partitions() {
                 TANK_EXPECT(!part->access.ll.empty());
 
                 if (part->access.last_access  + 16 <= curTime) {
+			// this may not happend if the partition is currently being compacted
                         close_partition_log(part);
-                        TANK_EXPECT(part->access.ll.empty());
                 }
 
                 it = next;

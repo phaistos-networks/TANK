@@ -550,7 +550,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                 if (unlikely(!Compression::check_decode_varuint32(p, chunk_end))) {
                                         if (trace) {
-                                                SLog("Unable to decode bundle_len\n");
+                                                SLog("Unable to decode bundle_len:", std::distance(need_from, chunk_end), "\n");
                                         }
 
                                         need_upto = p + 256;
