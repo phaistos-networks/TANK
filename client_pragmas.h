@@ -202,7 +202,7 @@ void drain_pipe(int);
 
 void process_io(const size_t);
 
-uint64_t reactor_next_wakekup() const noexcept;
+uint64_t reactor_next_wakeup() const noexcept;
 
 void reactor_step(uint32_t);
 

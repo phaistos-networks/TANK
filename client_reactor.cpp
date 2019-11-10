@@ -823,7 +823,7 @@ void TankClient::check_unreachable_brokers() {
         }
 }
 
-uint64_t TankClient::reactor_next_wakekup() const noexcept {
+uint64_t TankClient::reactor_next_wakeup() const noexcept {
         uint64_t until = TANKUtil::minimum(
             unreachable_brokers_tree_next,
             retry_bundles_next,
@@ -853,7 +853,7 @@ void TankClient::reactor_step(uint32_t timeout_ms) {
         // this makes a lot of sense, and also avoid excessive calls to
         // TankClient::poll()
         for (;;) {
-                const auto until = std::min(step_end, reactor_next_wakekup());
+                const auto until = std::min(step_end, reactor_next_wakeup());
 
                 sleeping.store(true, std::memory_order_relaxed);
 
