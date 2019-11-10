@@ -1,4 +1,4 @@
-TANK is [a very high performance distributed log](https://github.com/phaistos-networks/TANK/wiki/Why-Tank-and-Tank-vs-X), inspired in part by Kafka, and other similar services and technologies. This is the second major public release, **TANK 2**.
+TANK is [a very high performance distributed log](https://github.com/phaistos-networks/TANK/wiki/Why-Tank-and-Tank-vs-X), inspired in part by Kafka, and other similar services and technologies. This is the second major public release, **TANK 2**. Read about this new major public release [here](https://medium.com/@markpapadakis/tank-2-initial-public-release-b6d88edab07f).
 
 
 #### Introduction
