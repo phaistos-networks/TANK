@@ -182,6 +182,8 @@ int Service::reset_partition_log(topic_partition *partition) {
                 return 0;
         }
 
+	TANK_EXPECT(false == read_only);
+
         char       basePath[PATH_MAX];
         const auto basePathLen = snprintf(basePath, sizeof(basePath), "%.*s/%.*s/%u/",
                                           static_cast<int>(::basePath_.size()), ::basePath_.data(),
@@ -193,6 +195,8 @@ int Service::reset_partition_log(topic_partition *partition) {
                         if (name.front() == '.') {
                                 continue;
                         }
+
+			TANK_EXPECT(false == read_only);
 
                         name.ToCString(basePath + basePathLen);
                         if (-1 == unlink(basePath)) {
@@ -382,6 +386,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                         if (0 == st.st_size) {
                                                 // This is a stray - whatever the reason this is here, it needs to go
                                                 Print("Found a stray ", _base_path, ", deleting it\n");
+						TANK_EXPECT(false == read_only);
                                                 unlink(_base_path);
                                                 continue;
                                         }
@@ -438,6 +443,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                         while (!swapped.empty()) {
                                 auto it = swapped.back();
 
+				TANK_EXPECT(false == read_only);
                                 if (Unlink(Buffer::build(basePath, "/", it).data()) == -1) {
                                         throw Switch::system_error("Failed to unlink swapped file:", strerror(errno));
                                 }
@@ -575,6 +581,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                         SLog("Got a dummy/empty current segment, will reset\n");
                                 }
 
+				TANK_EXPECT(false == read_only);
                                 if (-1 == unlink(basePath)) {
                                         throw Switch::system_error("Failed to unlink(", basePath, "): ", strerror(errno));
                                 }
@@ -849,7 +856,7 @@ topic_partition_log *Service::partition_log(topic_partition *const p) {
         if (!p->_log) {
                 open_partition_log(p, p->owner->partitionConf);
         } else {
-                EXPECT(p->access.ll.empty() == false);
+                TANK_EXPECT(p->access.ll.empty() == false);
                 p->access.last_access = curTime;
         }
 

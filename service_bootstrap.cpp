@@ -145,7 +145,7 @@ int Service::start(int argc, char **argv) {
                                 Print(Buffer{}.append(align_to(5), "-h"_s32, align_to(24), "This help message"_s32), "\n");
                                 Print("\n\nExamples:\n");
                                 Print(Buffer{}.append(left_aligned(7, "./tank -p /data/TANK -l :11011 :Starts a TANK node where the TANK data files are stored in /tmp/TANK and accepts requests at localhost:11011"_s32, 76)), "\n\n");
-                                Print(Buffer{}.append(left_aligned(7, "./tank -p /data/TANK -l 10.5.5.10:11011 :Starts a TANK node where the TANK data files are stored in /tmp/TANK and accepts requests at 10.5.5.10:11011"_s32, 76)), "\n");
+                                Print(Buffer{}.append(left_aligned(7, "./tank -p /data/TANK -l 10.5.5.10:11011 :Starts a TANK node where the TANK data files are stored in /tmp/TANK and accepts requests at 10.5.5.10:11011"_s32, 76)), "\n\n");
                                 Print(Buffer{}.append(left_aligned(7, "./tank -p /data/TANK -l 10.5.5.10:11011 -C 1@my_cluster: Starts a TANK node where the TANK data files are stored in /tmp/TANK and accepts requests at 10.5.5.10:11011, and joins or creates the TANK cluster 'my_cluster'\nThe node maybe become the cluster leader and may replicate data from existing topic parttiions immediately. Please see TANK's documentation for Clusters terminology and guides"_s32, 76)), "\n");
                                 return 0;
 
@@ -191,7 +191,6 @@ int Service::start(int argc, char **argv) {
                         uint64_t                                                          before;
                         simple_allocator                                                  a{8192};
                         std::vector<strwlen8_t>                                           collectedTopics;
-                        std::vector<std::future<void>>                                    futures;
                         std::mutex                                                        collectLock;
                         std::vector<std::pair<std::pair<strwlen8_t, uint16_t>, uint64_t>> cleanupCheckpoints;
                         char                                                              fullPath[PATH_MAX];
@@ -208,7 +207,6 @@ int Service::start(int argc, char **argv) {
 
                         try {
                                 for (const auto &&name : DirectoryEntries(basePath_.data())) {
-
                                         if (name.Eq(_S(".cleanup.log"))) {
                                                 int fd = open(Buffer::build(basePath_, "/", name).data(), O_RDONLY | O_LARGEFILE);
 
@@ -225,7 +223,8 @@ int Service::start(int argc, char **argv) {
                                                         continue;
                                                 }
 
-                                                auto fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, fd, 0);
+                                                auto      fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, fd, 0);
+                                                str_view8 topicName;
 
                                                 TANKUtil::safe_close(fd);
                                                 if (fileData == MAP_FAILED) {
@@ -239,8 +238,6 @@ int Service::start(int argc, char **argv) {
                                                     });
 
                                                 madvise(fileData, fileSize, MADV_SEQUENTIAL | MADV_DONTDUMP);
-
-                                                strwlen8_t topicName;
 
                                                 for (const auto *p = static_cast<uint8_t *>(fileData), *const e = p + fileSize; p < e;) {
                                                         topicName.Set((char *)p + 1, *p);
@@ -272,7 +269,7 @@ int Service::start(int argc, char **argv) {
                                                         }
                                                 } else {
                                                         if (name.front() == '.') {
-                                                                if (false) {
+                                                                if (false && false == read_only) {
                                                                         Print(ansifmt::color_red, "Found stray topic '", name, "'. Will attempt to delete it", ansifmt::reset, "\n");
                                                                         rm_tankdir(fullPath);
                                                                 } else {
@@ -291,7 +288,8 @@ int Service::start(int argc, char **argv) {
                         }
 
                         if (trace) {
-                                SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " for initial walk ", collectedTopics.size(), " topics\n");
+                                SLog("Took ", duration_repr(Timings::Microseconds::Since(before)),
+                                     " for initial walk ", collectedTopics.size(), " topics\n");
                         }
 
                         try {
@@ -300,12 +298,12 @@ int Service::start(int argc, char **argv) {
                                         // it creates a new thread for each call, which is far from optimal
                                         // for now, we will not parallelize the work, but eventually we will use a fixed-size thread pool
                                         // to register all those topics, although it shouldn't really matter match
-					basePath_.resize(basePathLen);
-					basePath_.append('/', name, '/');
+                                        basePath_.resize(basePathLen);
+                                        basePath_.append('/', name, '/');
 
-					// XXX: make sure you access basePath_.data() after Buffer::append()
+                                        // XXX: make sure you access basePath_.data() after Buffer::append()
                                         auto       path = basePath_.c_str();
-					const auto len = basePath_.size();
+                                        const auto len  = basePath_.size();
 
                                         if (stat64(path, &st) == -1) {
 #if defined(TANK_THROW_SWITCH_EXCEPTIONS) || __cplusplus <= 201703L
@@ -324,8 +322,8 @@ int Service::start(int argc, char **argv) {
 
                                                 try {
                                                         for (const auto &&name : DirectoryEntries(path)) {
-								basePath_.resize(len);
-								basePath_.append(name);
+                                                                basePath_.resize(len);
+                                                                basePath_.append(name);
 
                                                                 if (name.Eq(_S("config"))) {
                                                                         // topic overrides defaults
@@ -369,7 +367,7 @@ int Service::start(int argc, char **argv) {
                                                         } else {
                                                                 path[len] = '\0'; // this is important
 
-                                                                if (false) {
+                                                                if (false && false == read_only) {
                                                                         Print(ansifmt::color_red, "No partions found in ", path,
                                                                               ": Will delete topic", ansifmt::reset, "\n");
 
@@ -386,16 +384,16 @@ int Service::start(int argc, char **argv) {
                                         }
                                 }
                         } catch (const std::exception &e) {
-                                Print(ansifmt::bold, ansifmt::color_red, "Initialization failed:", ansifmt::reset, 
-					e.what(), ". Aborting startup-sequence\n");
+                                Print(ansifmt::bold, ansifmt::color_red, "Initialization failed:", ansifmt::reset,
+                                      e.what(), ". Aborting startup-sequence\n");
                                 return 1;
                         }
 
                         basePath_.resize(basePathLen);
 
                         if (trace) {
-                                SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), 
-					" for topics, pendingPartitions.size() = ", pendingPartitions.size(), "\n");
+                                SLog("Took ", duration_repr(Timings::Microseconds::Since(before)),
+                                     " for topics, pendingPartitions.size() = ", pendingPartitions.size(), "\n");
                         }
 
                         before = Timings::Microseconds::Tick();
@@ -407,43 +405,10 @@ int Service::start(int argc, char **argv) {
                                         SLog("pendingPartitions.size() = ", pendingPartitions.size(), "\n");
                                 }
 
-                                futures.clear();
                                 for (auto &it : pendingPartitions) {
                                         auto t = it.first;
 
                                         for (uint16_t i{0}; i < it.second; ++i) {
-
-#ifndef TANK_SRV_LAZY_PARTITION_INIT
-                                                if (bootstrap_failed.load()) {
-                                                        break;
-                                                }
-
-                                                futures.push_back(std::async(
-                                                    std::launch(std::launch::async), [&list, &collectLock, this](topic *t, const uint16_t partition) {
-                                                            TANK_EXPECT(t);
-
-                                                            if (bootstrap_failed.load()) {
-                                                                    return;
-                                                            }
-
-                                                            try {
-                                                                    auto p = init_local_partition(partition, t, t->partitionConf, false);
-
-                                                                    if (p) {
-                                                                            TANK_EXPECT(p->use_count() >= 1);
-
-                                                                            collectLock.lock();
-                                                                            list.emplace_back(t, std::move(p));
-                                                                            collectLock.unlock();
-                                                                    }
-                                                            } catch (const std::exception &e) {
-                                                                    bootstrap_failed.store(true);
-                                                                    throw;
-                                                            }
-                                                    },
-                                                    t, i));
-#else
-
                                                 try {
                                                         const auto partition = i;
                                                         auto       p         = init_local_partition(partition, t, t->partitionConf, false);
@@ -454,31 +419,14 @@ int Service::start(int argc, char **argv) {
 
                                                 } catch (std::exception &e) {
                                                         Print(ansifmt::bold, ansifmt::color_red, "Initialization failed:", ansifmt::reset, e.what(), ". Aborting startup-sequence\n");
-							return 1;
+                                                        return 1;
                                                 }
-#endif
                                         }
                                 }
 
-#ifndef TANK_SRV_LAZY_PARTITION_INIT
-                                if (trace) {
-                                        SLog("futures.size() = ", futures.size(), "\n");
-                                        before = Timings::Microseconds::Tick();
-                                }
-
-                                try {
-                                        for (auto &it : futures) {
-                                                it.get();
-                                        }
-                                } catch (const std::exception &e) {
-                                        Print(ansifmt::bold, ansifmt::color_red, e.what(), ". Aborting startup-sequence.", ansifmt::reset, "\n");
-                                        return 1;
-                                }
-#else
                                 if (trace) {
                                         SLog("Done with partitions\n");
                                 }
-#endif
 
                                 if (trace) {
                                         SLog("Took ", duration_repr(Timings::Microseconds::Since(before)), " for all partitions\n");
@@ -500,7 +448,7 @@ int Service::start(int argc, char **argv) {
 
                                         do {
                                                 partitions.push_back(list[i].second.release());
-                                        } while (++i != n && list[i].first == t);
+                                        } while (++i < n && list[i].first == t);
 
                                         t->register_partitions(partitions.data(), partitions.size());
                                         totalPartitions += partitions.size();

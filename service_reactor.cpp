@@ -176,7 +176,7 @@ void Service::consider_deferred_produce_responses() {
 }
 
 int Service::reactor_main() {
-	unsigned iterations{0};
+        unsigned iterations{0};
 
 #define _TRACE_EXPENSIVE 1
         now_ms = Timings::Milliseconds::Tick();
@@ -184,8 +184,6 @@ int Service::reactor_main() {
 #ifdef _TRACE_EXPENSIVE
         uint64_t _start;
 #endif
-
-//#define DBG_WAIT_UNTIL 1
 
         reactor_state = ReactorState::Active;
         curTime       = time(nullptr);
@@ -216,52 +214,8 @@ int Service::reactor_main() {
                     timers_ebtree_next,
                     consul_state.active_conns_next_process_ts,
                     next_cluster_state_apply,
-		    next_active_partitions_check,
+                    next_active_partitions_check,
                     now_ms + 30 * 1000);
-
-#ifdef DBG_WAIT_UNTIL
-		static unsigned iteration = 0;
-
-                if (++iteration == 128) {
-                        Buffer b;
-                        int    fd = open("/tmp/tank_srv.trace", O_WRONLY | O_APPEND | O_CREAT);
-
-                        const auto repr = [&, now = now_ms](const auto n, const auto v) {
-                                if (v < now) {
-                                        b.append("[", n, "] (past)\n");
-                                } else {
-                                        b.append("[", n, "] ", v - now, "\n");
-                                }
-                        };
-
-			b.append("====================================================================================\n"_s32);
-                        repr("scheduled_consume_retries_list_next", scheduled_consume_retries_list_next);
-                        repr("deferred_produce_responses_next_expiration", deferred_produce_responses_next_expiration);
-                        repr("isr_pending_ack_list_next", isr_pending_ack_list_next);
-                        repr("consul_state.active_conns_next_process_ts", consul_state.active_conns_next_process_ts);
-                        repr("next_idle_check_ts", next_idle_check_ts);
-                        repr("timers_ebtree_next", timers_ebtree_next);
-                        repr("consul_state.active_conns_next_process_ts", consul_state.active_conns_next_process_ts);
-                        repr("next_cluster_state_apply", next_cluster_state_apply);
-                        repr("next_active_partitions_check", next_active_partitions_check);
-
-			for (auto it = eb64_first(&timers_ebtree_root); it; it = eb64_next(it)) {
-				auto ctx = eb64_entry(it, timer_node, node);
-
-				b.append("Timer:", unsigned(ctx->type), "\n");
-
-			}
-
-
-
-                        if (fd != -1) {
-                                write(fd, b.data(), b.size());
-                                TANKUtil::safe_close(fd);
-                        }
-
-                        iteration = 0;
-                }
-#endif
 
                 sleeping.store(true, std::memory_order_relaxed);
 
@@ -278,11 +232,11 @@ int Service::reactor_main() {
                              : "memory");
 
                 now_ms = Timings::Milliseconds::Tick();
-		if (++iterations == 10) {
-			// be kind
-			sched_yield();
-			iterations = 0;
-		}
+                if (++iterations == 10) {
+                        // be kind
+                        sched_yield();
+                        iterations = 0;
+                }
 
                 if (now_ms > next_curtime_update) {
                         // we can avoid excessive time() calls by
@@ -335,9 +289,9 @@ int Service::reactor_main() {
                         consider_idle_conns();
                 }
 
-		if (now_ms >= next_active_partitions_check) {
-			consider_active_partitions();
-		}
+                if (now_ms >= next_active_partitions_check) {
+                        consider_active_partitions();
+                }
 
                 if (now_ms >= consul_state.active_conns_next_process_ts) {
 #ifdef _TRACE_EXPENSIVE
@@ -524,19 +478,19 @@ int Service::process_io(const int r, const uint64_t max_conn_gen) {
                 auto *const c = static_cast<connection *>(ptr);
 
                 if (unlikely(c->gen > max_conn_gen)) {
-			// this connection was created after epoll_wait() was invoked
-			// so the fact that we are processing I/O events about it here means that
-			// the connection was shut down after epoll_wait() (and possibly that
-			// this struct connection has been reused for another connection).
-			// Whatever the case, we must ignore whatever epoll events here for that connection
-			// because it's not the same connection as the one that was registered with epoll
+                        // this connection was created after epoll_wait() was invoked
+                        // so the fact that we are processing I/O events about it here means that
+                        // the connection was shut down after epoll_wait() (and possibly that
+                        // this struct connection has been reused for another connection).
+                        // Whatever the case, we must ignore whatever epoll events here for that connection
+                        // because it's not the same connection as the one that was registered with epoll
                         continue;
                 }
 
-		if (unlikely(c->fd <= 2)) {
-			SLog("Unexpected fd ", c->fd, " for ", ptr_repr(c), "\n");
-			std::abort();
-		}
+                if (unlikely(c->fd <= 2)) {
+                        SLog("Unexpected fd ", c->fd, " for ", ptr_repr(c), "\n");
+                        std::abort();
+                }
 
                 const auto events = it->events;
 
@@ -567,7 +521,7 @@ int Service::process_io(const int r, const uint64_t max_conn_gen) {
                 }
 
                 if (events & EPOLLIN) {
-			TANK_EXPECT(c->fd > 2);
+                        TANK_EXPECT(c->fd > 2);
 
                         try_recv(c);
                 }
@@ -871,12 +825,12 @@ void Service::make_long_polling(connection *const c) {
 // attempt to shutdown upto `n` connections in order
 // to reclaim resources, especially FDs
 size_t Service::try_shutdown_idle(size_t n) {
-	static constexpr const bool trace{false};
-        const auto b = n;
+        static constexpr const bool trace{false};
+        const auto                  b = n;
 
-	if (trace) {
-		SLog("Require at least ", n, " more FDs, will try to shutdown among ", idle_connections.size(), " idle connections\n");
-	}
+        if (trace) {
+                SLog("Require at least ", n, " more FDs, will try to shutdown among ", idle_connections.size(), " idle connections\n");
+        }
 
         while (n && !idle_connections.empty()) {
                 auto c = switch_list_entry(connection, classification.ll, idle_connections.prev);
@@ -937,7 +891,7 @@ bool Service::enable_listener() {
                 return false;
         } else if (bind(listenFd, reinterpret_cast<sockaddr *>(&sa), sizeof(sa))) {
                 Print("bind() failed:", strerror(errno), "\n");
-		Print("Is there another TANK instance already running?\n");
+                Print("Is there another TANK instance already running?\n");
 
                 TANKUtil::safe_close(listenFd);
                 listenFd = -1;
@@ -1415,21 +1369,22 @@ bool Service::shutdown(connection *const c, const uint32_t ref) {
         }
 
         if (trace) {
-                SLog("SHUTDOWN connection of type ", [t = c->type]() {
-                        switch (t) {
-                                case connection::Type::TankClient:
-                                        return "client"_s32;
-                                case connection::Type::Prometheus:
-                                        return "prometheus"_s32;
-                                case connection::Type::ConsulClient:
-                                        return "consul"_s32;
-                                case connection::Type::Consumer:
-                                        return "consumer"_s32;
-                                default:
-                                        return "other"_s32;
-                        }
-                }(),
-                     " at ", ref, " ", time(nullptr), " ", ptr_repr(c), " addr4 ", ip4addr_repr(c->addr4), "\n");
+                SLog(
+                    "SHUTDOWN connection of type ", [t = c->type]() {
+                            switch (t) {
+                                    case connection::Type::TankClient:
+                                            return "client"_s32;
+                                    case connection::Type::Prometheus:
+                                            return "prometheus"_s32;
+                                    case connection::Type::ConsulClient:
+                                            return "consul"_s32;
+                                    case connection::Type::Consumer:
+                                            return "consumer"_s32;
+                                    default:
+                                            return "other"_s32;
+                            }
+                    }(),
+                    " at ", ref, " ", time(nullptr), " ", ptr_repr(c), " addr4 ", ip4addr_repr(c->addr4), "\n");
         }
 
         cleanup_connection(c, ref);
@@ -1451,7 +1406,7 @@ void Service::poll_outavail(connection *const c) {
 }
 
 void Service::release_payload(payload *const p) {
-	TANK_EXPECT(p);
+        TANK_EXPECT(p);
 
         switch (p->src) {
                 case payload::Source::DataVector: {
@@ -1467,9 +1422,9 @@ void Service::release_payload(payload *const p) {
                 case payload::Source::FileContents: {
                         auto fh_p = static_cast<file_contents_payload *>(p);
 
-			if (auto fdh = std::exchange(fh_p->file_range.fdhandle, nullptr)) {
-				fdh->Release();
-			}
+                        if (auto fdh = std::exchange(fh_p->file_range.fdhandle, nullptr)) {
+                                fdh->Release();
+                        }
 
                         put_file_contents_payload(fh_p);
                 } break;
@@ -1498,16 +1453,15 @@ Service::flushop_res Service::flush_file_contents(connection *const c,
         auto        q  = c->outQ;
         std::size_t transmitted{0};
 
-	q->verify();
+        q->verify();
 
-	// any chance this is not the front?
-	TANK_EXPECT(q->front() == payload);
+        // any chance this is not the front?
+        TANK_EXPECT(q->front() == payload);
 
-	// XXX: crashes here
-	// why do we ever crash here?
-	TANK_EXPECT(it.file_range.fdhandle);
-	TANK_EXPECT(it.file_range.range.size());
-
+        // XXX: crashes here
+        // why do we ever crash here?
+        TANK_EXPECT(it.file_range.fdhandle);
+        TANK_EXPECT(it.file_range.range.size());
 
         if (trace) {
                 SLog("About to transfer ", it.file_range.range, "\n");
@@ -1583,7 +1537,7 @@ Service::flushop_res Service::flush_file_contents(connection *const c,
                                         topic->metrics.latency.reg_sample(delta);
                                 }
 
-				std::exchange(it.file_range.fdhandle, nullptr)->Release();
+                                std::exchange(it.file_range.fdhandle, nullptr)->Release();
 
                                 q->pop_front_expected(payload);
                                 release_payload(payload);
@@ -1655,7 +1609,7 @@ Service::flushop_res Service::flush_iov_impl(connection *const   c,
 
         TANK_EXPECT(q);
         TANK_EXPECT(fd != -1);
-	TANK_EXPECT(fd > 2);
+        TANK_EXPECT(fd > 2);
         TANK_EXPECT(iovCnt);
         q->verify();
 
@@ -1665,31 +1619,31 @@ Service::flushop_res Service::flush_iov_impl(connection *const   c,
         }
 
         for (;;) {
-		if (trace) {
-			SLog("Now attempting to writev() ", iovCnt, "\n");
-		}
+                if (trace) {
+                        SLog("Now attempting to writev() ", iovCnt, "\n");
+                }
 
-		TANK_EXPECT(iovCnt);
+                TANK_EXPECT(iovCnt);
 
                 auto r = writev(fd, iov, iovCnt);
 
-		if (trace) {
-			SLog("writev() => ",r, "\n");
-		}
+                if (trace) {
+                        SLog("writev() => ", r, "\n");
+                }
 
                 if (-1 == r) {
                         if (EINTR == errno) {
                                 continue;
                         } else if (EAGAIN == errno) {
-				if (trace) {
-					SLog("Return NeedOutAvail\n");
-				}
+                                if (trace) {
+                                        SLog("Return NeedOutAvail\n");
+                                }
 
                                 return flushop_res::NeedOutAvail;
                         } else {
-				if (trace) {
-					SLog("writev() failed:", strerror(errno), "\n");
-				}
+                                if (trace) {
+                                        SLog("writev() failed:", strerror(errno), "\n");
+                                }
 
                                 track_shutdown(c,
                                                __LINE__,
@@ -1698,28 +1652,28 @@ Service::flushop_res Service::flush_iov_impl(connection *const   c,
 
                                 shutdown(c, __LINE__);
 
-				if (trace) {
-					SLog("Return Shutdown\n");
-				}
+                                if (trace) {
+                                        SLog("Return Shutdown\n");
+                                }
                                 return flushop_res::Shutdown;
                         }
                 }
 
-		if (trace) {
-			SLog("starting at ", q->dv_iov_index, "\n");
-		}
+                if (trace) {
+                        SLog("starting at ", q->dv_iov_index, "\n");
+                }
 
                 for (auto dv_iov_index = q->dv_iov_index;;) {
                 next_gather:
-			TANK_EXPECT(q->front()->src == payload::Source::DataVector);
+                        TANK_EXPECT(q->front()->src == payload::Source::DataVector);
 
                         auto it  = static_cast<data_vector_payload *>(q->front());
                         auto ptr = it->iov + dv_iov_index;
 
                         TANK_EXPECT(dv_iov_index < it->iov_cnt);
-			if (trace) {
-				SLog("dv_iov_index = ", dv_iov_index, " / ", it->iov_cnt, "\n");
-			}
+                        if (trace) {
+                                SLog("dv_iov_index = ", dv_iov_index, " / ", it->iov_cnt, "\n");
+                        }
 
                         while (r >= ptr->iov_len) {
                                 r -= ptr->iov_len;
@@ -1727,9 +1681,9 @@ Service::flushop_res Service::flush_iov_impl(connection *const   c,
                                 TANK_EXPECT(dv_iov_index + 1 <= it->iov_cnt);
 
                                 if (++dv_iov_index == it->iov_cnt) {
-					if (trace) {
-						SLog("OK, dropping front now, size before ", q->size(), "\n");
-					}
+                                        if (trace) {
+                                                SLog("OK, dropping front now, size before ", q->size(), "\n");
+                                        }
 
                                         q->pop_front_expected(it);
                                         dv_iov_index = 0;
@@ -1738,7 +1692,7 @@ Service::flushop_res Service::flush_iov_impl(connection *const   c,
 
                                         release_payload(it);
 
-					q->verify();
+                                        q->verify();
 
                                         if (!r) {
                                                 if (c->state.flags & (1 << unsigned(connection::State::Flags::DrainingForShutdown))) {
@@ -1748,18 +1702,18 @@ Service::flushop_res Service::flush_iov_impl(connection *const   c,
 
                                                         shutdown(c, __LINE__);
 
-							if (trace) {
-								SLog("Return Shutdown\n");
-							}
+                                                        if (trace) {
+                                                                SLog("Return Shutdown\n");
+                                                        }
                                                         return flushop_res::Shutdown;
 
                                                 } else {
                                                         // callee may want to deal with the cork
                                                         q->dv_iov_index = dv_iov_index;
 
-							if (trace) {
-								SLog("Return Flush\n");
-							}
+                                                        if (trace) {
+                                                                SLog("Return Flush\n");
+                                                        }
                                                         return flushop_res::Flush;
                                                 }
 
@@ -1776,9 +1730,9 @@ Service::flushop_res Service::flush_iov_impl(connection *const   c,
                         ptr->iov_base   = reinterpret_cast<char *>(ptr->iov_base) + r;
                         ptr->iov_len -= r;
 
-			if (trace) {
-				SLog("Return NeedOutAvail\n");
-			}
+                        if (trace) {
+                                SLog("Return NeedOutAvail\n");
+                        }
 
                         return flushop_res::NeedOutAvail;
                 }
@@ -1786,7 +1740,7 @@ Service::flushop_res Service::flush_iov_impl(connection *const   c,
 }
 
 bool Service::handle_flush(connection *const c) {
-	TANK_EXPECT(c);
+        TANK_EXPECT(c);
 
         switch (c->type) {
                 case connection::Type::ConsulClient:
@@ -1848,7 +1802,6 @@ bool Service::tx(connection *const c) {
         }
 
         q->verify();
-
 
         if (trace) {
                 SLog("Attempting to send ", q->size(), " payloads\n");
@@ -2012,7 +1965,7 @@ bool Service::tx(connection *const c) {
 }
 
 connection *Service::new_peer_connection(cluster_node *const peer) {
-	TANK_EXPECT(peer);
+        TANK_EXPECT(peer);
         static constexpr bool trace{false};
         auto                  c = get_connection();
 
@@ -2133,9 +2086,9 @@ _accept:
                 SLog("accept4() failed:", strerror(errno), "\n");
 
                 if (errno == EMFILE || errno == ENFILE) {
-			if (trace) {
-				SLog("Will try_shutdown_idle()\n");
-			}
+                        if (trace) {
+                                SLog("Will try_shutdown_idle()\n");
+                        }
 
                         if (try_shutdown_idle(1)) {
                                 goto _accept;
@@ -2156,7 +2109,7 @@ _accept:
                         return 1;
                 }
         } else {
-		TANK_EXPECT(newFd > 2);
+                TANK_EXPECT(newFd > 2);
                 TANK_EXPECT(saLen == sizeof(sockaddr_in));
                 static const auto rcvBufSize = strwlen32_t(getenv("TANK_BROKER_SOCKBUF_RCV_SIZE") ?: "0").as_uint32();
                 static const auto sndBufSize = strwlen32_t(getenv("TANK_BROKER_SOCKBUF_SND_SIZE") ?: "0").as_uint32();
@@ -2183,7 +2136,7 @@ _accept:
                 c->addr4 = *reinterpret_cast<const uint32_t *>(&sa.sin_addr.s_addr);
                 c->fd    = newFd;
 
-		TANK_EXPECT(c->fd > 2);
+                TANK_EXPECT(c->fd > 2);
 
                 Switch::SetNoDelay(c->fd, 1);
 
@@ -2192,7 +2145,6 @@ _accept:
                 c->as.tank.flags = unsigned(connection::As::Tank::Flags::PendingIntro);
                 c->state.flags   = 1u << unsigned(connection::State::Flags::NeedOutAvail);
                 poller.insert(c->fd, EPOLLIN | EPOLLOUT, c);
-
 
                 // start as idle
                 make_idle(c, __LINE__);
@@ -2425,7 +2377,8 @@ bool Service::try_recv_prom(connection *const c) {
                                                                 total += topic->metrics.latency.hist_buckets[i];
 
                                                                 if (total) {
-                                                                        b->append(R"(tanksrv_topic_latency_bucket{le=")", topic::metrics_struct::latency_struct::histogram_scale[i], R"(", n=")", name, R"("} )", total, "\n"_s32);
+                                                                        b->append(R"(tanksrv_topic_latency_bucket{le=")", 
+										topic::metrics_struct::latency_struct::histogram_scale[i], R"(", n=")", name, R"("} )", total, "\n"_s32);
                                                                 }
                                                         }
 
@@ -2522,8 +2475,8 @@ bool Service::try_recv_consumer(connection *const c) {
 }
 
 bool Service::try_recv_tank(connection *const c) {
-	TANK_EXPECT(c);
-	TANK_EXPECT(c->fd > 2);
+        TANK_EXPECT(c);
+        TANK_EXPECT(c->fd > 2);
         static constexpr bool trace{false};
         auto *const           b = c->inB;
 
@@ -2593,7 +2546,7 @@ bool Service::try_recv_tank(connection *const c) {
 bool Service::try_recv(connection *const c) {
         static constexpr bool trace{false};
         TANK_EXPECT(c);
-	TANK_EXPECT(c->fd > 2);
+        TANK_EXPECT(c->fd > 2);
         c->verify();
 
         int  fd = c->fd, n;
@@ -2680,7 +2633,8 @@ void Service::register_timer(eb64_node *const node) {
 
 bool Service::cancel_timer(eb64_node *const node) {
         if (trace_timers) {
-                SLog(ansifmt::color_brown, "Attempting to cancel timer ", ptr_repr(node), " (is linked?:", node->node.leaf_p != nullptr, ")", ansifmt::reset, "\n");
+                SLog(ansifmt::color_brown, "Attempting to cancel timer ", ptr_repr(node),
+                     " (is linked?:", node->node.leaf_p != nullptr, ")", ansifmt::reset, "\n");
         }
 
         if (!node->node.leaf_p) {
