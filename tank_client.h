@@ -114,12 +114,6 @@ class TankClient {
                 size_t           msgsCnt;
         };
 
-#if 0
-        void deregister_connection_attempt(connection *const c) {
-                connectionAttempts.RemoveByValue(c);
-        }
-
-#endif
         struct discovered_topic_partitions final {
                 uint32_t clientReqId;
 

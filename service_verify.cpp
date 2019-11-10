@@ -13,7 +13,7 @@ int Service::verify(char *paths[], const int cnt) {
                         int fd = open(path, O_RDONLY | O_LARGEFILE);
 
                         if (fd == -1) {
-                                RFLog("Failed to access ", fullPath, ": ", strerror(errno), "\n");
+				Print("open(", path, ") failed:", strerror(errno), "\n");
                                 return 1;
                         }
 

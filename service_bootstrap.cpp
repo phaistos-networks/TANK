@@ -228,7 +228,8 @@ int Service::start(int argc, char **argv) {
 
                                                 TANKUtil::safe_close(fd);
                                                 if (fileData == MAP_FAILED) {
-                                                        RFLog("mmap() failed:", strerror(errno), "\n");
+                                                        Print(ansifmt::bold, ansifmt::color_red, "mmap() failed", name, ansifmt::reset, ": ", strerror(errno), "\n");
+                                                        Print("Aborting Now\n");
                                                         return 1;
                                                 }
 

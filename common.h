@@ -20,12 +20,6 @@
 #define MAKE_TANK_RELEASE(major, minor) ((major)*100 + (minor))
 #define TANK_VERSION (MAKE_TANK_RELEASE(3, 4))
 
-// All kind of if (trace) SLog() calls here, for checks and for debugging. Will be stripped out later
-
-#ifdef LEAN_SWITCH
-#define RFLog(...) Print(__VA_ARGS__)
-#endif
-
 namespace TankFlags {
         enum class BundleMsgFlags : uint8_t {
                 HaveKey            = 1,

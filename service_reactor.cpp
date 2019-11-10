@@ -2105,8 +2105,8 @@ _accept:
                                 return 0;
                         }
                 } else if (errno != EINTR && errno != EAGAIN) {
-                        RFLog("accept4(): ", strerror(errno), "\n");
-                        return 1;
+			Print("accept5() failed:", strerror(errno), "\n");
+			return 1;
                 }
         } else {
                 TANK_EXPECT(newFd > 2);
