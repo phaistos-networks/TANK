@@ -1,4 +1,4 @@
-Tank is [a very high performance distributed log](https://github.com/phaistos-networks/TANK/wiki/Why-Tank-and-Tank-vs-X), inspired in part by Kafka, and other similar services and technologies. This is the second major public release, **TANK 2**.
+TANK is [a very high performance distributed log](https://github.com/phaistos-networks/TANK/wiki/Why-Tank-and-Tank-vs-X), inspired in part by Kafka, and other similar services and technologies. This is the second major public release, **TANK 2**.
 
 
 #### Introduction
@@ -15,10 +15,9 @@ Features include:
 - A [powerful CLI tool](https://github.com/phaistos-networks/TANK/wiki/Tank-CLI) for managing, querying, setting messages, mirroring across brokers, etc.
 - [Prometheus Support](https://github.com/phaistos-networks/TANK/wiki/Prometheus-Support)
  
-You should probably use Kafka (the Confluent folk are particularly great), or Google Pub/Sub, or any other open source broker/queue instead of Tank - they are all perfectly fine, some more than others, if support for cluster-aware setups is crucial to you(this feature is in the works).
-
-Tank's goal is highest performance and simplicity. If you need very high performance, operation simplicity and no reliance on other services (when running Tank in stand-alone mode), consider Tank.
+TANK's goal is highest performance and simplicity. 
+If you need very high performance, operation simplicity and no reliance on other services (when running TANK in stand-alone mode), consider TANK.
 
 Please see the [wiki](https://github.com/phaistos-networks/TANK/wiki) for more information.
 
-We chose the name Tank because its a storage chamber, suitable for liquids and gas - which we think is analogous to a storage container for data that flows, from and to other containers and other systems via 'pipes' (connections).
+We chose the name TANK because its a storage chamber, suitable for liquids and gas - which we think is analogous to a storage container for data that flows, from and to other containers and other systems via 'pipes' (connections).
