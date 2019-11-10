@@ -178,6 +178,7 @@ uint64_t TankClient::sequence_number_by_event_time(const topic_partition &topic_
                                              Date::ts_repr(Timings::Milliseconds::ToSeconds(msg_ts)),
                                              " need ", Date::ts_repr(Timings::Milliseconds::ToSeconds(event_time)), "\n");
                                 }
+
                                 break;
                         }
 
@@ -188,8 +189,11 @@ uint64_t TankClient::sequence_number_by_event_time(const topic_partition &topic_
 
                 if (msg_ts < event_time && msg_ts >= cut_off) {
                         if (trace) {
-                                SLog("Stopping now at ", Date::ts_repr(msg_ts / 1000), ", event_time = ", Date::ts_repr(event_time / 1000), " ", Date::ts_repr(cut_off / 1000), "\n");
+                                SLog("Stopping now at ", Date::ts_repr(msg_ts / 1000),
+                                     ", event_time = ", Date::ts_repr(event_time / 1000),
+                                     " ", Date::ts_repr(cut_off / 1000), "\n");
                         }
+
                         break;
                 }
 

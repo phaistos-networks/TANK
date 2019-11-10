@@ -1017,7 +1017,9 @@ void TankClient::make_unreachable(broker *br) {
         unreachable_brokers_tree_next = std::min<uint64_t>(unreachable_brokers_tree_next, br->unreachable_brokers_tree_node.key);
 
         if (trace) {
-                SLog("Will block for a while, consequtive_connection_failures = ", br->consequtive_connection_failures, ", delay = ", delay, "\n");
+                SLog("Will block for a while, consequtive_connection_failures = ",
+                     br->consequtive_connection_failures,
+                     ", delay = ", delay, "\n");
         }
 }
 
