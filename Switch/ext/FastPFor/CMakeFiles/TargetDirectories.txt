@@ -1,0 +1,15 @@
+/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/rebuild_cache.dir
+/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/unit.dir
+/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/example.dir
+/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/inmemorybenchmark.dir
+/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/codecs.dir
+/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/inmemorybenchmarksnappy.dir
+/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/codecssnappy.dir
+/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/gapstats.dir
+/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/FastPFor.dir
+/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/check.dir
+/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/csv2maropu.dir
+/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/edit_cache.dir
+/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/entropy.dir
+/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/partitionbylength.dir
+/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/benchbitpacking.dir

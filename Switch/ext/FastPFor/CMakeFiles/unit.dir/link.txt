@@ -1,0 +1,1 @@
+/usr/bin/clang++  -Wall -Wcast-align -O3 -DNDEBUG -std=c++11 -DHAVE_CXX0X -msse4.1 -march=native  -rdynamic CMakeFiles/unit.dir/src/unit.cpp.o  -o unit libFastPFor.a 

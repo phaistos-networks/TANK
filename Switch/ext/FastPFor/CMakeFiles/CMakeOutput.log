@@ -1,0 +1,1563 @@
+The system is: Linux - 4.4.0-28-generic - x86_64
+Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+Compiler: /usr/bin/c++ 
+Build flags: 
+Id flags: 
+
+The output was:
+0
+
+
+Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "a.out"
+
+The CXX compiler identification is GNU, found in "/home/system/Development/Switch/ext/FastPFor/CMakeFiles/3.5.1/CompilerIdCXX/a.out"
+
+Compiling the C compiler identification source file "CMakeCCompilerId.c" succeeded.
+Compiler: /usr/bin/cc 
+Build flags: 
+Id flags: 
+
+The output was:
+0
+
+
+Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "a.out"
+
+The C compiler identification is GNU, found in "/home/system/Development/Switch/ext/FastPFor/CMakeFiles/3.5.1/CompilerIdC/a.out"
+
+Determining if the CXX compiler works passed with the following output:
+Change Dir: /home/system/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_c262b/fast"
+/usr/bin/make -f CMakeFiles/cmTC_c262b.dir/build.make CMakeFiles/cmTC_c262b.dir/build
+make[1]: Entering directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_c262b.dir/testCXXCompiler.cxx.o
+/usr/bin/c++      -o CMakeFiles/cmTC_c262b.dir/testCXXCompiler.cxx.o -c /home/system/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp/testCXXCompiler.cxx
+Linking CXX executable cmTC_c262b
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_c262b.dir/link.txt --verbose=1
+/usr/bin/c++        CMakeFiles/cmTC_c262b.dir/testCXXCompiler.cxx.o  -o cmTC_c262b -rdynamic 
+make[1]: Leaving directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+Detecting CXX compiler ABI info compiled with the following output:
+Change Dir: /home/system/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_d2ec7/fast"
+/usr/bin/make -f CMakeFiles/cmTC_d2ec7.dir/build.make CMakeFiles/cmTC_d2ec7.dir/build
+make[1]: Entering directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_d2ec7.dir/CMakeCXXCompilerABI.cpp.o
+/usr/bin/c++      -o CMakeFiles/cmTC_d2ec7.dir/CMakeCXXCompilerABI.cpp.o -c /usr/share/cmake-3.5/Modules/CMakeCXXCompilerABI.cpp
+Linking CXX executable cmTC_d2ec7
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_d2ec7.dir/link.txt --verbose=1
+/usr/bin/c++       -v CMakeFiles/cmTC_d2ec7.dir/CMakeCXXCompilerABI.cpp.o  -o cmTC_d2ec7 -rdynamic  
+Using built-in specs.
+COLLECT_GCC=/usr/bin/c++
+COLLECT_LTO_WRAPPER=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper
+Target: x86_64-linux-gnu
+Configured with: ../src/configure -v --with-pkgversion='Ubuntu 5.4.1-2ubuntu1~16.04' --with-bugurl=file:///usr/share/doc/gcc-5/README.Bugs --enable-languages=c,ada,c++,java,go,d,fortran,objc,obj-c++ --prefix=/usr --program-suffix=-5 --enable-shared --enable-linker-build-id --libexecdir=/usr/lib --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --with-sysroot=/ --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-gnu-unique-object --disable-vtable-verify --enable-libmpx --enable-plugin --with-system-zlib --disable-browser-plugin --enable-java-awt=gtk --enable-gtk-cairo --with-java-home=/usr/lib/jvm/java-1.5.0-gcj-5-amd64/jre --enable-java-home --with-jvm-root-dir=/usr/lib/jvm/java-1.5.0-gcj-5-amd64 --with-jvm-jar-dir=/usr/lib/jvm-exports/java-1.5.0-gcj-5-amd64 --with-arch-directory=amd64 --with-ecj-jar=/usr/share/java/eclipse-ecj.jar --enable-objc-gc --enable-multiarch --disable-werror --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32,m64,mx32 --enable-multilib --with-tune=generic --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu
+Thread model: posix
+gcc version 5.4.1 20160904 (Ubuntu 5.4.1-2ubuntu1~16.04) 
+COMPILER_PATH=/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/
+LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../:/lib/:/usr/lib/
+COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_d2ec7' '-rdynamic' '-shared-libgcc' '-mtune=generic' '-march=x86-64'
+ /usr/lib/gcc/x86_64-linux-gnu/5/collect2 -plugin /usr/lib/gcc/x86_64-linux-gnu/5/liblto_plugin.so -plugin-opt=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper -plugin-opt=-fresolution=/tmp/ccQcxQdB.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --sysroot=/ --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -export-dynamic -dynamic-linker /lib64/ld-linux-x86-64.so.2 -z relro -o cmTC_d2ec7 /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crt1.o /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/5/crtbegin.o -L/usr/lib/gcc/x86_64-linux-gnu/5 -L/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/5/../../.. CMakeFiles/cmTC_d2ec7.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-linux-gnu/5/crtend.o /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crtn.o
+make[1]: Leaving directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+Parsed CXX implicit link information from above output:
+  link line regex: [^( *|.*[/\])(ld|([^/\]+-)?ld|collect2)[^/\]*( |$)]
+  ignore line: [Change Dir: /home/system/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp]
+  ignore line: []
+  ignore line: [Run Build Command:"/usr/bin/make" "cmTC_d2ec7/fast"]
+  ignore line: [/usr/bin/make -f CMakeFiles/cmTC_d2ec7.dir/build.make CMakeFiles/cmTC_d2ec7.dir/build]
+  ignore line: [make[1]: Entering directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp']
+  ignore line: [Building CXX object CMakeFiles/cmTC_d2ec7.dir/CMakeCXXCompilerABI.cpp.o]
+  ignore line: [/usr/bin/c++      -o CMakeFiles/cmTC_d2ec7.dir/CMakeCXXCompilerABI.cpp.o -c /usr/share/cmake-3.5/Modules/CMakeCXXCompilerABI.cpp]
+  ignore line: [Linking CXX executable cmTC_d2ec7]
+  ignore line: [/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_d2ec7.dir/link.txt --verbose=1]
+  ignore line: [/usr/bin/c++       -v CMakeFiles/cmTC_d2ec7.dir/CMakeCXXCompilerABI.cpp.o  -o cmTC_d2ec7 -rdynamic  ]
+  ignore line: [Using built-in specs.]
+  ignore line: [COLLECT_GCC=/usr/bin/c++]
+  ignore line: [COLLECT_LTO_WRAPPER=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper]
+  ignore line: [Target: x86_64-linux-gnu]
+  ignore line: [Configured with: ../src/configure -v --with-pkgversion='Ubuntu 5.4.1-2ubuntu1~16.04' --with-bugurl=file:///usr/share/doc/gcc-5/README.Bugs --enable-languages=c,ada,c++,java,go,d,fortran,objc,obj-c++ --prefix=/usr --program-suffix=-5 --enable-shared --enable-linker-build-id --libexecdir=/usr/lib --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --with-sysroot=/ --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-gnu-unique-object --disable-vtable-verify --enable-libmpx --enable-plugin --with-system-zlib --disable-browser-plugin --enable-java-awt=gtk --enable-gtk-cairo --with-java-home=/usr/lib/jvm/java-1.5.0-gcj-5-amd64/jre --enable-java-home --with-jvm-root-dir=/usr/lib/jvm/java-1.5.0-gcj-5-amd64 --with-jvm-jar-dir=/usr/lib/jvm-exports/java-1.5.0-gcj-5-amd64 --with-arch-directory=amd64 --with-ecj-jar=/usr/share/java/eclipse-ecj.jar --enable-objc-gc --enable-multiarch --disable-werror --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32,m64,mx32 --enable-multilib --with-tune=generic --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu]
+  ignore line: [Thread model: posix]
+  ignore line: [gcc version 5.4.1 20160904 (Ubuntu 5.4.1-2ubuntu1~16.04) ]
+  ignore line: [COMPILER_PATH=/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/]
+  ignore line: [LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../:/lib/:/usr/lib/]
+  ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_d2ec7' '-rdynamic' '-shared-libgcc' '-mtune=generic' '-march=x86-64']
+  link line: [ /usr/lib/gcc/x86_64-linux-gnu/5/collect2 -plugin /usr/lib/gcc/x86_64-linux-gnu/5/liblto_plugin.so -plugin-opt=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper -plugin-opt=-fresolution=/tmp/ccQcxQdB.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --sysroot=/ --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -export-dynamic -dynamic-linker /lib64/ld-linux-x86-64.so.2 -z relro -o cmTC_d2ec7 /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crt1.o /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/5/crtbegin.o -L/usr/lib/gcc/x86_64-linux-gnu/5 -L/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/5/../../.. CMakeFiles/cmTC_d2ec7.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-linux-gnu/5/crtend.o /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crtn.o]
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/collect2] ==> ignore
+    arg [-plugin] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/liblto_plugin.so] ==> ignore
+    arg [-plugin-opt=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper] ==> ignore
+    arg [-plugin-opt=-fresolution=/tmp/ccQcxQdB.res] ==> ignore
+    arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+    arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+    arg [-plugin-opt=-pass-through=-lc] ==> ignore
+    arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+    arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+    arg [--sysroot=/] ==> ignore
+    arg [--build-id] ==> ignore
+    arg [--eh-frame-hdr] ==> ignore
+    arg [-m] ==> ignore
+    arg [elf_x86_64] ==> ignore
+    arg [--hash-style=gnu] ==> ignore
+    arg [--as-needed] ==> ignore
+    arg [-export-dynamic] ==> ignore
+    arg [-dynamic-linker] ==> ignore
+    arg [/lib64/ld-linux-x86-64.so.2] ==> ignore
+    arg [-zrelro] ==> ignore
+    arg [-o] ==> ignore
+    arg [cmTC_d2ec7] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crt1.o] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crti.o] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/crtbegin.o] ==> ignore
+    arg [-L/usr/lib/gcc/x86_64-linux-gnu/5] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/5]
+    arg [-L/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu]
+    arg [-L/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib]
+    arg [-L/lib/x86_64-linux-gnu] ==> dir [/lib/x86_64-linux-gnu]
+    arg [-L/lib/../lib] ==> dir [/lib/../lib]
+    arg [-L/usr/lib/x86_64-linux-gnu] ==> dir [/usr/lib/x86_64-linux-gnu]
+    arg [-L/usr/lib/../lib] ==> dir [/usr/lib/../lib]
+    arg [-L/usr/lib/gcc/x86_64-linux-gnu/5/../../..] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../..]
+    arg [CMakeFiles/cmTC_d2ec7.dir/CMakeCXXCompilerABI.cpp.o] ==> ignore
+    arg [-lstdc++] ==> lib [stdc++]
+    arg [-lm] ==> lib [m]
+    arg [-lgcc_s] ==> lib [gcc_s]
+    arg [-lgcc] ==> lib [gcc]
+    arg [-lc] ==> lib [c]
+    arg [-lgcc_s] ==> lib [gcc_s]
+    arg [-lgcc] ==> lib [gcc]
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/crtend.o] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crtn.o] ==> ignore
+  remove lib [gcc_s]
+  remove lib [gcc]
+  remove lib [gcc_s]
+  remove lib [gcc]
+  collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/5] ==> [/usr/lib/gcc/x86_64-linux-gnu/5]
+  collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu] ==> [/usr/lib/x86_64-linux-gnu]
+  collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib] ==> [/usr/lib]
+  collapse library dir [/lib/x86_64-linux-gnu] ==> [/lib/x86_64-linux-gnu]
+  collapse library dir [/lib/../lib] ==> [/lib]
+  collapse library dir [/usr/lib/x86_64-linux-gnu] ==> [/usr/lib/x86_64-linux-gnu]
+  collapse library dir [/usr/lib/../lib] ==> [/usr/lib]
+  collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../..] ==> [/usr/lib]
+  implicit libs: [stdc++;m;c]
+  implicit dirs: [/usr/lib/gcc/x86_64-linux-gnu/5;/usr/lib/x86_64-linux-gnu;/usr/lib;/lib/x86_64-linux-gnu;/lib]
+  implicit fwks: []
+
+
+
+
+Detecting CXX [-std=c++14] compiler features compiled with the following output:
+Change Dir: /home/system/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_88a24/fast"
+/usr/bin/make -f CMakeFiles/cmTC_88a24.dir/build.make CMakeFiles/cmTC_88a24.dir/build
+make[1]: Entering directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_88a24.dir/feature_tests.cxx.o
+/usr/bin/c++     -std=c++14 -o CMakeFiles/cmTC_88a24.dir/feature_tests.cxx.o -c /home/system/Development/Switch/ext/FastPFor/CMakeFiles/feature_tests.cxx
+Linking CXX executable cmTC_88a24
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_88a24.dir/link.txt --verbose=1
+/usr/bin/c++        CMakeFiles/cmTC_88a24.dir/feature_tests.cxx.o  -o cmTC_88a24 -rdynamic 
+make[1]: Leaving directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+    Feature record: CXX_FEATURE:1cxx_aggregate_default_initializers
+    Feature record: CXX_FEATURE:1cxx_alias_templates
+    Feature record: CXX_FEATURE:1cxx_alignas
+    Feature record: CXX_FEATURE:1cxx_alignof
+    Feature record: CXX_FEATURE:1cxx_attributes
+    Feature record: CXX_FEATURE:1cxx_attribute_deprecated
+    Feature record: CXX_FEATURE:1cxx_auto_type
+    Feature record: CXX_FEATURE:1cxx_binary_literals
+    Feature record: CXX_FEATURE:1cxx_constexpr
+    Feature record: CXX_FEATURE:1cxx_contextual_conversions
+    Feature record: CXX_FEATURE:1cxx_decltype
+    Feature record: CXX_FEATURE:1cxx_decltype_auto
+    Feature record: CXX_FEATURE:1cxx_decltype_incomplete_return_types
+    Feature record: CXX_FEATURE:1cxx_default_function_template_args
+    Feature record: CXX_FEATURE:1cxx_defaulted_functions
+    Feature record: CXX_FEATURE:1cxx_defaulted_move_initializers
+    Feature record: CXX_FEATURE:1cxx_delegating_constructors
+    Feature record: CXX_FEATURE:1cxx_deleted_functions
+    Feature record: CXX_FEATURE:1cxx_digit_separators
+    Feature record: CXX_FEATURE:1cxx_enum_forward_declarations
+    Feature record: CXX_FEATURE:1cxx_explicit_conversions
+    Feature record: CXX_FEATURE:1cxx_extended_friend_declarations
+    Feature record: CXX_FEATURE:1cxx_extern_templates
+    Feature record: CXX_FEATURE:1cxx_final
+    Feature record: CXX_FEATURE:1cxx_func_identifier
+    Feature record: CXX_FEATURE:1cxx_generalized_initializers
+    Feature record: CXX_FEATURE:1cxx_generic_lambdas
+    Feature record: CXX_FEATURE:1cxx_inheriting_constructors
+    Feature record: CXX_FEATURE:1cxx_inline_namespaces
+    Feature record: CXX_FEATURE:1cxx_lambdas
+    Feature record: CXX_FEATURE:1cxx_lambda_init_captures
+    Feature record: CXX_FEATURE:1cxx_local_type_template_args
+    Feature record: CXX_FEATURE:1cxx_long_long_type
+    Feature record: CXX_FEATURE:1cxx_noexcept
+    Feature record: CXX_FEATURE:1cxx_nonstatic_member_init
+    Feature record: CXX_FEATURE:1cxx_nullptr
+    Feature record: CXX_FEATURE:1cxx_override
+    Feature record: CXX_FEATURE:1cxx_range_for
+    Feature record: CXX_FEATURE:1cxx_raw_string_literals
+    Feature record: CXX_FEATURE:1cxx_reference_qualified_functions
+    Feature record: CXX_FEATURE:1cxx_relaxed_constexpr
+    Feature record: CXX_FEATURE:1cxx_return_type_deduction
+    Feature record: CXX_FEATURE:1cxx_right_angle_brackets
+    Feature record: CXX_FEATURE:1cxx_rvalue_references
+    Feature record: CXX_FEATURE:1cxx_sizeof_member
+    Feature record: CXX_FEATURE:1cxx_static_assert
+    Feature record: CXX_FEATURE:1cxx_strong_enums
+    Feature record: CXX_FEATURE:1cxx_template_template_parameters
+    Feature record: CXX_FEATURE:1cxx_thread_local
+    Feature record: CXX_FEATURE:1cxx_trailing_return_types
+    Feature record: CXX_FEATURE:1cxx_unicode_literals
+    Feature record: CXX_FEATURE:1cxx_uniform_initialization
+    Feature record: CXX_FEATURE:1cxx_unrestricted_unions
+    Feature record: CXX_FEATURE:1cxx_user_literals
+    Feature record: CXX_FEATURE:1cxx_variable_templates
+    Feature record: CXX_FEATURE:1cxx_variadic_macros
+    Feature record: CXX_FEATURE:1cxx_variadic_templates
+
+
+Detecting CXX [-std=c++11] compiler features compiled with the following output:
+Change Dir: /home/system/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_6037b/fast"
+/usr/bin/make -f CMakeFiles/cmTC_6037b.dir/build.make CMakeFiles/cmTC_6037b.dir/build
+make[1]: Entering directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_6037b.dir/feature_tests.cxx.o
+/usr/bin/c++     -std=c++11 -o CMakeFiles/cmTC_6037b.dir/feature_tests.cxx.o -c /home/system/Development/Switch/ext/FastPFor/CMakeFiles/feature_tests.cxx
+Linking CXX executable cmTC_6037b
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_6037b.dir/link.txt --verbose=1
+/usr/bin/c++        CMakeFiles/cmTC_6037b.dir/feature_tests.cxx.o  -o cmTC_6037b -rdynamic 
+make[1]: Leaving directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+    Feature record: CXX_FEATURE:0cxx_aggregate_default_initializers
+    Feature record: CXX_FEATURE:1cxx_alias_templates
+    Feature record: CXX_FEATURE:1cxx_alignas
+    Feature record: CXX_FEATURE:1cxx_alignof
+    Feature record: CXX_FEATURE:1cxx_attributes
+    Feature record: CXX_FEATURE:0cxx_attribute_deprecated
+    Feature record: CXX_FEATURE:1cxx_auto_type
+    Feature record: CXX_FEATURE:0cxx_binary_literals
+    Feature record: CXX_FEATURE:1cxx_constexpr
+    Feature record: CXX_FEATURE:0cxx_contextual_conversions
+    Feature record: CXX_FEATURE:1cxx_decltype
+    Feature record: CXX_FEATURE:0cxx_decltype_auto
+    Feature record: CXX_FEATURE:1cxx_decltype_incomplete_return_types
+    Feature record: CXX_FEATURE:1cxx_default_function_template_args
+    Feature record: CXX_FEATURE:1cxx_defaulted_functions
+    Feature record: CXX_FEATURE:1cxx_defaulted_move_initializers
+    Feature record: CXX_FEATURE:1cxx_delegating_constructors
+    Feature record: CXX_FEATURE:1cxx_deleted_functions
+    Feature record: CXX_FEATURE:0cxx_digit_separators
+    Feature record: CXX_FEATURE:1cxx_enum_forward_declarations
+    Feature record: CXX_FEATURE:1cxx_explicit_conversions
+    Feature record: CXX_FEATURE:1cxx_extended_friend_declarations
+    Feature record: CXX_FEATURE:1cxx_extern_templates
+    Feature record: CXX_FEATURE:1cxx_final
+    Feature record: CXX_FEATURE:1cxx_func_identifier
+    Feature record: CXX_FEATURE:1cxx_generalized_initializers
+    Feature record: CXX_FEATURE:0cxx_generic_lambdas
+    Feature record: CXX_FEATURE:1cxx_inheriting_constructors
+    Feature record: CXX_FEATURE:1cxx_inline_namespaces
+    Feature record: CXX_FEATURE:1cxx_lambdas
+    Feature record: CXX_FEATURE:0cxx_lambda_init_captures
+    Feature record: CXX_FEATURE:1cxx_local_type_template_args
+    Feature record: CXX_FEATURE:1cxx_long_long_type
+    Feature record: CXX_FEATURE:1cxx_noexcept
+    Feature record: CXX_FEATURE:1cxx_nonstatic_member_init
+    Feature record: CXX_FEATURE:1cxx_nullptr
+    Feature record: CXX_FEATURE:1cxx_override
+    Feature record: CXX_FEATURE:1cxx_range_for
+    Feature record: CXX_FEATURE:1cxx_raw_string_literals
+    Feature record: CXX_FEATURE:1cxx_reference_qualified_functions
+    Feature record: CXX_FEATURE:0cxx_relaxed_constexpr
+    Feature record: CXX_FEATURE:0cxx_return_type_deduction
+    Feature record: CXX_FEATURE:1cxx_right_angle_brackets
+    Feature record: CXX_FEATURE:1cxx_rvalue_references
+    Feature record: CXX_FEATURE:1cxx_sizeof_member
+    Feature record: CXX_FEATURE:1cxx_static_assert
+    Feature record: CXX_FEATURE:1cxx_strong_enums
+    Feature record: CXX_FEATURE:1cxx_template_template_parameters
+    Feature record: CXX_FEATURE:1cxx_thread_local
+    Feature record: CXX_FEATURE:1cxx_trailing_return_types
+    Feature record: CXX_FEATURE:1cxx_unicode_literals
+    Feature record: CXX_FEATURE:1cxx_uniform_initialization
+    Feature record: CXX_FEATURE:1cxx_unrestricted_unions
+    Feature record: CXX_FEATURE:1cxx_user_literals
+    Feature record: CXX_FEATURE:0cxx_variable_templates
+    Feature record: CXX_FEATURE:1cxx_variadic_macros
+    Feature record: CXX_FEATURE:1cxx_variadic_templates
+
+
+Detecting CXX [-std=c++98] compiler features compiled with the following output:
+Change Dir: /home/system/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_8af26/fast"
+/usr/bin/make -f CMakeFiles/cmTC_8af26.dir/build.make CMakeFiles/cmTC_8af26.dir/build
+make[1]: Entering directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_8af26.dir/feature_tests.cxx.o
+/usr/bin/c++     -std=c++98 -o CMakeFiles/cmTC_8af26.dir/feature_tests.cxx.o -c /home/system/Development/Switch/ext/FastPFor/CMakeFiles/feature_tests.cxx
+Linking CXX executable cmTC_8af26
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_8af26.dir/link.txt --verbose=1
+/usr/bin/c++        CMakeFiles/cmTC_8af26.dir/feature_tests.cxx.o  -o cmTC_8af26 -rdynamic 
+make[1]: Leaving directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+    Feature record: CXX_FEATURE:0cxx_aggregate_default_initializers
+    Feature record: CXX_FEATURE:0cxx_alias_templates
+    Feature record: CXX_FEATURE:0cxx_alignas
+    Feature record: CXX_FEATURE:0cxx_alignof
+    Feature record: CXX_FEATURE:0cxx_attributes
+    Feature record: CXX_FEATURE:0cxx_attribute_deprecated
+    Feature record: CXX_FEATURE:0cxx_auto_type
+    Feature record: CXX_FEATURE:0cxx_binary_literals
+    Feature record: CXX_FEATURE:0cxx_constexpr
+    Feature record: CXX_FEATURE:0cxx_contextual_conversions
+    Feature record: CXX_FEATURE:0cxx_decltype
+    Feature record: CXX_FEATURE:0cxx_decltype_auto
+    Feature record: CXX_FEATURE:0cxx_decltype_incomplete_return_types
+    Feature record: CXX_FEATURE:0cxx_default_function_template_args
+    Feature record: CXX_FEATURE:0cxx_defaulted_functions
+    Feature record: CXX_FEATURE:0cxx_defaulted_move_initializers
+    Feature record: CXX_FEATURE:0cxx_delegating_constructors
+    Feature record: CXX_FEATURE:0cxx_deleted_functions
+    Feature record: CXX_FEATURE:0cxx_digit_separators
+    Feature record: CXX_FEATURE:0cxx_enum_forward_declarations
+    Feature record: CXX_FEATURE:0cxx_explicit_conversions
+    Feature record: CXX_FEATURE:0cxx_extended_friend_declarations
+    Feature record: CXX_FEATURE:0cxx_extern_templates
+    Feature record: CXX_FEATURE:0cxx_final
+    Feature record: CXX_FEATURE:0cxx_func_identifier
+    Feature record: CXX_FEATURE:0cxx_generalized_initializers
+    Feature record: CXX_FEATURE:0cxx_generic_lambdas
+    Feature record: CXX_FEATURE:0cxx_inheriting_constructors
+    Feature record: CXX_FEATURE:0cxx_inline_namespaces
+    Feature record: CXX_FEATURE:0cxx_lambdas
+    Feature record: CXX_FEATURE:0cxx_lambda_init_captures
+    Feature record: CXX_FEATURE:0cxx_local_type_template_args
+    Feature record: CXX_FEATURE:0cxx_long_long_type
+    Feature record: CXX_FEATURE:0cxx_noexcept
+    Feature record: CXX_FEATURE:0cxx_nonstatic_member_init
+    Feature record: CXX_FEATURE:0cxx_nullptr
+    Feature record: CXX_FEATURE:0cxx_override
+    Feature record: CXX_FEATURE:0cxx_range_for
+    Feature record: CXX_FEATURE:0cxx_raw_string_literals
+    Feature record: CXX_FEATURE:0cxx_reference_qualified_functions
+    Feature record: CXX_FEATURE:0cxx_relaxed_constexpr
+    Feature record: CXX_FEATURE:0cxx_return_type_deduction
+    Feature record: CXX_FEATURE:0cxx_right_angle_brackets
+    Feature record: CXX_FEATURE:0cxx_rvalue_references
+    Feature record: CXX_FEATURE:0cxx_sizeof_member
+    Feature record: CXX_FEATURE:0cxx_static_assert
+    Feature record: CXX_FEATURE:0cxx_strong_enums
+    Feature record: CXX_FEATURE:1cxx_template_template_parameters
+    Feature record: CXX_FEATURE:0cxx_thread_local
+    Feature record: CXX_FEATURE:0cxx_trailing_return_types
+    Feature record: CXX_FEATURE:0cxx_unicode_literals
+    Feature record: CXX_FEATURE:0cxx_uniform_initialization
+    Feature record: CXX_FEATURE:0cxx_unrestricted_unions
+    Feature record: CXX_FEATURE:0cxx_user_literals
+    Feature record: CXX_FEATURE:0cxx_variable_templates
+    Feature record: CXX_FEATURE:0cxx_variadic_macros
+    Feature record: CXX_FEATURE:0cxx_variadic_templates
+Determining if the C compiler works passed with the following output:
+Change Dir: /home/system/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_83d3c/fast"
+/usr/bin/make -f CMakeFiles/cmTC_83d3c.dir/build.make CMakeFiles/cmTC_83d3c.dir/build
+make[1]: Entering directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_83d3c.dir/testCCompiler.c.o
+/usr/bin/cc     -o CMakeFiles/cmTC_83d3c.dir/testCCompiler.c.o   -c /home/system/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp/testCCompiler.c
+Linking C executable cmTC_83d3c
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_83d3c.dir/link.txt --verbose=1
+/usr/bin/cc       CMakeFiles/cmTC_83d3c.dir/testCCompiler.c.o  -o cmTC_83d3c -rdynamic 
+make[1]: Leaving directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+Detecting C compiler ABI info compiled with the following output:
+Change Dir: /home/system/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_21fd6/fast"
+/usr/bin/make -f CMakeFiles/cmTC_21fd6.dir/build.make CMakeFiles/cmTC_21fd6.dir/build
+make[1]: Entering directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_21fd6.dir/CMakeCCompilerABI.c.o
+/usr/bin/cc     -o CMakeFiles/cmTC_21fd6.dir/CMakeCCompilerABI.c.o   -c /usr/share/cmake-3.5/Modules/CMakeCCompilerABI.c
+Linking C executable cmTC_21fd6
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_21fd6.dir/link.txt --verbose=1
+/usr/bin/cc      -v CMakeFiles/cmTC_21fd6.dir/CMakeCCompilerABI.c.o  -o cmTC_21fd6 -rdynamic  
+Using built-in specs.
+COLLECT_GCC=/usr/bin/cc
+COLLECT_LTO_WRAPPER=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper
+Target: x86_64-linux-gnu
+Configured with: ../src/configure -v --with-pkgversion='Ubuntu 5.4.1-2ubuntu1~16.04' --with-bugurl=file:///usr/share/doc/gcc-5/README.Bugs --enable-languages=c,ada,c++,java,go,d,fortran,objc,obj-c++ --prefix=/usr --program-suffix=-5 --enable-shared --enable-linker-build-id --libexecdir=/usr/lib --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --with-sysroot=/ --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-gnu-unique-object --disable-vtable-verify --enable-libmpx --enable-plugin --with-system-zlib --disable-browser-plugin --enable-java-awt=gtk --enable-gtk-cairo --with-java-home=/usr/lib/jvm/java-1.5.0-gcj-5-amd64/jre --enable-java-home --with-jvm-root-dir=/usr/lib/jvm/java-1.5.0-gcj-5-amd64 --with-jvm-jar-dir=/usr/lib/jvm-exports/java-1.5.0-gcj-5-amd64 --with-arch-directory=amd64 --with-ecj-jar=/usr/share/java/eclipse-ecj.jar --enable-objc-gc --enable-multiarch --disable-werror --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32,m64,mx32 --enable-multilib --with-tune=generic --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu
+Thread model: posix
+gcc version 5.4.1 20160904 (Ubuntu 5.4.1-2ubuntu1~16.04) 
+COMPILER_PATH=/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/
+LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../:/lib/:/usr/lib/
+COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_21fd6' '-rdynamic' '-mtune=generic' '-march=x86-64'
+ /usr/lib/gcc/x86_64-linux-gnu/5/collect2 -plugin /usr/lib/gcc/x86_64-linux-gnu/5/liblto_plugin.so -plugin-opt=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper -plugin-opt=-fresolution=/tmp/ccUmNF41.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --sysroot=/ --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -export-dynamic -dynamic-linker /lib64/ld-linux-x86-64.so.2 -z relro -o cmTC_21fd6 /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crt1.o /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/5/crtbegin.o -L/usr/lib/gcc/x86_64-linux-gnu/5 -L/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/5/../../.. CMakeFiles/cmTC_21fd6.dir/CMakeCCompilerABI.c.o -lgcc --as-needed -lgcc_s --no-as-needed -lc -lgcc --as-needed -lgcc_s --no-as-needed /usr/lib/gcc/x86_64-linux-gnu/5/crtend.o /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crtn.o
+make[1]: Leaving directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+Parsed C implicit link information from above output:
+  link line regex: [^( *|.*[/\])(ld|([^/\]+-)?ld|collect2)[^/\]*( |$)]
+  ignore line: [Change Dir: /home/system/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp]
+  ignore line: []
+  ignore line: [Run Build Command:"/usr/bin/make" "cmTC_21fd6/fast"]
+  ignore line: [/usr/bin/make -f CMakeFiles/cmTC_21fd6.dir/build.make CMakeFiles/cmTC_21fd6.dir/build]
+  ignore line: [make[1]: Entering directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp']
+  ignore line: [Building C object CMakeFiles/cmTC_21fd6.dir/CMakeCCompilerABI.c.o]
+  ignore line: [/usr/bin/cc     -o CMakeFiles/cmTC_21fd6.dir/CMakeCCompilerABI.c.o   -c /usr/share/cmake-3.5/Modules/CMakeCCompilerABI.c]
+  ignore line: [Linking C executable cmTC_21fd6]
+  ignore line: [/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_21fd6.dir/link.txt --verbose=1]
+  ignore line: [/usr/bin/cc      -v CMakeFiles/cmTC_21fd6.dir/CMakeCCompilerABI.c.o  -o cmTC_21fd6 -rdynamic  ]
+  ignore line: [Using built-in specs.]
+  ignore line: [COLLECT_GCC=/usr/bin/cc]
+  ignore line: [COLLECT_LTO_WRAPPER=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper]
+  ignore line: [Target: x86_64-linux-gnu]
+  ignore line: [Configured with: ../src/configure -v --with-pkgversion='Ubuntu 5.4.1-2ubuntu1~16.04' --with-bugurl=file:///usr/share/doc/gcc-5/README.Bugs --enable-languages=c,ada,c++,java,go,d,fortran,objc,obj-c++ --prefix=/usr --program-suffix=-5 --enable-shared --enable-linker-build-id --libexecdir=/usr/lib --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --with-sysroot=/ --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-gnu-unique-object --disable-vtable-verify --enable-libmpx --enable-plugin --with-system-zlib --disable-browser-plugin --enable-java-awt=gtk --enable-gtk-cairo --with-java-home=/usr/lib/jvm/java-1.5.0-gcj-5-amd64/jre --enable-java-home --with-jvm-root-dir=/usr/lib/jvm/java-1.5.0-gcj-5-amd64 --with-jvm-jar-dir=/usr/lib/jvm-exports/java-1.5.0-gcj-5-amd64 --with-arch-directory=amd64 --with-ecj-jar=/usr/share/java/eclipse-ecj.jar --enable-objc-gc --enable-multiarch --disable-werror --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32,m64,mx32 --enable-multilib --with-tune=generic --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu]
+  ignore line: [Thread model: posix]
+  ignore line: [gcc version 5.4.1 20160904 (Ubuntu 5.4.1-2ubuntu1~16.04) ]
+  ignore line: [COMPILER_PATH=/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/]
+  ignore line: [LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../:/lib/:/usr/lib/]
+  ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_21fd6' '-rdynamic' '-mtune=generic' '-march=x86-64']
+  link line: [ /usr/lib/gcc/x86_64-linux-gnu/5/collect2 -plugin /usr/lib/gcc/x86_64-linux-gnu/5/liblto_plugin.so -plugin-opt=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper -plugin-opt=-fresolution=/tmp/ccUmNF41.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --sysroot=/ --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -export-dynamic -dynamic-linker /lib64/ld-linux-x86-64.so.2 -z relro -o cmTC_21fd6 /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crt1.o /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/5/crtbegin.o -L/usr/lib/gcc/x86_64-linux-gnu/5 -L/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/5/../../.. CMakeFiles/cmTC_21fd6.dir/CMakeCCompilerABI.c.o -lgcc --as-needed -lgcc_s --no-as-needed -lc -lgcc --as-needed -lgcc_s --no-as-needed /usr/lib/gcc/x86_64-linux-gnu/5/crtend.o /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crtn.o]
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/collect2] ==> ignore
+    arg [-plugin] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/liblto_plugin.so] ==> ignore
+    arg [-plugin-opt=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper] ==> ignore
+    arg [-plugin-opt=-fresolution=/tmp/ccUmNF41.res] ==> ignore
+    arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+    arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+    arg [-plugin-opt=-pass-through=-lc] ==> ignore
+    arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+    arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+    arg [--sysroot=/] ==> ignore
+    arg [--build-id] ==> ignore
+    arg [--eh-frame-hdr] ==> ignore
+    arg [-m] ==> ignore
+    arg [elf_x86_64] ==> ignore
+    arg [--hash-style=gnu] ==> ignore
+    arg [--as-needed] ==> ignore
+    arg [-export-dynamic] ==> ignore
+    arg [-dynamic-linker] ==> ignore
+    arg [/lib64/ld-linux-x86-64.so.2] ==> ignore
+    arg [-zrelro] ==> ignore
+    arg [-o] ==> ignore
+    arg [cmTC_21fd6] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crt1.o] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crti.o] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/crtbegin.o] ==> ignore
+    arg [-L/usr/lib/gcc/x86_64-linux-gnu/5] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/5]
+    arg [-L/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu]
+    arg [-L/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib]
+    arg [-L/lib/x86_64-linux-gnu] ==> dir [/lib/x86_64-linux-gnu]
+    arg [-L/lib/../lib] ==> dir [/lib/../lib]
+    arg [-L/usr/lib/x86_64-linux-gnu] ==> dir [/usr/lib/x86_64-linux-gnu]
+    arg [-L/usr/lib/../lib] ==> dir [/usr/lib/../lib]
+    arg [-L/usr/lib/gcc/x86_64-linux-gnu/5/../../..] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../..]
+    arg [CMakeFiles/cmTC_21fd6.dir/CMakeCCompilerABI.c.o] ==> ignore
+    arg [-lgcc] ==> lib [gcc]
+    arg [--as-needed] ==> ignore
+    arg [-lgcc_s] ==> lib [gcc_s]
+    arg [--no-as-needed] ==> ignore
+    arg [-lc] ==> lib [c]
+    arg [-lgcc] ==> lib [gcc]
+    arg [--as-needed] ==> ignore
+    arg [-lgcc_s] ==> lib [gcc_s]
+    arg [--no-as-needed] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/crtend.o] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crtn.o] ==> ignore
+  remove lib [gcc]
+  remove lib [gcc_s]
+  remove lib [gcc]
+  remove lib [gcc_s]
+  collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/5] ==> [/usr/lib/gcc/x86_64-linux-gnu/5]
+  collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu] ==> [/usr/lib/x86_64-linux-gnu]
+  collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib] ==> [/usr/lib]
+  collapse library dir [/lib/x86_64-linux-gnu] ==> [/lib/x86_64-linux-gnu]
+  collapse library dir [/lib/../lib] ==> [/lib]
+  collapse library dir [/usr/lib/x86_64-linux-gnu] ==> [/usr/lib/x86_64-linux-gnu]
+  collapse library dir [/usr/lib/../lib] ==> [/usr/lib]
+  collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../..] ==> [/usr/lib]
+  implicit libs: [c]
+  implicit dirs: [/usr/lib/gcc/x86_64-linux-gnu/5;/usr/lib/x86_64-linux-gnu;/usr/lib;/lib/x86_64-linux-gnu;/lib]
+  implicit fwks: []
+
+
+
+
+Detecting C [-std=c11] compiler features compiled with the following output:
+Change Dir: /home/system/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_cd1bb/fast"
+/usr/bin/make -f CMakeFiles/cmTC_cd1bb.dir/build.make CMakeFiles/cmTC_cd1bb.dir/build
+make[1]: Entering directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_cd1bb.dir/feature_tests.c.o
+/usr/bin/cc    -std=c11 -o CMakeFiles/cmTC_cd1bb.dir/feature_tests.c.o   -c /home/system/Development/Switch/ext/FastPFor/CMakeFiles/feature_tests.c
+Linking C executable cmTC_cd1bb
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_cd1bb.dir/link.txt --verbose=1
+/usr/bin/cc       CMakeFiles/cmTC_cd1bb.dir/feature_tests.c.o  -o cmTC_cd1bb -rdynamic 
+make[1]: Leaving directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+    Feature record: C_FEATURE:1c_function_prototypes
+    Feature record: C_FEATURE:1c_restrict
+    Feature record: C_FEATURE:1c_static_assert
+    Feature record: C_FEATURE:1c_variadic_macros
+
+
+Detecting C [-std=c99] compiler features compiled with the following output:
+Change Dir: /home/system/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_d3ae1/fast"
+/usr/bin/make -f CMakeFiles/cmTC_d3ae1.dir/build.make CMakeFiles/cmTC_d3ae1.dir/build
+make[1]: Entering directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_d3ae1.dir/feature_tests.c.o
+/usr/bin/cc    -std=c99 -o CMakeFiles/cmTC_d3ae1.dir/feature_tests.c.o   -c /home/system/Development/Switch/ext/FastPFor/CMakeFiles/feature_tests.c
+Linking C executable cmTC_d3ae1
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_d3ae1.dir/link.txt --verbose=1
+/usr/bin/cc       CMakeFiles/cmTC_d3ae1.dir/feature_tests.c.o  -o cmTC_d3ae1 -rdynamic 
+make[1]: Leaving directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+    Feature record: C_FEATURE:1c_function_prototypes
+    Feature record: C_FEATURE:1c_restrict
+    Feature record: C_FEATURE:0c_static_assert
+    Feature record: C_FEATURE:1c_variadic_macros
+
+
+Detecting C [-std=c90] compiler features compiled with the following output:
+Change Dir: /home/system/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_e7437/fast"
+/usr/bin/make -f CMakeFiles/cmTC_e7437.dir/build.make CMakeFiles/cmTC_e7437.dir/build
+make[1]: Entering directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_e7437.dir/feature_tests.c.o
+/usr/bin/cc    -std=c90 -o CMakeFiles/cmTC_e7437.dir/feature_tests.c.o   -c /home/system/Development/Switch/ext/FastPFor/CMakeFiles/feature_tests.c
+Linking C executable cmTC_e7437
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_e7437.dir/link.txt --verbose=1
+/usr/bin/cc       CMakeFiles/cmTC_e7437.dir/feature_tests.c.o  -o cmTC_e7437 -rdynamic 
+make[1]: Leaving directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+    Feature record: C_FEATURE:1c_function_prototypes
+    Feature record: C_FEATURE:0c_restrict
+    Feature record: C_FEATURE:0c_static_assert
+    Feature record: C_FEATURE:0c_variadic_macros
+Performing C++ SOURCE FILE Test SUPPORT_SSE42 succeeded with the following output:
+Change Dir: /home/system/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_77ecd/fast"
+/usr/bin/make -f CMakeFiles/cmTC_77ecd.dir/build.make CMakeFiles/cmTC_77ecd.dir/build
+make[1]: Entering directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_77ecd.dir/src.cxx.o
+/usr/bin/c++     -DSUPPORT_SSE42 -march=native -msse4.2   -o CMakeFiles/cmTC_77ecd.dir/src.cxx.o -c /home/system/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp/src.cxx
+Linking CXX executable cmTC_77ecd
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_77ecd.dir/link.txt --verbose=1
+/usr/bin/c++    -DSUPPORT_SSE42 -march=native -msse4.2    CMakeFiles/cmTC_77ecd.dir/src.cxx.o  -o cmTC_77ecd -rdynamic 
+make[1]: Leaving directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+Source file was:
+
+
+#include<smmintrin.h>
+int main(){
+__m128 x=_mm_set1_ps(0.5);
+x=_mm_dp_ps(x,x,0x77);
+return _mm_movemask_ps(x);
+}
+Performing C++ SOURCE FILE Test SUPPORT_AVX succeeded with the following output:
+Change Dir: /home/system/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_3afb2/fast"
+/usr/bin/make -f CMakeFiles/cmTC_3afb2.dir/build.make CMakeFiles/cmTC_3afb2.dir/build
+make[1]: Entering directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_3afb2.dir/src.cxx.o
+/usr/bin/c++     -DSUPPORT_AVX -march=native -mavx   -o CMakeFiles/cmTC_3afb2.dir/src.cxx.o -c /home/system/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp/src.cxx
+Linking CXX executable cmTC_3afb2
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_3afb2.dir/link.txt --verbose=1
+/usr/bin/c++    -DSUPPORT_AVX -march=native -mavx    CMakeFiles/cmTC_3afb2.dir/src.cxx.o  -o cmTC_3afb2 -rdynamic 
+make[1]: Leaving directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+Source file was:
+
+
+#include<immintrin.h>
+int main(){
+__m128 x=_mm_set1_ps(0.5);
+x=_mm_permute_ps(x,1);
+return _mm_movemask_ps(x);
+}
+Performing C++ SOURCE FILE Test SUPPORT_AVX2 succeeded with the following output:
+Change Dir: /home/system/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_693d5/fast"
+/usr/bin/make -f CMakeFiles/cmTC_693d5.dir/build.make CMakeFiles/cmTC_693d5.dir/build
+make[1]: Entering directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_693d5.dir/src.cxx.o
+/usr/bin/c++     -DSUPPORT_AVX2 -march=native -mavx2   -o CMakeFiles/cmTC_693d5.dir/src.cxx.o -c /home/system/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp/src.cxx
+Linking CXX executable cmTC_693d5
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_693d5.dir/link.txt --verbose=1
+/usr/bin/c++    -DSUPPORT_AVX2 -march=native -mavx2    CMakeFiles/cmTC_693d5.dir/src.cxx.o  -o cmTC_693d5 -rdynamic 
+make[1]: Leaving directory '/db/storage/Development/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+Source file was:
+
+
+#include<immintrin.h>
+int main(){
+__m256i x=_mm256_set1_epi32(5);
+x=_mm256_add_epi32(x,x);
+return _mm256_movemask_epi8(x);
+}
+Performing C++ SOURCE FILE Test SUPPORT_SSE42 succeeded with the following output:
+Change Dir: /home/system/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_5729a/fast"
+/usr/bin/make -f CMakeFiles/cmTC_5729a.dir/build.make CMakeFiles/cmTC_5729a.dir/build
+make[1]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_5729a.dir/src.cxx.o
+/usr/bin/c++     -DSUPPORT_SSE42 -march=native -msse4.2   -o CMakeFiles/cmTC_5729a.dir/src.cxx.o -c /home/system/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp/src.cxx
+Linking CXX executable cmTC_5729a
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_5729a.dir/link.txt --verbose=1
+/usr/bin/c++    -DSUPPORT_SSE42 -march=native -msse4.2    CMakeFiles/cmTC_5729a.dir/src.cxx.o  -o cmTC_5729a -rdynamic 
+make[1]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+Source file was:
+
+
+#include<smmintrin.h>
+int main(){
+__m128 x=_mm_set1_ps(0.5);
+x=_mm_dp_ps(x,x,0x77);
+return _mm_movemask_ps(x);
+}
+Performing C++ SOURCE FILE Test SUPPORT_AVX succeeded with the following output:
+Change Dir: /home/system/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_d87ae/fast"
+/usr/bin/make -f CMakeFiles/cmTC_d87ae.dir/build.make CMakeFiles/cmTC_d87ae.dir/build
+make[1]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_d87ae.dir/src.cxx.o
+/usr/bin/c++     -DSUPPORT_AVX -march=native -mavx   -o CMakeFiles/cmTC_d87ae.dir/src.cxx.o -c /home/system/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp/src.cxx
+Linking CXX executable cmTC_d87ae
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_d87ae.dir/link.txt --verbose=1
+/usr/bin/c++    -DSUPPORT_AVX -march=native -mavx    CMakeFiles/cmTC_d87ae.dir/src.cxx.o  -o cmTC_d87ae -rdynamic 
+make[1]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+Source file was:
+
+
+#include<immintrin.h>
+int main(){
+__m128 x=_mm_set1_ps(0.5);
+x=_mm_permute_ps(x,1);
+return _mm_movemask_ps(x);
+}
+Performing C++ SOURCE FILE Test SUPPORT_AVX2 succeeded with the following output:
+Change Dir: /home/system/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_35c0b/fast"
+/usr/bin/make -f CMakeFiles/cmTC_35c0b.dir/build.make CMakeFiles/cmTC_35c0b.dir/build
+make[1]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_35c0b.dir/src.cxx.o
+/usr/bin/c++     -DSUPPORT_AVX2 -march=native -mavx2   -o CMakeFiles/cmTC_35c0b.dir/src.cxx.o -c /home/system/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp/src.cxx
+Linking CXX executable cmTC_35c0b
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_35c0b.dir/link.txt --verbose=1
+/usr/bin/c++    -DSUPPORT_AVX2 -march=native -mavx2    CMakeFiles/cmTC_35c0b.dir/src.cxx.o  -o cmTC_35c0b -rdynamic 
+make[1]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+Source file was:
+
+
+#include<immintrin.h>
+int main(){
+__m256i x=_mm256_set1_epi32(5);
+x=_mm256_add_epi32(x,x);
+return _mm256_movemask_epi8(x);
+}
+Performing C++ SOURCE FILE Test SUPPORT_SSE42 succeeded with the following output:
+Change Dir: /home/system/Development/Projects/Trinity2/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_013da/fast"
+/usr/bin/make -f CMakeFiles/cmTC_013da.dir/build.make CMakeFiles/cmTC_013da.dir/build
+make[1]: Entering directory '/db/storage/Development/Projects/Trinity2/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_013da.dir/src.cxx.o
+/usr/bin/c++     -DSUPPORT_SSE42 -march=native -msse4.2   -o CMakeFiles/cmTC_013da.dir/src.cxx.o -c /home/system/Development/Projects/Trinity2/Switch/ext/FastPFor/CMakeFiles/CMakeTmp/src.cxx
+Linking CXX executable cmTC_013da
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_013da.dir/link.txt --verbose=1
+/usr/bin/c++    -DSUPPORT_SSE42 -march=native -msse4.2    CMakeFiles/cmTC_013da.dir/src.cxx.o  -o cmTC_013da -rdynamic 
+make[1]: Leaving directory '/db/storage/Development/Projects/Trinity2/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+Source file was:
+
+
+#include<smmintrin.h>
+int main(){
+__m128 x=_mm_set1_ps(0.5);
+x=_mm_dp_ps(x,x,0x77);
+return _mm_movemask_ps(x);
+}
+Performing C++ SOURCE FILE Test SUPPORT_AVX succeeded with the following output:
+Change Dir: /home/system/Development/Projects/Trinity2/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_9bfd2/fast"
+/usr/bin/make -f CMakeFiles/cmTC_9bfd2.dir/build.make CMakeFiles/cmTC_9bfd2.dir/build
+make[1]: Entering directory '/db/storage/Development/Projects/Trinity2/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_9bfd2.dir/src.cxx.o
+/usr/bin/c++     -DSUPPORT_AVX -march=native -mavx   -o CMakeFiles/cmTC_9bfd2.dir/src.cxx.o -c /home/system/Development/Projects/Trinity2/Switch/ext/FastPFor/CMakeFiles/CMakeTmp/src.cxx
+Linking CXX executable cmTC_9bfd2
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_9bfd2.dir/link.txt --verbose=1
+/usr/bin/c++    -DSUPPORT_AVX -march=native -mavx    CMakeFiles/cmTC_9bfd2.dir/src.cxx.o  -o cmTC_9bfd2 -rdynamic 
+make[1]: Leaving directory '/db/storage/Development/Projects/Trinity2/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+Source file was:
+
+
+#include<immintrin.h>
+int main(){
+__m128 x=_mm_set1_ps(0.5);
+x=_mm_permute_ps(x,1);
+return _mm_movemask_ps(x);
+}
+Performing C++ SOURCE FILE Test SUPPORT_AVX2 succeeded with the following output:
+Change Dir: /home/system/Development/Projects/Trinity2/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_ce29d/fast"
+/usr/bin/make -f CMakeFiles/cmTC_ce29d.dir/build.make CMakeFiles/cmTC_ce29d.dir/build
+make[1]: Entering directory '/db/storage/Development/Projects/Trinity2/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_ce29d.dir/src.cxx.o
+/usr/bin/c++     -DSUPPORT_AVX2 -march=native -mavx2   -o CMakeFiles/cmTC_ce29d.dir/src.cxx.o -c /home/system/Development/Projects/Trinity2/Switch/ext/FastPFor/CMakeFiles/CMakeTmp/src.cxx
+Linking CXX executable cmTC_ce29d
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_ce29d.dir/link.txt --verbose=1
+/usr/bin/c++    -DSUPPORT_AVX2 -march=native -mavx2    CMakeFiles/cmTC_ce29d.dir/src.cxx.o  -o cmTC_ce29d -rdynamic 
+make[1]: Leaving directory '/db/storage/Development/Projects/Trinity2/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+Source file was:
+
+
+#include<immintrin.h>
+int main(){
+__m256i x=_mm256_set1_epi32(5);
+x=_mm256_add_epi32(x,x);
+return _mm256_movemask_epi8(x);
+}
+Performing C++ SOURCE FILE Test SUPPORT_SSE42 succeeded with the following output:
+Change Dir: /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_5d663/fast"
+/usr/bin/make -f CMakeFiles/cmTC_5d663.dir/build.make CMakeFiles/cmTC_5d663.dir/build
+make[1]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_5d663.dir/src.cxx.o
+/usr/bin/c++     -DSUPPORT_SSE42 -march=native -msse4.2   -o CMakeFiles/cmTC_5d663.dir/src.cxx.o -c /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp/src.cxx
+Linking CXX executable cmTC_5d663
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_5d663.dir/link.txt --verbose=1
+/usr/bin/c++    -DSUPPORT_SSE42 -march=native -msse4.2    CMakeFiles/cmTC_5d663.dir/src.cxx.o  -o cmTC_5d663 -rdynamic 
+make[1]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+Source file was:
+
+
+#include<smmintrin.h>
+int main(){
+__m128 x=_mm_set1_ps(0.5);
+x=_mm_dp_ps(x,x,0x77);
+return _mm_movemask_ps(x);
+}
+Performing C++ SOURCE FILE Test SUPPORT_AVX succeeded with the following output:
+Change Dir: /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_823fb/fast"
+/usr/bin/make -f CMakeFiles/cmTC_823fb.dir/build.make CMakeFiles/cmTC_823fb.dir/build
+make[1]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_823fb.dir/src.cxx.o
+/usr/bin/c++     -DSUPPORT_AVX -march=native -mavx   -o CMakeFiles/cmTC_823fb.dir/src.cxx.o -c /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp/src.cxx
+Linking CXX executable cmTC_823fb
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_823fb.dir/link.txt --verbose=1
+/usr/bin/c++    -DSUPPORT_AVX -march=native -mavx    CMakeFiles/cmTC_823fb.dir/src.cxx.o  -o cmTC_823fb -rdynamic 
+make[1]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+Source file was:
+
+
+#include<immintrin.h>
+int main(){
+__m128 x=_mm_set1_ps(0.5);
+x=_mm_permute_ps(x,1);
+return _mm_movemask_ps(x);
+}
+Performing C++ SOURCE FILE Test SUPPORT_AVX2 succeeded with the following output:
+Change Dir: /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_39001/fast"
+/usr/bin/make -f CMakeFiles/cmTC_39001.dir/build.make CMakeFiles/cmTC_39001.dir/build
+make[1]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_39001.dir/src.cxx.o
+/usr/bin/c++     -DSUPPORT_AVX2 -march=native -mavx2   -o CMakeFiles/cmTC_39001.dir/src.cxx.o -c /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp/src.cxx
+Linking CXX executable cmTC_39001
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_39001.dir/link.txt --verbose=1
+/usr/bin/c++    -DSUPPORT_AVX2 -march=native -mavx2    CMakeFiles/cmTC_39001.dir/src.cxx.o  -o cmTC_39001 -rdynamic 
+make[1]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+Source file was:
+
+
+#include<immintrin.h>
+int main(){
+__m256i x=_mm256_set1_epi32(5);
+x=_mm256_add_epi32(x,x);
+return _mm256_movemask_epi8(x);
+}
+The system is: Linux - 4.15.0-29-generic - x86_64
+Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+Compiler: /usr/bin/clang++ 
+Build flags: 
+Id flags:  
+
+The output was:
+0
+
+
+Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "a.out"
+
+The CXX compiler identification is Clang, found in "/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/3.10.2/CompilerIdCXX/a.out"
+
+Compiling the C compiler identification source file "CMakeCCompilerId.c" succeeded.
+Compiler: /usr/bin/clang 
+Build flags: 
+Id flags:  
+
+The output was:
+0
+
+
+Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "a.out"
+
+The C compiler identification is Clang, found in "/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/3.10.2/CompilerIdC/a.out"
+
+Determining if the CXX compiler works passed with the following output:
+Change Dir: /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_1cdb0/fast"
+make[2]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+/usr/bin/make -f CMakeFiles/cmTC_1cdb0.dir/build.make CMakeFiles/cmTC_1cdb0.dir/build
+make[3]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_1cdb0.dir/testCXXCompiler.cxx.o
+/usr/bin/clang++     -o CMakeFiles/cmTC_1cdb0.dir/testCXXCompiler.cxx.o -c /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp/testCXXCompiler.cxx
+Linking CXX executable cmTC_1cdb0
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_1cdb0.dir/link.txt --verbose=1
+/usr/bin/clang++       -rdynamic CMakeFiles/cmTC_1cdb0.dir/testCXXCompiler.cxx.o  -o cmTC_1cdb0 
+make[3]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+make[2]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+Detecting CXX compiler ABI info compiled with the following output:
+Change Dir: /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_e4311/fast"
+make[2]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+/usr/bin/make -f CMakeFiles/cmTC_e4311.dir/build.make CMakeFiles/cmTC_e4311.dir/build
+make[3]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_e4311.dir/CMakeCXXCompilerABI.cpp.o
+/usr/bin/clang++     -o CMakeFiles/cmTC_e4311.dir/CMakeCXXCompilerABI.cpp.o -c /usr/share/cmake-3.10/Modules/CMakeCXXCompilerABI.cpp
+Linking CXX executable cmTC_e4311
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_e4311.dir/link.txt --verbose=1
+/usr/bin/clang++      -v -rdynamic CMakeFiles/cmTC_e4311.dir/CMakeCXXCompilerABI.cpp.o  -o cmTC_e4311 
+clang version 6.0.0 (tags/RELEASE_600/final)
+Target: x86_64-unknown-linux-gnu
+Thread model: posix
+InstalledDir: /usr/bin
+Found candidate GCC installation: /usr/bin/../lib/gcc/i686-linux-gnu/8
+Found candidate GCC installation: /usr/bin/../lib/gcc/i686-linux-gnu/8.0.1
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.7
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.7.4
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.8
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.8.5
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.9
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.9.4
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/5
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/5.5.0
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/6
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/6.4.0
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/7
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/8
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/8.0.1
+Found candidate GCC installation: /usr/lib/gcc/i686-linux-gnu/8
+Found candidate GCC installation: /usr/lib/gcc/i686-linux-gnu/8.0.1
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.7
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.7.4
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.8
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.8.5
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.9
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.9.4
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/5
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/5.5.0
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/6
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/6.4.0
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/7
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/7.3.0
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/8
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/8.0.1
+Selected GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0
+Candidate multilib: .;@m64
+Selected multilib: .;@m64
+ "/usr/bin/ld" -export-dynamic -z relro --hash-style=gnu --eh-frame-hdr -m elf_x86_64 -export-dynamic -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_e4311 /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu/crt1.o /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu/crti.o /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/crtbegin.o -L/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0 -L/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu -L/lib/x86_64-linux-gnu -L/lib/../lib64 -L/usr/lib/x86_64-linux-gnu -L/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../.. -L/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04/bin/../lib -L/lib -L/usr/lib CMakeFiles/cmTC_e4311.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/crtend.o /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu/crtn.o
+make[3]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+make[2]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+Parsed CXX implicit link information from above output:
+  link line regex: [^( *|.*[/\])(ld|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\]+-)?ld|collect2)[^/\]*( |$)]
+  ignore line: [Change Dir: /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp]
+  ignore line: []
+  ignore line: [Run Build Command:"/usr/bin/make" "cmTC_e4311/fast"]
+  ignore line: [make[2]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp']
+  ignore line: [/usr/bin/make -f CMakeFiles/cmTC_e4311.dir/build.make CMakeFiles/cmTC_e4311.dir/build]
+  ignore line: [make[3]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp']
+  ignore line: [Building CXX object CMakeFiles/cmTC_e4311.dir/CMakeCXXCompilerABI.cpp.o]
+  ignore line: [/usr/bin/clang++     -o CMakeFiles/cmTC_e4311.dir/CMakeCXXCompilerABI.cpp.o -c /usr/share/cmake-3.10/Modules/CMakeCXXCompilerABI.cpp]
+  ignore line: [Linking CXX executable cmTC_e4311]
+  ignore line: [/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_e4311.dir/link.txt --verbose=1]
+  ignore line: [/usr/bin/clang++      -v -rdynamic CMakeFiles/cmTC_e4311.dir/CMakeCXXCompilerABI.cpp.o  -o cmTC_e4311 ]
+  ignore line: [clang version 6.0.0 (tags/RELEASE_600/final)]
+  ignore line: [Target: x86_64-unknown-linux-gnu]
+  ignore line: [Thread model: posix]
+  ignore line: [InstalledDir: /usr/bin]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/i686-linux-gnu/8]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/i686-linux-gnu/8.0.1]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.7]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.7.4]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.8]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.8.5]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.9]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.9.4]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/5]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/5.5.0]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/6]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/6.4.0]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/7]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/8]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/8.0.1]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/i686-linux-gnu/8]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/i686-linux-gnu/8.0.1]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.7]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.7.4]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.8]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.8.5]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.9]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.9.4]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/5]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/5.5.0]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/6]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/6.4.0]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/7]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/7.3.0]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/8]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/8.0.1]
+  ignore line: [Selected GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0]
+  ignore line: [Candidate multilib: .]
+  ignore line: [@m64]
+  ignore line: [Selected multilib: .]
+  ignore line: [@m64]
+  link line: [ "/usr/bin/ld" -export-dynamic -z relro --hash-style=gnu --eh-frame-hdr -m elf_x86_64 -export-dynamic -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_e4311 /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu/crt1.o /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu/crti.o /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/crtbegin.o -L/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0 -L/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu -L/lib/x86_64-linux-gnu -L/lib/../lib64 -L/usr/lib/x86_64-linux-gnu -L/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../.. -L/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04/bin/../lib -L/lib -L/usr/lib CMakeFiles/cmTC_e4311.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/crtend.o /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu/crtn.o]
+    arg [/usr/bin/ld] ==> ignore
+    arg [-export-dynamic] ==> ignore
+    arg [-zrelro] ==> ignore
+    arg [--hash-style=gnu] ==> ignore
+    arg [--eh-frame-hdr] ==> ignore
+    arg [-m] ==> ignore
+    arg [elf_x86_64] ==> ignore
+    arg [-export-dynamic] ==> ignore
+    arg [-dynamic-linker] ==> ignore
+    arg [/lib64/ld-linux-x86-64.so.2] ==> ignore
+    arg [-o] ==> ignore
+    arg [cmTC_e4311] ==> ignore
+    arg [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu/crt1.o] ==> ignore
+    arg [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu/crti.o] ==> ignore
+    arg [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/crtbegin.o] ==> ignore
+    arg [-L/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0] ==> dir [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0]
+    arg [-L/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu] ==> dir [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu]
+    arg [-L/lib/x86_64-linux-gnu] ==> dir [/lib/x86_64-linux-gnu]
+    arg [-L/lib/../lib64] ==> dir [/lib/../lib64]
+    arg [-L/usr/lib/x86_64-linux-gnu] ==> dir [/usr/lib/x86_64-linux-gnu]
+    arg [-L/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../..] ==> dir [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../..]
+    arg [-L/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04/bin/../lib] ==> dir [/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04/bin/../lib]
+    arg [-L/lib] ==> dir [/lib]
+    arg [-L/usr/lib] ==> dir [/usr/lib]
+    arg [CMakeFiles/cmTC_e4311.dir/CMakeCXXCompilerABI.cpp.o] ==> ignore
+    arg [-lstdc++] ==> lib [stdc++]
+    arg [-lm] ==> lib [m]
+    arg [-lgcc_s] ==> lib [gcc_s]
+    arg [-lgcc] ==> lib [gcc]
+    arg [-lc] ==> lib [c]
+    arg [-lgcc_s] ==> lib [gcc_s]
+    arg [-lgcc] ==> lib [gcc]
+    arg [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/crtend.o] ==> ignore
+    arg [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu/crtn.o] ==> ignore
+  collapse library dir [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0] ==> [/usr/lib/gcc/x86_64-linux-gnu/7.3.0]
+  collapse library dir [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu] ==> [/usr/lib/x86_64-linux-gnu]
+  collapse library dir [/lib/x86_64-linux-gnu] ==> [/lib/x86_64-linux-gnu]
+  collapse library dir [/lib/../lib64] ==> [/lib64]
+  collapse library dir [/usr/lib/x86_64-linux-gnu] ==> [/usr/lib/x86_64-linux-gnu]
+  collapse library dir [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../..] ==> [/usr/lib]
+  collapse library dir [/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04/bin/../lib] ==> [/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04/lib]
+  collapse library dir [/lib] ==> [/lib]
+  collapse library dir [/usr/lib] ==> [/usr/lib]
+  implicit libs: [stdc++;m;gcc_s;gcc;c;gcc_s;gcc]
+  implicit dirs: [/usr/lib/gcc/x86_64-linux-gnu/7.3.0;/usr/lib/x86_64-linux-gnu;/lib/x86_64-linux-gnu;/lib64;/usr/lib;/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04/lib;/lib]
+  implicit fwks: []
+
+
+
+
+Detecting CXX [-std=c++1z] compiler features compiled with the following output:
+Change Dir: /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_f5644/fast"
+make[2]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+/usr/bin/make -f CMakeFiles/cmTC_f5644.dir/build.make CMakeFiles/cmTC_f5644.dir/build
+make[3]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_f5644.dir/feature_tests.cxx.o
+/usr/bin/clang++    -std=c++1z -o CMakeFiles/cmTC_f5644.dir/feature_tests.cxx.o -c /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/feature_tests.cxx
+Linking CXX executable cmTC_f5644
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_f5644.dir/link.txt --verbose=1
+/usr/bin/clang++       -rdynamic CMakeFiles/cmTC_f5644.dir/feature_tests.cxx.o  -o cmTC_f5644 
+make[3]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+make[2]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+    Feature record: CXX_FEATURE:1cxx_aggregate_default_initializers
+    Feature record: CXX_FEATURE:1cxx_alias_templates
+    Feature record: CXX_FEATURE:1cxx_alignas
+    Feature record: CXX_FEATURE:1cxx_alignof
+    Feature record: CXX_FEATURE:1cxx_attributes
+    Feature record: CXX_FEATURE:1cxx_attribute_deprecated
+    Feature record: CXX_FEATURE:1cxx_auto_type
+    Feature record: CXX_FEATURE:1cxx_binary_literals
+    Feature record: CXX_FEATURE:1cxx_constexpr
+    Feature record: CXX_FEATURE:1cxx_contextual_conversions
+    Feature record: CXX_FEATURE:1cxx_decltype
+    Feature record: CXX_FEATURE:1cxx_decltype_auto
+    Feature record: CXX_FEATURE:1cxx_decltype_incomplete_return_types
+    Feature record: CXX_FEATURE:1cxx_default_function_template_args
+    Feature record: CXX_FEATURE:1cxx_defaulted_functions
+    Feature record: CXX_FEATURE:1cxx_defaulted_move_initializers
+    Feature record: CXX_FEATURE:1cxx_delegating_constructors
+    Feature record: CXX_FEATURE:1cxx_deleted_functions
+    Feature record: CXX_FEATURE:1cxx_digit_separators
+    Feature record: CXX_FEATURE:1cxx_enum_forward_declarations
+    Feature record: CXX_FEATURE:1cxx_explicit_conversions
+    Feature record: CXX_FEATURE:1cxx_extended_friend_declarations
+    Feature record: CXX_FEATURE:1cxx_extern_templates
+    Feature record: CXX_FEATURE:1cxx_final
+    Feature record: CXX_FEATURE:1cxx_func_identifier
+    Feature record: CXX_FEATURE:1cxx_generalized_initializers
+    Feature record: CXX_FEATURE:1cxx_generic_lambdas
+    Feature record: CXX_FEATURE:1cxx_inheriting_constructors
+    Feature record: CXX_FEATURE:1cxx_inline_namespaces
+    Feature record: CXX_FEATURE:1cxx_lambdas
+    Feature record: CXX_FEATURE:1cxx_lambda_init_captures
+    Feature record: CXX_FEATURE:1cxx_local_type_template_args
+    Feature record: CXX_FEATURE:1cxx_long_long_type
+    Feature record: CXX_FEATURE:1cxx_noexcept
+    Feature record: CXX_FEATURE:1cxx_nonstatic_member_init
+    Feature record: CXX_FEATURE:1cxx_nullptr
+    Feature record: CXX_FEATURE:1cxx_override
+    Feature record: CXX_FEATURE:1cxx_range_for
+    Feature record: CXX_FEATURE:1cxx_raw_string_literals
+    Feature record: CXX_FEATURE:1cxx_reference_qualified_functions
+    Feature record: CXX_FEATURE:1cxx_relaxed_constexpr
+    Feature record: CXX_FEATURE:1cxx_return_type_deduction
+    Feature record: CXX_FEATURE:1cxx_right_angle_brackets
+    Feature record: CXX_FEATURE:1cxx_rvalue_references
+    Feature record: CXX_FEATURE:1cxx_sizeof_member
+    Feature record: CXX_FEATURE:1cxx_static_assert
+    Feature record: CXX_FEATURE:1cxx_strong_enums
+    Feature record: CXX_FEATURE:1cxx_template_template_parameters
+    Feature record: CXX_FEATURE:1cxx_thread_local
+    Feature record: CXX_FEATURE:1cxx_trailing_return_types
+    Feature record: CXX_FEATURE:1cxx_unicode_literals
+    Feature record: CXX_FEATURE:1cxx_uniform_initialization
+    Feature record: CXX_FEATURE:1cxx_unrestricted_unions
+    Feature record: CXX_FEATURE:1cxx_user_literals
+    Feature record: CXX_FEATURE:1cxx_variable_templates
+    Feature record: CXX_FEATURE:1cxx_variadic_macros
+    Feature record: CXX_FEATURE:1cxx_variadic_templates
+
+
+Detecting CXX [-std=c++14] compiler features compiled with the following output:
+Change Dir: /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_81bc9/fast"
+make[2]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+/usr/bin/make -f CMakeFiles/cmTC_81bc9.dir/build.make CMakeFiles/cmTC_81bc9.dir/build
+make[3]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_81bc9.dir/feature_tests.cxx.o
+/usr/bin/clang++    -std=c++14 -o CMakeFiles/cmTC_81bc9.dir/feature_tests.cxx.o -c /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/feature_tests.cxx
+Linking CXX executable cmTC_81bc9
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_81bc9.dir/link.txt --verbose=1
+/usr/bin/clang++       -rdynamic CMakeFiles/cmTC_81bc9.dir/feature_tests.cxx.o  -o cmTC_81bc9 
+make[3]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+make[2]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+    Feature record: CXX_FEATURE:1cxx_aggregate_default_initializers
+    Feature record: CXX_FEATURE:1cxx_alias_templates
+    Feature record: CXX_FEATURE:1cxx_alignas
+    Feature record: CXX_FEATURE:1cxx_alignof
+    Feature record: CXX_FEATURE:1cxx_attributes
+    Feature record: CXX_FEATURE:1cxx_attribute_deprecated
+    Feature record: CXX_FEATURE:1cxx_auto_type
+    Feature record: CXX_FEATURE:1cxx_binary_literals
+    Feature record: CXX_FEATURE:1cxx_constexpr
+    Feature record: CXX_FEATURE:1cxx_contextual_conversions
+    Feature record: CXX_FEATURE:1cxx_decltype
+    Feature record: CXX_FEATURE:1cxx_decltype_auto
+    Feature record: CXX_FEATURE:1cxx_decltype_incomplete_return_types
+    Feature record: CXX_FEATURE:1cxx_default_function_template_args
+    Feature record: CXX_FEATURE:1cxx_defaulted_functions
+    Feature record: CXX_FEATURE:1cxx_defaulted_move_initializers
+    Feature record: CXX_FEATURE:1cxx_delegating_constructors
+    Feature record: CXX_FEATURE:1cxx_deleted_functions
+    Feature record: CXX_FEATURE:1cxx_digit_separators
+    Feature record: CXX_FEATURE:1cxx_enum_forward_declarations
+    Feature record: CXX_FEATURE:1cxx_explicit_conversions
+    Feature record: CXX_FEATURE:1cxx_extended_friend_declarations
+    Feature record: CXX_FEATURE:1cxx_extern_templates
+    Feature record: CXX_FEATURE:1cxx_final
+    Feature record: CXX_FEATURE:1cxx_func_identifier
+    Feature record: CXX_FEATURE:1cxx_generalized_initializers
+    Feature record: CXX_FEATURE:1cxx_generic_lambdas
+    Feature record: CXX_FEATURE:1cxx_inheriting_constructors
+    Feature record: CXX_FEATURE:1cxx_inline_namespaces
+    Feature record: CXX_FEATURE:1cxx_lambdas
+    Feature record: CXX_FEATURE:1cxx_lambda_init_captures
+    Feature record: CXX_FEATURE:1cxx_local_type_template_args
+    Feature record: CXX_FEATURE:1cxx_long_long_type
+    Feature record: CXX_FEATURE:1cxx_noexcept
+    Feature record: CXX_FEATURE:1cxx_nonstatic_member_init
+    Feature record: CXX_FEATURE:1cxx_nullptr
+    Feature record: CXX_FEATURE:1cxx_override
+    Feature record: CXX_FEATURE:1cxx_range_for
+    Feature record: CXX_FEATURE:1cxx_raw_string_literals
+    Feature record: CXX_FEATURE:1cxx_reference_qualified_functions
+    Feature record: CXX_FEATURE:1cxx_relaxed_constexpr
+    Feature record: CXX_FEATURE:1cxx_return_type_deduction
+    Feature record: CXX_FEATURE:1cxx_right_angle_brackets
+    Feature record: CXX_FEATURE:1cxx_rvalue_references
+    Feature record: CXX_FEATURE:1cxx_sizeof_member
+    Feature record: CXX_FEATURE:1cxx_static_assert
+    Feature record: CXX_FEATURE:1cxx_strong_enums
+    Feature record: CXX_FEATURE:1cxx_template_template_parameters
+    Feature record: CXX_FEATURE:1cxx_thread_local
+    Feature record: CXX_FEATURE:1cxx_trailing_return_types
+    Feature record: CXX_FEATURE:1cxx_unicode_literals
+    Feature record: CXX_FEATURE:1cxx_uniform_initialization
+    Feature record: CXX_FEATURE:1cxx_unrestricted_unions
+    Feature record: CXX_FEATURE:1cxx_user_literals
+    Feature record: CXX_FEATURE:1cxx_variable_templates
+    Feature record: CXX_FEATURE:1cxx_variadic_macros
+    Feature record: CXX_FEATURE:1cxx_variadic_templates
+
+
+Detecting CXX [-std=c++11] compiler features compiled with the following output:
+Change Dir: /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_9a4af/fast"
+make[2]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+/usr/bin/make -f CMakeFiles/cmTC_9a4af.dir/build.make CMakeFiles/cmTC_9a4af.dir/build
+make[3]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_9a4af.dir/feature_tests.cxx.o
+/usr/bin/clang++    -std=c++11 -o CMakeFiles/cmTC_9a4af.dir/feature_tests.cxx.o -c /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/feature_tests.cxx
+Linking CXX executable cmTC_9a4af
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_9a4af.dir/link.txt --verbose=1
+/usr/bin/clang++       -rdynamic CMakeFiles/cmTC_9a4af.dir/feature_tests.cxx.o  -o cmTC_9a4af 
+make[3]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+make[2]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+    Feature record: CXX_FEATURE:0cxx_aggregate_default_initializers
+    Feature record: CXX_FEATURE:1cxx_alias_templates
+    Feature record: CXX_FEATURE:1cxx_alignas
+    Feature record: CXX_FEATURE:1cxx_alignof
+    Feature record: CXX_FEATURE:1cxx_attributes
+    Feature record: CXX_FEATURE:0cxx_attribute_deprecated
+    Feature record: CXX_FEATURE:1cxx_auto_type
+    Feature record: CXX_FEATURE:0cxx_binary_literals
+    Feature record: CXX_FEATURE:1cxx_constexpr
+    Feature record: CXX_FEATURE:0cxx_contextual_conversions
+    Feature record: CXX_FEATURE:1cxx_decltype
+    Feature record: CXX_FEATURE:0cxx_decltype_auto
+    Feature record: CXX_FEATURE:1cxx_decltype_incomplete_return_types
+    Feature record: CXX_FEATURE:1cxx_default_function_template_args
+    Feature record: CXX_FEATURE:1cxx_defaulted_functions
+    Feature record: CXX_FEATURE:1cxx_defaulted_move_initializers
+    Feature record: CXX_FEATURE:1cxx_delegating_constructors
+    Feature record: CXX_FEATURE:1cxx_deleted_functions
+    Feature record: CXX_FEATURE:0cxx_digit_separators
+    Feature record: CXX_FEATURE:1cxx_enum_forward_declarations
+    Feature record: CXX_FEATURE:1cxx_explicit_conversions
+    Feature record: CXX_FEATURE:1cxx_extended_friend_declarations
+    Feature record: CXX_FEATURE:1cxx_extern_templates
+    Feature record: CXX_FEATURE:1cxx_final
+    Feature record: CXX_FEATURE:1cxx_func_identifier
+    Feature record: CXX_FEATURE:1cxx_generalized_initializers
+    Feature record: CXX_FEATURE:0cxx_generic_lambdas
+    Feature record: CXX_FEATURE:1cxx_inheriting_constructors
+    Feature record: CXX_FEATURE:1cxx_inline_namespaces
+    Feature record: CXX_FEATURE:1cxx_lambdas
+    Feature record: CXX_FEATURE:0cxx_lambda_init_captures
+    Feature record: CXX_FEATURE:1cxx_local_type_template_args
+    Feature record: CXX_FEATURE:1cxx_long_long_type
+    Feature record: CXX_FEATURE:1cxx_noexcept
+    Feature record: CXX_FEATURE:1cxx_nonstatic_member_init
+    Feature record: CXX_FEATURE:1cxx_nullptr
+    Feature record: CXX_FEATURE:1cxx_override
+    Feature record: CXX_FEATURE:1cxx_range_for
+    Feature record: CXX_FEATURE:1cxx_raw_string_literals
+    Feature record: CXX_FEATURE:1cxx_reference_qualified_functions
+    Feature record: CXX_FEATURE:0cxx_relaxed_constexpr
+    Feature record: CXX_FEATURE:0cxx_return_type_deduction
+    Feature record: CXX_FEATURE:1cxx_right_angle_brackets
+    Feature record: CXX_FEATURE:1cxx_rvalue_references
+    Feature record: CXX_FEATURE:1cxx_sizeof_member
+    Feature record: CXX_FEATURE:1cxx_static_assert
+    Feature record: CXX_FEATURE:1cxx_strong_enums
+    Feature record: CXX_FEATURE:1cxx_template_template_parameters
+    Feature record: CXX_FEATURE:1cxx_thread_local
+    Feature record: CXX_FEATURE:1cxx_trailing_return_types
+    Feature record: CXX_FEATURE:1cxx_unicode_literals
+    Feature record: CXX_FEATURE:1cxx_uniform_initialization
+    Feature record: CXX_FEATURE:1cxx_unrestricted_unions
+    Feature record: CXX_FEATURE:1cxx_user_literals
+    Feature record: CXX_FEATURE:0cxx_variable_templates
+    Feature record: CXX_FEATURE:1cxx_variadic_macros
+    Feature record: CXX_FEATURE:1cxx_variadic_templates
+
+
+Detecting CXX [-std=c++98] compiler features compiled with the following output:
+Change Dir: /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_2bfba/fast"
+make[2]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+/usr/bin/make -f CMakeFiles/cmTC_2bfba.dir/build.make CMakeFiles/cmTC_2bfba.dir/build
+make[3]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_2bfba.dir/feature_tests.cxx.o
+/usr/bin/clang++    -std=c++98 -o CMakeFiles/cmTC_2bfba.dir/feature_tests.cxx.o -c /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/feature_tests.cxx
+Linking CXX executable cmTC_2bfba
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_2bfba.dir/link.txt --verbose=1
+/usr/bin/clang++       -rdynamic CMakeFiles/cmTC_2bfba.dir/feature_tests.cxx.o  -o cmTC_2bfba 
+make[3]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+make[2]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+    Feature record: CXX_FEATURE:0cxx_aggregate_default_initializers
+    Feature record: CXX_FEATURE:0cxx_alias_templates
+    Feature record: CXX_FEATURE:0cxx_alignas
+    Feature record: CXX_FEATURE:0cxx_alignof
+    Feature record: CXX_FEATURE:0cxx_attributes
+    Feature record: CXX_FEATURE:0cxx_attribute_deprecated
+    Feature record: CXX_FEATURE:0cxx_auto_type
+    Feature record: CXX_FEATURE:0cxx_binary_literals
+    Feature record: CXX_FEATURE:0cxx_constexpr
+    Feature record: CXX_FEATURE:0cxx_contextual_conversions
+    Feature record: CXX_FEATURE:0cxx_decltype
+    Feature record: CXX_FEATURE:0cxx_decltype_auto
+    Feature record: CXX_FEATURE:0cxx_decltype_incomplete_return_types
+    Feature record: CXX_FEATURE:0cxx_default_function_template_args
+    Feature record: CXX_FEATURE:0cxx_defaulted_functions
+    Feature record: CXX_FEATURE:0cxx_defaulted_move_initializers
+    Feature record: CXX_FEATURE:0cxx_delegating_constructors
+    Feature record: CXX_FEATURE:0cxx_deleted_functions
+    Feature record: CXX_FEATURE:0cxx_digit_separators
+    Feature record: CXX_FEATURE:0cxx_enum_forward_declarations
+    Feature record: CXX_FEATURE:0cxx_explicit_conversions
+    Feature record: CXX_FEATURE:0cxx_extended_friend_declarations
+    Feature record: CXX_FEATURE:0cxx_extern_templates
+    Feature record: CXX_FEATURE:0cxx_final
+    Feature record: CXX_FEATURE:0cxx_func_identifier
+    Feature record: CXX_FEATURE:0cxx_generalized_initializers
+    Feature record: CXX_FEATURE:0cxx_generic_lambdas
+    Feature record: CXX_FEATURE:0cxx_inheriting_constructors
+    Feature record: CXX_FEATURE:0cxx_inline_namespaces
+    Feature record: CXX_FEATURE:0cxx_lambdas
+    Feature record: CXX_FEATURE:0cxx_lambda_init_captures
+    Feature record: CXX_FEATURE:0cxx_local_type_template_args
+    Feature record: CXX_FEATURE:0cxx_long_long_type
+    Feature record: CXX_FEATURE:0cxx_noexcept
+    Feature record: CXX_FEATURE:0cxx_nonstatic_member_init
+    Feature record: CXX_FEATURE:0cxx_nullptr
+    Feature record: CXX_FEATURE:0cxx_override
+    Feature record: CXX_FEATURE:0cxx_range_for
+    Feature record: CXX_FEATURE:0cxx_raw_string_literals
+    Feature record: CXX_FEATURE:0cxx_reference_qualified_functions
+    Feature record: CXX_FEATURE:0cxx_relaxed_constexpr
+    Feature record: CXX_FEATURE:0cxx_return_type_deduction
+    Feature record: CXX_FEATURE:0cxx_right_angle_brackets
+    Feature record: CXX_FEATURE:0cxx_rvalue_references
+    Feature record: CXX_FEATURE:0cxx_sizeof_member
+    Feature record: CXX_FEATURE:0cxx_static_assert
+    Feature record: CXX_FEATURE:0cxx_strong_enums
+    Feature record: CXX_FEATURE:1cxx_template_template_parameters
+    Feature record: CXX_FEATURE:0cxx_thread_local
+    Feature record: CXX_FEATURE:0cxx_trailing_return_types
+    Feature record: CXX_FEATURE:0cxx_unicode_literals
+    Feature record: CXX_FEATURE:0cxx_uniform_initialization
+    Feature record: CXX_FEATURE:0cxx_unrestricted_unions
+    Feature record: CXX_FEATURE:0cxx_user_literals
+    Feature record: CXX_FEATURE:0cxx_variable_templates
+    Feature record: CXX_FEATURE:0cxx_variadic_macros
+    Feature record: CXX_FEATURE:0cxx_variadic_templates
+Determining if the C compiler works passed with the following output:
+Change Dir: /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_f1c26/fast"
+make[2]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+/usr/bin/make -f CMakeFiles/cmTC_f1c26.dir/build.make CMakeFiles/cmTC_f1c26.dir/build
+make[3]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_f1c26.dir/testCCompiler.c.o
+/usr/bin/clang    -o CMakeFiles/cmTC_f1c26.dir/testCCompiler.c.o   -c /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp/testCCompiler.c
+Linking C executable cmTC_f1c26
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_f1c26.dir/link.txt --verbose=1
+/usr/bin/clang      -rdynamic CMakeFiles/cmTC_f1c26.dir/testCCompiler.c.o  -o cmTC_f1c26 
+make[3]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+make[2]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+Detecting C compiler ABI info compiled with the following output:
+Change Dir: /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_ff9c8/fast"
+make[2]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+/usr/bin/make -f CMakeFiles/cmTC_ff9c8.dir/build.make CMakeFiles/cmTC_ff9c8.dir/build
+make[3]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_ff9c8.dir/CMakeCCompilerABI.c.o
+/usr/bin/clang    -o CMakeFiles/cmTC_ff9c8.dir/CMakeCCompilerABI.c.o   -c /usr/share/cmake-3.10/Modules/CMakeCCompilerABI.c
+Linking C executable cmTC_ff9c8
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_ff9c8.dir/link.txt --verbose=1
+/usr/bin/clang     -v -rdynamic CMakeFiles/cmTC_ff9c8.dir/CMakeCCompilerABI.c.o  -o cmTC_ff9c8 
+clang version 6.0.0 (tags/RELEASE_600/final)
+Target: x86_64-unknown-linux-gnu
+Thread model: posix
+InstalledDir: /usr/bin
+Found candidate GCC installation: /usr/bin/../lib/gcc/i686-linux-gnu/8
+Found candidate GCC installation: /usr/bin/../lib/gcc/i686-linux-gnu/8.0.1
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.7
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.7.4
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.8
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.8.5
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.9
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.9.4
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/5
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/5.5.0
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/6
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/6.4.0
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/7
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/8
+Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/8.0.1
+Found candidate GCC installation: /usr/lib/gcc/i686-linux-gnu/8
+Found candidate GCC installation: /usr/lib/gcc/i686-linux-gnu/8.0.1
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.7
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.7.4
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.8
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.8.5
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.9
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.9.4
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/5
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/5.5.0
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/6
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/6.4.0
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/7
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/7.3.0
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/8
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/8.0.1
+Selected GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0
+Candidate multilib: .;@m64
+Selected multilib: .;@m64
+ "/usr/bin/ld" -export-dynamic -z relro --hash-style=gnu --eh-frame-hdr -m elf_x86_64 -export-dynamic -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_ff9c8 /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu/crt1.o /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu/crti.o /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/crtbegin.o -L/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0 -L/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu -L/lib/x86_64-linux-gnu -L/lib/../lib64 -L/usr/lib/x86_64-linux-gnu -L/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../.. -L/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04/bin/../lib -L/lib -L/usr/lib CMakeFiles/cmTC_ff9c8.dir/CMakeCCompilerABI.c.o -lgcc --as-needed -lgcc_s --no-as-needed -lc -lgcc --as-needed -lgcc_s --no-as-needed /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/crtend.o /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu/crtn.o
+make[3]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+make[2]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+Parsed C implicit link information from above output:
+  link line regex: [^( *|.*[/\])(ld|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\]+-)?ld|collect2)[^/\]*( |$)]
+  ignore line: [Change Dir: /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp]
+  ignore line: []
+  ignore line: [Run Build Command:"/usr/bin/make" "cmTC_ff9c8/fast"]
+  ignore line: [make[2]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp']
+  ignore line: [/usr/bin/make -f CMakeFiles/cmTC_ff9c8.dir/build.make CMakeFiles/cmTC_ff9c8.dir/build]
+  ignore line: [make[3]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp']
+  ignore line: [Building C object CMakeFiles/cmTC_ff9c8.dir/CMakeCCompilerABI.c.o]
+  ignore line: [/usr/bin/clang    -o CMakeFiles/cmTC_ff9c8.dir/CMakeCCompilerABI.c.o   -c /usr/share/cmake-3.10/Modules/CMakeCCompilerABI.c]
+  ignore line: [Linking C executable cmTC_ff9c8]
+  ignore line: [/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_ff9c8.dir/link.txt --verbose=1]
+  ignore line: [/usr/bin/clang     -v -rdynamic CMakeFiles/cmTC_ff9c8.dir/CMakeCCompilerABI.c.o  -o cmTC_ff9c8 ]
+  ignore line: [clang version 6.0.0 (tags/RELEASE_600/final)]
+  ignore line: [Target: x86_64-unknown-linux-gnu]
+  ignore line: [Thread model: posix]
+  ignore line: [InstalledDir: /usr/bin]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/i686-linux-gnu/8]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/i686-linux-gnu/8.0.1]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.7]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.7.4]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.8]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.8.5]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.9]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/4.9.4]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/5]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/5.5.0]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/6]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/6.4.0]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/7]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/8]
+  ignore line: [Found candidate GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/8.0.1]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/i686-linux-gnu/8]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/i686-linux-gnu/8.0.1]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.7]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.7.4]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.8]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.8.5]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.9]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.9.4]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/5]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/5.5.0]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/6]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/6.4.0]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/7]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/7.3.0]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/8]
+  ignore line: [Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/8.0.1]
+  ignore line: [Selected GCC installation: /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0]
+  ignore line: [Candidate multilib: .]
+  ignore line: [@m64]
+  ignore line: [Selected multilib: .]
+  ignore line: [@m64]
+  link line: [ "/usr/bin/ld" -export-dynamic -z relro --hash-style=gnu --eh-frame-hdr -m elf_x86_64 -export-dynamic -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_ff9c8 /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu/crt1.o /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu/crti.o /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/crtbegin.o -L/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0 -L/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu -L/lib/x86_64-linux-gnu -L/lib/../lib64 -L/usr/lib/x86_64-linux-gnu -L/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../.. -L/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04/bin/../lib -L/lib -L/usr/lib CMakeFiles/cmTC_ff9c8.dir/CMakeCCompilerABI.c.o -lgcc --as-needed -lgcc_s --no-as-needed -lc -lgcc --as-needed -lgcc_s --no-as-needed /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/crtend.o /usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu/crtn.o]
+    arg [/usr/bin/ld] ==> ignore
+    arg [-export-dynamic] ==> ignore
+    arg [-zrelro] ==> ignore
+    arg [--hash-style=gnu] ==> ignore
+    arg [--eh-frame-hdr] ==> ignore
+    arg [-m] ==> ignore
+    arg [elf_x86_64] ==> ignore
+    arg [-export-dynamic] ==> ignore
+    arg [-dynamic-linker] ==> ignore
+    arg [/lib64/ld-linux-x86-64.so.2] ==> ignore
+    arg [-o] ==> ignore
+    arg [cmTC_ff9c8] ==> ignore
+    arg [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu/crt1.o] ==> ignore
+    arg [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu/crti.o] ==> ignore
+    arg [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/crtbegin.o] ==> ignore
+    arg [-L/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0] ==> dir [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0]
+    arg [-L/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu] ==> dir [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu]
+    arg [-L/lib/x86_64-linux-gnu] ==> dir [/lib/x86_64-linux-gnu]
+    arg [-L/lib/../lib64] ==> dir [/lib/../lib64]
+    arg [-L/usr/lib/x86_64-linux-gnu] ==> dir [/usr/lib/x86_64-linux-gnu]
+    arg [-L/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../..] ==> dir [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../..]
+    arg [-L/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04/bin/../lib] ==> dir [/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04/bin/../lib]
+    arg [-L/lib] ==> dir [/lib]
+    arg [-L/usr/lib] ==> dir [/usr/lib]
+    arg [CMakeFiles/cmTC_ff9c8.dir/CMakeCCompilerABI.c.o] ==> ignore
+    arg [-lgcc] ==> lib [gcc]
+    arg [--as-needed] ==> ignore
+    arg [-lgcc_s] ==> lib [gcc_s]
+    arg [--no-as-needed] ==> ignore
+    arg [-lc] ==> lib [c]
+    arg [-lgcc] ==> lib [gcc]
+    arg [--as-needed] ==> ignore
+    arg [-lgcc_s] ==> lib [gcc_s]
+    arg [--no-as-needed] ==> ignore
+    arg [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/crtend.o] ==> ignore
+    arg [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu/crtn.o] ==> ignore
+  collapse library dir [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0] ==> [/usr/lib/gcc/x86_64-linux-gnu/7.3.0]
+  collapse library dir [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../../x86_64-linux-gnu] ==> [/usr/lib/x86_64-linux-gnu]
+  collapse library dir [/lib/x86_64-linux-gnu] ==> [/lib/x86_64-linux-gnu]
+  collapse library dir [/lib/../lib64] ==> [/lib64]
+  collapse library dir [/usr/lib/x86_64-linux-gnu] ==> [/usr/lib/x86_64-linux-gnu]
+  collapse library dir [/usr/bin/../lib/gcc/x86_64-linux-gnu/7.3.0/../../..] ==> [/usr/lib]
+  collapse library dir [/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04/bin/../lib] ==> [/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04/lib]
+  collapse library dir [/lib] ==> [/lib]
+  collapse library dir [/usr/lib] ==> [/usr/lib]
+  implicit libs: [gcc;gcc_s;c;gcc;gcc_s]
+  implicit dirs: [/usr/lib/gcc/x86_64-linux-gnu/7.3.0;/usr/lib/x86_64-linux-gnu;/lib/x86_64-linux-gnu;/lib64;/usr/lib;/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04/lib;/lib]
+  implicit fwks: []
+
+
+
+
+Detecting C [-std=c11] compiler features compiled with the following output:
+Change Dir: /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_215ac/fast"
+make[2]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+/usr/bin/make -f CMakeFiles/cmTC_215ac.dir/build.make CMakeFiles/cmTC_215ac.dir/build
+make[3]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_215ac.dir/feature_tests.c.o
+/usr/bin/clang   -std=c11 -o CMakeFiles/cmTC_215ac.dir/feature_tests.c.o   -c /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/feature_tests.c
+Linking C executable cmTC_215ac
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_215ac.dir/link.txt --verbose=1
+/usr/bin/clang      -rdynamic CMakeFiles/cmTC_215ac.dir/feature_tests.c.o  -o cmTC_215ac 
+make[3]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+make[2]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+    Feature record: C_FEATURE:1c_function_prototypes
+    Feature record: C_FEATURE:1c_restrict
+    Feature record: C_FEATURE:1c_static_assert
+    Feature record: C_FEATURE:1c_variadic_macros
+
+
+Detecting C [-std=c99] compiler features compiled with the following output:
+Change Dir: /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_0c7cc/fast"
+make[2]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+/usr/bin/make -f CMakeFiles/cmTC_0c7cc.dir/build.make CMakeFiles/cmTC_0c7cc.dir/build
+make[3]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_0c7cc.dir/feature_tests.c.o
+/usr/bin/clang   -std=c99 -o CMakeFiles/cmTC_0c7cc.dir/feature_tests.c.o   -c /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/feature_tests.c
+Linking C executable cmTC_0c7cc
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_0c7cc.dir/link.txt --verbose=1
+/usr/bin/clang      -rdynamic CMakeFiles/cmTC_0c7cc.dir/feature_tests.c.o  -o cmTC_0c7cc 
+make[3]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+make[2]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+    Feature record: C_FEATURE:1c_function_prototypes
+    Feature record: C_FEATURE:1c_restrict
+    Feature record: C_FEATURE:0c_static_assert
+    Feature record: C_FEATURE:1c_variadic_macros
+
+
+Detecting C [-std=c90] compiler features compiled with the following output:
+Change Dir: /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_d22e4/fast"
+make[2]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+/usr/bin/make -f CMakeFiles/cmTC_d22e4.dir/build.make CMakeFiles/cmTC_d22e4.dir/build
+make[3]: Entering directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_d22e4.dir/feature_tests.c.o
+/usr/bin/clang   -std=c90 -o CMakeFiles/cmTC_d22e4.dir/feature_tests.c.o   -c /db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/feature_tests.c
+Linking C executable cmTC_d22e4
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_d22e4.dir/link.txt --verbose=1
+/usr/bin/clang      -rdynamic CMakeFiles/cmTC_d22e4.dir/feature_tests.c.o  -o cmTC_d22e4 
+make[3]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+make[2]: Leaving directory '/db/storage/Development/Projects/Trinity/Switch/ext/FastPFor/CMakeFiles/CMakeTmp'
+
+
+    Feature record: C_FEATURE:1c_function_prototypes
+    Feature record: C_FEATURE:0c_restrict
+    Feature record: C_FEATURE:0c_static_assert
+    Feature record: C_FEATURE:0c_variadic_macros
