@@ -44,8 +44,7 @@ TEST_SERVICE_OBJS:=$(patsubst %.cpp,%.o,$(wildcard test_service*.cpp))
 TEST_CLIENT_OBJS:=$(patsubst %.cpp,%.o,$(wildcard test_client*.cpp))
 
 
-#all: cli-tool client
-all: service ##cli-tool client
+all: service cli-tool client
 
 switch:
 	@make -C Switch/ext_snappy/ all
