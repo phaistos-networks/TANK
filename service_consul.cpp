@@ -1390,12 +1390,14 @@ consul_request *Service::schedule_topology_update_tx(const std::vector<NodesPart
         // XXX: what happens if any of those requests fail for any reason?
         if (first) {
                 // sanity check
+#ifdef TANK_RUNTIME_CHECKS
                 size_t n{0};
 
                 for (auto it = first; it; it = it->then) {
                         ++n;
                 }
                 TANK_EXPECT(n == reprs.size());
+#endif
         }
 
         return first;
@@ -1407,7 +1409,7 @@ void Service::consul_req_over(consul_request *req) {
         TANK_EXPECT(req);
 
         if (0 == (req->flags & unsigned(consul_request::Flags::OverHandled))) {
-                req->flags ^= unsigned(consul_request::Flags::OverHandled);
+                req->flags |= unsigned(consul_request::Flags::OverHandled);
 
                 if (req->type == consul_request::Type::TryBecomeClusterLeader) {
                         consul_state.flags &= ~unsigned(ConsulState::Flags::AttemptBecomeClusterLeader);
