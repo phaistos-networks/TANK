@@ -503,11 +503,13 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                 }
 
                 if (trace) {
-                        SLog("roLogs.size() = ", roLogs.size(), ", curLogSeqNum = ", curLogSeqNum, ", curLogCreateTS = ", curLogCreateTS, "\n");
+                        SLog("roLogs.size() = ", roLogs.size(), 
+				", curLogSeqNum = ", curLogSeqNum, 
+				", curLogCreateTS = ", curLogCreateTS, "\n");
                 }
 
                 // Process read only segments
-                if (!roLogs.empty()) {
+                if (const auto total = roLogs.size()) {
                         // TODO:
                         // if we have too many segments, it can take a while to initialise them
 			// so we should perhaps use a threads pool to paralize work
@@ -518,9 +520,11 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                         l->firstAvailableSeqNum = roLogs.front().firstAvailableSeqNum;
                         l->roSegments.reset(new std::vector<ro_segment *>());
 
+#if 0
                         for (const auto &it : roLogs) {
                                 if (trace) {
-                                        SLog("Initializing [firstAvailableSeqNum=", it.firstAvailableSeqNum, ",lastAvailSeqNum=", it.lastAvailSeqNum, ", base = ", b, "]\n");
+                                        SLog("Initializing [firstAvailableSeqNum=", it.firstAvailableSeqNum,
+                                             ",lastAvailSeqNum=", it.lastAvailSeqNum, ", base = ", b, "]\n");
                                 }
 
                                 try {
@@ -531,10 +535,133 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                                                               wideEntyRoLogIndices.count(it.firstAvailableSeqNum));
 
                                         l->roSegments->emplace_back(s.release());
-                                } catch (...) {
+                                } catch (const std::exception &e) {
+					if (trace) {
+						SLog("Failed:", e.what(), "\n");
+					}
+					
                                         throw;
                                 }
                         }
+#else
+			// this is not ideal, but it should be an improvement over using
+			// a single thread to initialise all RO Segments
+                        static constexpr const std::size_t        stride = 8;
+                        std::atomic<unsigned>                     next{0};
+                        std::vector<std::unique_ptr<std::thread>> threads;
+                        std::mutex                                mutex;
+                        const auto                                strides = (total + stride - 1) / stride;
+                        const auto                                n_threads =
+                            std::min<size_t>(strides - 1, std::thread::hardware_concurrency());
+                        auto *const                               ro_segments = l->roSegments.get();
+                        const auto                                ro_logs     = roLogs.data();
+                        std::exception_ptr                        eptr;
+
+                        for (unsigned i = 0; i < n_threads; ++i) {
+                                auto t = std::make_unique<std::thread>([&next,
+                                                                        &wideEntyRoLogIndices,
+                                                                        ro_segments,
+                                                                        &eptr,
+                                                                        &mutex,
+                                                                        b,
+                                                                        ro_logs,
+                                                                        total]() {
+                                        for (;;) {
+                                                auto i = next.fetch_add(stride);
+
+                                                if (i >= total) {
+                                                        return;
+                                                }
+
+                                                for (const auto upto = std::min<size_t>(i + stride, total); i < upto; ++i) {
+                                                        if (eptr) {
+								return;
+                                                        }
+
+                                                        const auto &it = ro_logs[i];
+
+                                                        try {
+                                                                auto s = std::make_unique<ro_segment>(it.firstAvailableSeqNum,
+                                                                                                      it.lastAvailSeqNum,
+                                                                                                      b,
+                                                                                                      it.creationTS,
+                                                                                                      wideEntyRoLogIndices.count(it.firstAvailableSeqNum));
+
+                                                                mutex.lock();
+                                                                ro_segments->emplace_back(s.release());
+                                                                mutex.unlock();
+                                                        } catch (...) {
+                                                                mutex.lock();
+                                                                eptr = std::current_exception();
+                                                                mutex.unlock();
+                                                                break;
+                                                        }
+                                                }
+                                        }
+                                });
+
+                                threads.emplace_back(std::move(t));
+                        }
+
+                        for (;;) {
+                                auto i = next.fetch_add(stride);
+
+                                if (i >= total) {
+                                        break;
+                                }
+
+                                for (const auto upto = std::min<size_t>(i + stride, total); i < upto; ++i) {
+                                        if (eptr) {
+                                                goto l5121;
+                                        }
+
+                                        const auto &it = ro_logs[i];
+
+                                        try {
+                                                auto s = std::make_unique<ro_segment>(it.firstAvailableSeqNum,
+                                                                                      it.lastAvailSeqNum,
+                                                                                      b,
+                                                                                      it.creationTS,
+                                                                                      wideEntyRoLogIndices.count(it.firstAvailableSeqNum));
+
+                                                mutex.lock();
+                                                ro_segments->emplace_back(s.release());
+                                                mutex.unlock();
+                                        } catch (...) {
+                                                mutex.lock();
+                                                eptr = std::current_exception();
+                                                mutex.unlock();
+                                                break;
+                                        }
+                                }
+                        }
+
+                l5121:
+                        while (!threads.empty()) {
+                                threads.back()->join();
+                                threads.pop_back();
+                        }
+
+                        if (eptr) {
+                                std::rethrow_exception(eptr);
+                        }
+
+			if (trace) {
+				SLog("Total:", l->roSegments->size(), "\n");
+			}
+
+                        std::sort(l->roSegments->begin(), l->roSegments->end(), [](const auto a, const auto b) noexcept {
+                                return a->baseSeqNum < b->baseSeqNum;
+                        });
+#endif
+
+
+			TANK_EXPECT(std::is_sorted(l->roSegments->begin(), l->roSegments->end(), [](const auto a, const auto b) noexcept {
+                                return a->baseSeqNum < b->baseSeqNum;
+
+			}));
+
+
                 } else {
                         l->firstAvailableSeqNum = curLogSeqNum;
                         l->roSegments.reset(new std::vector<ro_segment *>());
@@ -656,10 +783,9 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                 //
                                 // We just start from the last tracked-recorded (relSeqNum, absPhysical) and skip bundles until EOF
                                 // keeping track of offsets as we go.
-                                const auto span = s - o;
+				TANK_EXPECT(s >= o);
 
-                                TANK_EXPECT(span);
-
+                                const auto  span = s - o;
                                 auto *const data = static_cast<uint8_t *>(malloc(span));
                                 // first message in the first bundle we 'll parse
                                 uint64_t   next = l->cur.index.ondisk.lastRecorded.relSeqNum + l->cur.baseSeqNum;
