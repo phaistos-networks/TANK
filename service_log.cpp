@@ -544,8 +544,16 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                 }
                         }
 #else
-			// this is not ideal, but it should be an improvement over using
+			// This is not ideal, but it should be an improvement over using
 			// a single thread to initialise all RO Segments
+			//
+			// TODO: Maybe we should lazily initialise RO segments as well
+			// Consumers are almost always consuming from the tail anyway, so
+			// if we have a few thousands of RO Segments, we could avoid accessing all but the very few recent ones
+			// and that would result in practically instant startup and log initializationt times
+			//
+			// It shouldn't be that hard to do this either -- we 'll need to to "materialize" RO segments
+			// only when we need to access them. It should also be great for reducing resources (memeory, FDs, VMAs, etc) pressure
                         static constexpr const std::size_t        stride = 8;
                         std::atomic<unsigned>                     next{0};
                         std::vector<std::unique_ptr<std::thread>> threads;
