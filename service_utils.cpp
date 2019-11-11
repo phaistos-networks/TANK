@@ -2,7 +2,7 @@
 
 void Service::rm_tankdir(const char *tank_path) {
         static const auto visit = [](const auto &self, char *path, unsigned path_len) -> void {
-                EXPECT(path_len + 1 < PATH_MAX);
+                TANK_EXPECT(path_len + 1 < PATH_MAX);
 
                 if (path_len && path[path_len - 1] != '/') {
                         path[path_len++] = '/';
@@ -23,7 +23,7 @@ void Service::rm_tankdir(const char *tank_path) {
 
                         const auto name_len = name.size();
 
-                        EXPECT(path_len + name_len + 1 < PATH_MAX);
+                        TANK_EXPECT(path_len + name_len + 1 < PATH_MAX);
 
                         name.ToCString(path_end);
                         if (stat(path, &st) == -1) {

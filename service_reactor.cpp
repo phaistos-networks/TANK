@@ -1458,8 +1458,6 @@ Service::flushop_res Service::flush_file_contents(connection *const c,
         // any chance this is not the front?
         TANK_EXPECT(q->front() == payload);
 
-        // XXX: crashes here
-        // why do we ever crash here?
         TANK_EXPECT(it.file_range.fdhandle);
         TANK_EXPECT(it.file_range.range.size());
 
@@ -1608,7 +1606,6 @@ Service::flushop_res Service::flush_iov_impl(connection *const   c,
         auto       q  = c->outQ;
 
         TANK_EXPECT(q);
-        TANK_EXPECT(fd != -1);
         TANK_EXPECT(fd > 2);
         TANK_EXPECT(iovCnt);
         q->verify();
@@ -1768,7 +1765,7 @@ bool Service::tx(connection *const c) {
         static constexpr bool trace{false};
 
         TANK_EXPECT(c);
-        TANK_EXPECT(c->fd != -1);
+        TANK_EXPECT(c->fd > 2);
         c->verify();
 
         const auto   fd{c->fd};

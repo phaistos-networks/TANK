@@ -44,7 +44,7 @@ void Service::rebuild_partition_tracked_isrs(topic_partition *const partition) {
 
 #ifdef TANK_RUNTIME_CHECKS
         for (unsigned i = 1; i < partition->cluster.isr.tracker.size; ++i) {
-                EXPECT(partition->cluster.isr.tracker.data[i].lsn >= partition->cluster.isr.tracker.data[i - 1].lsn);
+                TANK_EXPECT(partition->cluster.isr.tracker.data[i].lsn >= partition->cluster.isr.tracker.data[i - 1].lsn);
         }
 #endif
 }

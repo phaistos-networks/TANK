@@ -495,7 +495,7 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
                                 SLog("in-skiplist: top = ", top, ", btm = ", sl_index, "\n");
                         }
 
-                        EXPECT(sl_index >= 0);
+                        TANK_EXPECT(sl_index >= 0);
                         for (int32_t btm = sl_index; btm <= top;) {
                                 const auto  mid            = btm + (top - btm) / 2;
                                 const auto &it             = skiplist_data[mid];
@@ -539,7 +539,7 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
                                 SLog("Starting from ", sl_index, ", top = ", top, "\n");
                         }
 
-                        EXPECT(sl_index >= 0);
+                        TANK_EXPECT(sl_index >= 0);
                         for (int32_t btm = sl_index; btm <= top;) {
                                 const auto  mid            = btm + (top - btm) / 2;
                                 const auto &it             = skip_list_data[mid];
@@ -706,7 +706,7 @@ lookup_res   topic_partition_log::from_immutable_segment(ro_segment *const f, co
 #pragma mark snap to the offset derived from the first message set in the index with sequence number <= abs_seqnum
         static constexpr const bool trace{false};
         const auto                  skiplist_size = static_cast<int32_t>(f->index.fileSize / sizeof(index_record));
-        EXPECT(skiplist_size);
+        TANK_EXPECT(skiplist_size);
         const auto skiplist_data = reinterpret_cast<const index_record *>(f->index.data);
         int32_t    top           = skiplist_size - 1;
         const auto relSeqNum     = abs_seqnum - f->baseSeqNum;

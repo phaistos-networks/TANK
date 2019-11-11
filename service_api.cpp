@@ -213,7 +213,7 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
                                                 SLog("Created topic\n");
                                         }
 
-                                        EXPECT(t->flags & unsigned(topic::Flags::under_construction));
+                                        TANK_EXPECT(t->flags & unsigned(topic::Flags::under_construction));
                                         t->flags ^= unsigned(topic::Flags::under_construction);
                                         t->register_partitions(list.data(), list.size());
                                         list.clear();

@@ -433,7 +433,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                                 const auto isr_e = containerof(isr_entry, partition_ll, it);
                                 const auto node  = isr_e->node();
 
-                                EXPECT(isr_e->partition() == partition);
+                                TANK_EXPECT(isr_e->partition() == partition);
 
                                 SLog(">>In ISR ", node->id, "@", node->ep, "\n");
                         }

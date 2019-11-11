@@ -163,9 +163,11 @@ bool Service::schedule_consul_req(consul_request *req, const bool urgent) {
         TANK_EXPECT(req);
         TANK_EXPECT(!req->is_released());
 
+#ifdef TANK_RUNTIME_CHECKS
         for (auto it = req->then; it; it = it->then) {
                 TANK_EXPECT(!it->is_released());
         }
+#endif
 
         if (urgent) {
                 req->flags |= unsigned(consul_request::Flags::Urgent) | unsigned(consul_request::Flags::Deferred);

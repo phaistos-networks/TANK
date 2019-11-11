@@ -110,7 +110,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
         }
 
         for (auto it : prevSegments) {
-                EXPECT(it->fdh);
+                TANK_EXPECT(it->fdh);
                 int         fd         = it->fdh->fd;
                 const auto  fileSize   = it->fileSize;
                 const auto  baseSeqNum = it->baseSeqNum;
@@ -415,7 +415,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
 
                         Snprint(logPath, sizeof(logPath), destPartitionPath, baseSeqNum, "-", 0, "_", 0, ".ilog.cleaned");
                         fd = open(logPath, O_RDWR | O_CREAT | O_LARGEFILE | O_TRUNC, 0775);
-                        EXPECT(fd != -1);
+                        TANK_EXPECT(fd != -1);
 
                         DEFER({
                                 if (fd != -1) {
@@ -671,7 +671,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         auto newSegment = std::make_unique<ro_segment>(baseSeqNum, lastAvailSeqNum, curSegment->createdTS);
 
                         newSegment->fdh.reset(new fd_handle(logFd));
-                        EXPECT(newSegment->fdh.use_count() == 2);
+                        TANK_EXPECT(newSegment->fdh.use_count() == 2);
                         newSegment->fdh->Release();
                         newSegment->fileSize           = outFileSize;
                         newSegment->index.data         = reinterpret_cast<const uint8_t *>(mmap(nullptr, index.size(), PROT_READ, MAP_SHARED, fd, 0));
@@ -682,8 +682,8 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                 SLog(newSegment->fileSize, " ", lseek64(newSegment->fdh->fd, 0, SEEK_END), "\n");
                         }
 
-                        EXPECT(newSegment->index.fileSize == lseek64(fd, 0, SEEK_END));
-                        EXPECT(newSegment->fileSize == lseek64(newSegment->fdh->fd, 0, SEEK_END));
+                        TANK_EXPECT(newSegment->index.fileSize == lseek64(fd, 0, SEEK_END));
+                        TANK_EXPECT(newSegment->fileSize == lseek64(newSegment->fdh->fd, 0, SEEK_END));
 
                         TANKUtil::safe_close(fd);
                         fd = -1;
@@ -694,7 +694,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
 
                         madvise((void *)newSegment->index.data, index.size(), MADV_DONTDUMP);
 
-                        EXPECT(newSegment->fdh.use_count() == 1);
+                        TANK_EXPECT(newSegment->fdh.use_count() == 1);
                         newSegments.push_back(newSegment.release());
 
                         if (trace) {
@@ -891,14 +891,14 @@ void Service::schedule_compaction(const char *base_partitition_path, topic_parti
         auto       compaction = std::make_unique<pending_compaction>();
         const auto l          = strlen(base_partitition_path);
 
-        EXPECT(l < sizeof(compaction->basePartitionPath));
+        TANK_EXPECT(l < sizeof(compaction->basePartitionPath));
 
         compaction->log = log;
         strwlen32_t(base_partitition_path, l).ToCString(compaction->basePartitionPath);
         compaction->prevSegments.reserve(log->roSegments->size());
 
         for (auto it : *log->roSegments) {
-                EXPECT(it->fdh);
+                TANK_EXPECT(it->fdh);
                 compaction->prevSegments.emplace_back(it);
         }
 

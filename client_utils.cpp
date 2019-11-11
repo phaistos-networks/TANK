@@ -74,8 +74,8 @@ uint64_t TankClient::sequence_number_by_event_time(const topic_partition &topic_
                 if (!discovered_partitions().empty()) {
                         const auto &it = discovered_partitions().front();
 
-                        EXPECT(discovered_partitions().size() == 1);
-                        EXPECT(it.topic == topic_partition.first);
+                        TANK_EXPECT(discovered_partitions().size() == 1);
+                        TANK_EXPECT(it.topic == topic_partition.first);
 
                         if (topic_partition.second >= it.watermarks.size()) {
 #ifdef TANK_THROW_SWITCH_EXCEPTIONS
