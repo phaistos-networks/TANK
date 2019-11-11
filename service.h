@@ -249,6 +249,8 @@ struct adjust_range_start_cache_value final {
         uint64_t seq_num;
 };
 
+struct topic_partition;
+
 // A read-only (immutable, frozen-sealed) partition commit log(Segment) (and the index file for quick lookups)
 // we don't need to acquire a lock to access this
 //
@@ -292,8 +294,8 @@ struct ro_segment final {
         // Every log file is associated with this skip-list index
         struct
         {
-                const uint8_t *data;
-                uint32_t       fileSize;
+                const uint8_t *data{nullptr};
+                uint32_t       fileSize{0};
 
                 // last record in the index
                 index_record lastRecorded;
@@ -310,6 +312,8 @@ struct ro_segment final {
                         munmap((void *)index.data, index.fileSize);
                 }
         }
+	
+	bool prepare_access(const topic_partition *);
 };
 
 struct timer_node final {
@@ -350,7 +354,8 @@ struct lookup_res final {
                 Empty,
                 BoundaryCheck,
                 PastMax,
-                AtEOF
+                AtEOF,
+		SystemFault,
         } fault;
 
         // This is set to either fileSize of the segment log file or lower if
@@ -445,7 +450,6 @@ static void PrintImpl(Buffer &out, const lookup_res &res) {
         }
 }
 
-struct topic_partition;
 
 // An append-only log for storing bundles, divided into segments
 struct topic_partition;
@@ -596,7 +600,11 @@ struct topic_partition_log final {
 
 	lookup_res no_immutable_segment(const bool);
 
-	lookup_res from_immutable_segment(ro_segment *, const uint64_t, const uint32_t, const uint64_t);
+        lookup_res from_immutable_segment(const topic_partition_log *,
+                                          ro_segment *,
+                                          const uint64_t,
+                                          const uint32_t,
+                                          const uint64_t);
 
         append_res append_bundle(const time_t, const void *bundle, const size_t bundleSize, const uint32_t bundleMsgsCnt, const uint64_t, const uint64_t);
 
@@ -2755,13 +2763,5 @@ static inline void run_on_main_thread(F &&l, Arg &&... args) {
 
 template <typename... T>
 inline void track_shutdown(connection *const c, const size_t line, T &&... args) {
-#ifndef LEAN_SWITCH
-        if (auto fd{logFd}; fd != -1) {
-                Buffer b;
-
-                b.append(Date::ts_repr(time(nullptr)), ": Unexpected shutdown at ", line, " for connection from ", ip4addr_repr(c ? c->addr4 : INADDR_NONE), ":");
-                b.append(std::forward<T>(args)...);
-                write(fd, b.data(), b.size());
-        }
-#endif
+	// no-op
 }

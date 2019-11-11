@@ -296,6 +296,11 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                                                              : hwmark;
 
                                 switch (res.fault) {
+					case lookup_res::Fault::SystemFault:
+                                                resp_hdr->pack(static_cast<uint8_t>(0xfb));
+                                                respond_now = true;
+                                                break;
+
                                         case lookup_res::Fault::PastMax: {
                                                 // we attempted to read past the highwater mark(i.e last committed message seq.num)
                                                 const auto hwmark = partition->highwater_mark.seq_num;
@@ -449,6 +454,7 @@ bool Service::process_consume(const TankAPIMsgType _msg,
 
                                                 respond_now = true;
                                                 break;
+
 
                                         case lookup_res::Fault::BoundaryCheck:
                                                 if (trace) {

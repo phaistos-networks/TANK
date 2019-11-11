@@ -11,195 +11,13 @@ PubSubQueue<mainthread_closure> mainThreadClosures;
 Service *                       this_service;
 Buffer                          basePath_;
 bool                            read_only{false};
-int                             logFd;
 
-static constexpr bool            trace{false};
 std::mutex                       mboxLock;
 std::vector<std::pair<int, int>> mbox;
 std::condition_variable          mbox_cv;
 
 int Rename(const char *oldpath, const char *newpath);
 int Unlink(const char *pathname);
-
-ro_segment::ro_segment(const uint64_t    absSeqNum,
-                       uint64_t          lastAbsSeqNum,
-                       const strwlen32_t base,
-                       const uint32_t    creationTS,
-                       const bool        wideEntries)
-    : baseSeqNum{absSeqNum}, createdTS{creationTS}, haveWideEntries{wideEntries} {
-        int           fd, indexFd;
-        struct stat64 st;
-        Buffer        path;
-        bool          _verified{false};
-
-        if (trace) {
-                SLog("New ro_segment(this = ", ptr_repr(this),
-                     ", baseSeqNum = ", baseSeqNum,
-                     ", lastAbsSeqNum = ", lastAbsSeqNum,
-                     ", createdTS = ", createdTS,
-                     ", haveWideEntries = ", haveWideEntries, " ", base, "/", absSeqNum, "\n");
-        }
-
-        TANK_EXPECT(lastAbsSeqNum >= baseSeqNum);
-
-        index.data = nullptr;
-
-        if (createdTS) {
-                path.append(base, "/", absSeqNum, "-", lastAbsSeqNum, "_", createdTS, ".ilog");
-        } else {
-                path.append(base, "/", absSeqNum, "-", lastAbsSeqNum, ".ilog");
-        }
-
-l1:
-        fd = this_service->safe_open(path.c_str(), O_RDONLY | O_LARGEFILE | O_NOATIME);
-
-        if (fd == -1) {
-                const auto saved = errno;
-
-                if (EPOLLIN == saved) {
-                        // provide some guidance because this may result in a lot of wasted time
-                        Print(ansifmt::color_red, ansifmt::bold, "Unable to access ", ansifmt::reset, path,
-                              ": The effective UID of the calleer does not match the owner of the file, and the caller is not privilleged\n");
-                }
-
-                throw Switch::system_error("Failed to access log file ", path.as_s32(), ":", strerror(saved));
-        }
-
-        if (std::exchange(_verified, true) == false && []() {
-                    static const bool _verify = getenv("TANK_VERIFY_ROLOGS");
-
-                    return _verify;
-            }()) {
-                const auto l = Service::segment_lastmsg_seqnum(fd, absSeqNum);
-
-                if (l != lastAbsSeqNum) {
-                        Buffer new_path;
-
-                        Print(ansifmt::bold, ansifmt::color_red, "Unexpected last message abs.seqnum (", lastAbsSeqNum, ") for ", path, ", expected ", l, ansifmt::reset, "\n");
-
-                        lastAbsSeqNum = l;
-
-                        if (createdTS) {
-                                new_path.append(base, "/", absSeqNum, "-", lastAbsSeqNum, "_", createdTS, ".ilog");
-                        } else {
-                                new_path.append(base, "/", absSeqNum, "-", lastAbsSeqNum, ".ilog");
-                        }
-
-                        TANKUtil::safe_close(fd);
-                        if (-1 == rename(path.c_str(), new_path.c_str())) {
-                                throw Switch::system_error("Failed to rename()");
-                        }
-
-                        Print(ansifmt::bold, ansifmt::color_green, "Renamed ", path, " to ", new_path, ansifmt::reset, "\n");
-
-                        path = new_path;
-                        goto l1;
-                }
-        }
-
-        // set lastAbsSeqNum here because it may have been updated in TANK_VERIFY_ROLOGS
-        this->lastAvailSeqNum = lastAbsSeqNum;
-
-        fdh.reset(new fd_handle(fd));
-        TANK_EXPECT(fdh.use_count() == 2);
-        fdh->Release();
-
-        if (fstat64(fd, &st) == -1) {
-                throw Switch::system_error("Failed to fstat():", strerror(errno));
-        }
-
-        auto size = st.st_size;
-
-        if (unlikely(size == (off64_t)-1)) {
-                throw Switch::system_error("lseek64() failed: ", strerror(errno));
-        }
-
-        TANK_EXPECT(size < std::numeric_limits<std::remove_reference<decltype(fileSize)>::type>::max());
-
-        fileSize = size;
-
-        if (trace) {
-                SLog(ansifmt::bold, "fileSize = ", fileSize, ", createdTS = ", Date::ts_repr(creationTS), ansifmt::reset, "\n");
-        }
-
-        if (haveWideEntries) {
-                indexFd = this_service->safe_open(Buffer::build(base, "/", absSeqNum, "_64.index").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
-        } else {
-                indexFd = this_service->safe_open(Buffer::build(base, "/", absSeqNum, ".index").data(), O_RDONLY | O_LARGEFILE | O_NOATIME);
-        }
-        const auto saved_errno = errno;
-
-        DEFER({ if (indexFd != -1) TANKUtil::safe_close(indexFd); });
-
-        if (indexFd == -1) {
-                if (saved_errno == ENFILE || saved_errno == EMFILE) {
-#if defined(TANK_THROW_SWITCH_EXCEPTIONS) || __cplusplus <= 201703L 
-                        throw Switch::system_error("open() failed: too many open files");
-#else
-                        throw std::filesystem::filesystem_error("open() failed: too many open files", std::error_code{});
-#endif
-                }
-
-                if (haveWideEntries) {
-                        indexFd = this_service->safe_open(Buffer::build(base, "/", absSeqNum, "_64.index").data(),
-                                                          read_only ? O_RDONLY : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME), 0775);
-                } else {
-                        indexFd = this_service->safe_open(Buffer::build(base, "/", absSeqNum, ".index").data(),
-                                                          read_only ? O_RDONLY : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME), 0775);
-                }
-
-                if (indexFd == -1) {
-                        throw Switch::system_error("Failed to access index file:", strerror(errno));
-                }
-
-                if (haveWideEntries) {
-                        IMPLEMENT_ME();
-                }
-
-                Service::rebuild_index(fdh->fd, indexFd, absSeqNum);
-        }
-
-        size = lseek64(indexFd, 0, SEEK_END);
-
-        if (unlikely(size == (off64_t)-1)) {
-                throw Switch::system_error("lseek64() failed: ", strerror(errno));
-        }
-
-        TANK_EXPECT(size < std::numeric_limits<std::remove_reference<decltype(index.fileSize)>::type>::max());
-
-        // TODO(markp): if (haveWideEntries), index.lastRecorded.relSeqNum should be a union, and we should
-        // properly set index.lastRecorded here
-        require(haveWideEntries == false); // not implemented yet
-
-        index.fileSize               = size;
-        index.lastRecorded.relSeqNum = index.lastRecorded.absPhysical = 0;
-
-        if (size) {
-                auto data = mmap(nullptr, index.fileSize, PROT_READ, MAP_SHARED, indexFd, 0);
-
-                if (unlikely(data == MAP_FAILED)) {
-                        throw Switch::system_error("Failed to access the index file. mmap() failed:", strerror(errno), " for ", size_repr(index.fileSize), " ", base, "/");
-                }
-
-                madvise(data, index.fileSize, MADV_DONTDUMP);
-
-                index.data = static_cast<const uint8_t *>(data);
-
-                if (likely(index.fileSize >= sizeof(uint32_t) + sizeof(uint32_t))) {
-                        // last entry in the index; very handy
-                        const auto *const p = (uint32_t *)(index.data + index.fileSize - sizeof(uint32_t) - sizeof(uint32_t));
-
-                        index.lastRecorded.relSeqNum   = p[0];
-                        index.lastRecorded.absPhysical = p[1];
-
-                        if (trace) {
-                                SLog("lastRecorded = ", index.lastRecorded.relSeqNum, "(", index.lastRecorded.relSeqNum + baseSeqNum, "), ", index.lastRecorded.absPhysical, "\n");
-                        }
-                }
-        } else {
-                index.data = nullptr;
-        }
-}
 
 void topic_partition_log::consider_ro_segments() {
         enum { trace = false };
@@ -739,6 +557,7 @@ void Service::put_outgoing_queue(outgoing_queue *const q) {
 }
 
 void Service::introduce_self(connection *const c, bool &have_cork) {
+	static constexpr const bool trace{false};
         uint8_t b[sizeof(uint8_t) + sizeof(uint32_t)];
         auto    q  = c->outQ;
         int     fd = c->fd;

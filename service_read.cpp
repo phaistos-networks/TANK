@@ -702,9 +702,27 @@ lookup_res topic_partition_log::no_immutable_segment(const bool first_bundle_is_
         }
 }
 
-lookup_res   topic_partition_log::from_immutable_segment(ro_segment *const f, const uint64_t abs_seqnum, const uint32_t max_size, const uint64_t max_abs_seq_num) {
+lookup_res   topic_partition_log::from_immutable_segment(const topic_partition_log *const tpl,
+                                                       ro_segment *const                f,
+                                                       const uint64_t                   abs_seqnum,
+                                                       const uint32_t                   max_size,
+                                                       const uint64_t                   max_abs_seq_num) {
 #pragma mark snap to the offset derived from the first message set in the index with sequence number <= abs_seqnum
         static constexpr const bool trace{false};
+
+        if (unlikely(false == f->prepare_access(tpl->partition))) {
+                lookup_res res;
+
+                res.fault                  = lookup_res::Fault::SystemFault;
+                res.fileOffsetCeiling      = 0;
+                res.fdh                    = nullptr;
+                res.absBaseSeqNum          = 0;
+                res.fileOffset             = 0;
+                res.first_bundle_is_sparse = false;
+
+                return res;
+        }
+
         const auto                  skiplist_size = static_cast<int32_t>(f->index.fileSize / sizeof(index_record));
         TANK_EXPECT(skiplist_size);
         const auto skiplist_data = reinterpret_cast<const index_record *>(f->index.data);
@@ -926,7 +944,7 @@ lookup_res topic_partition_log::range_for_immutable_segments(uint64_t abs_seqnum
                      ", fileSize = ", f->fileSize, ansifmt::reset, "\n");
         }
 
-        return from_immutable_segment(f, abs_seqnum, max_size, max_abs_seq_num);
+        return from_immutable_segment(this, f, abs_seqnum, max_size, max_abs_seq_num);
 }
 
 // trampoline to topic_partition_log::range_for()
