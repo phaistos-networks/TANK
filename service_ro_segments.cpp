@@ -1,7 +1,7 @@
 #include "service_common.h"
 
 bool ro_segment::prepare_access(const topic_partition *const partition) {
-        static constexpr const bool trace{true};
+        static constexpr const bool trace{false};
         TANK_EXPECT(partition);
 
         // TODO:
