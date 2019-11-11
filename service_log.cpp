@@ -783,7 +783,14 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                 //
                                 // We just start from the last tracked-recorded (relSeqNum, absPhysical) and skip bundles until EOF
                                 // keeping track of offsets as we go.
-				TANK_EXPECT(s >= o);
+                                if (unlikely(s < o)) {
+                                        Print(ansifmt::bold, ansifmt::color_red, "Dataset corruption", ansifmt::reset, ": Unexpected file size ", s, "(", size_repr(s), ") < last checkpoint in index at ", o, ". Did you copy the data while the partition was actively being updated?\n");
+					Print("You can force repair it by deleting ", basePath, " and restarting TANK. This will not salvage whatever data was lost, but will rebuild the index and you should be able to access the partition\n");
+					Print("Aborting\n");
+					exit(1);
+                                }
+
+                                TANK_EXPECT(s >= o);
 
                                 const auto  span = s - o;
                                 auto *const data = static_cast<uint8_t *>(malloc(span));
