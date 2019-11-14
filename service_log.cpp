@@ -141,6 +141,7 @@ bool Service::close_partition_log(topic_partition *partition) {
 
         if (!log) {
                 // already closed
+		// we shouldn't ever reach this path, but we may as well account for it
                 return false;
         }
 

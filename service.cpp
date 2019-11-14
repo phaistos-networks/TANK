@@ -503,8 +503,6 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                          static_cast<int>(topic->name_.size()),
                          topic->name_.data(), partition->idx);
 
-                track_accessed_partition(partition, curTime);
-
 #ifdef LEAN_SWITCH
                 if (-1 == mkdir(basePath, 0775)) {
                         throw Switch::system_error("Failed to mkdir(", basePath, "): ", strerror(errno));
