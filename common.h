@@ -18,7 +18,7 @@
 #endif
 
 #define MAKE_TANK_RELEASE(major, minor) ((major)*100 + (minor))
-#define TANK_VERSION (MAKE_TANK_RELEASE(3, 6))
+#define TANK_VERSION (MAKE_TANK_RELEASE(3, 7))
 
 namespace TankFlags {
         enum class BundleMsgFlags : uint8_t {

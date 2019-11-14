@@ -2752,7 +2752,6 @@ struct mainthread_closure final {
 extern PubSubQueue<mainthread_closure> mainThreadClosures;
 extern Service *                       this_service;
 extern Buffer                          basePath_;
-extern int                             logFd;
 extern bool                            read_only;
 
 template <typename F, typename... Arg>
