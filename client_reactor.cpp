@@ -390,6 +390,14 @@ bool TankClient::any_requests_pending_delivery() const noexcept {
                 }
         }
 
+        for (auto it = all_conns_list.next; it != &all_conns_list; it = it->next) {
+                const auto c = containerof(connection, all_conns_list_ll, it);
+
+                if (c->state.flags & (1u << unsigned(connection::State::Flags::ConnectionAttempt))) {
+                        return true;
+                }
+        }
+
         return false;
 }
 
