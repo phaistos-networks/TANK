@@ -671,8 +671,9 @@ void TankClient::drain_pipe(int fd) {
         } while (n);
 }
 
-void TankClient::process_io(const size_t events_count) {
+bool TankClient::process_io(const size_t events_count) {
         static constexpr bool trace{false};
+        bool                  interrupted = false;
 
         if (trace) {
                 SLog("Events ", events_count, "\n");
@@ -687,6 +688,7 @@ void TankClient::process_io(const size_t events_count) {
                         uint64_t one;
 
                         read(c->fd, &one, sizeof(one));
+                        interrupted = true;
                         continue;
                 }
 
@@ -741,6 +743,8 @@ void TankClient::process_io(const size_t events_count) {
                         rcv(c);
                 }
         }
+
+        return interrupted;
 }
 
 void TankClient::check_conns_pending_est() {
@@ -858,7 +862,8 @@ void TankClient::reactor_step(uint32_t timeout_ms) {
                 sleeping.store(true, std::memory_order_relaxed);
 
                 const auto r          = poller.poll(likely(until >= now_ms) ? until - now_ms : 0);
-                const auto saved_erro = errno;
+                const auto saved_erro  = errno;
+                bool       interrupted = false;
 
                 sleeping.store(false, std::memory_order_relaxed);
 
@@ -879,7 +884,7 @@ void TankClient::reactor_step(uint32_t timeout_ms) {
                                 throw Switch::system_error("epoll_wait()");
                         }
                 } else if (r) {
-                        process_io(r);
+                        interrupted = process_io(r);
                 }
 
                 if (now_ms >= conns_pend_est_next_expiration) {
@@ -904,6 +909,10 @@ void TankClient::reactor_step(uint32_t timeout_ms) {
                         manage_throttled_connections();
                 }
 #endif
+
+		if (interrupted) {
+			break;
+		}
 
                 if (!r) {
                         if (now_ms >= step_end) {

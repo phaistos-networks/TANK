@@ -200,7 +200,7 @@ bool process_srv_in(connection *);
 
 void drain_pipe(int);
 
-void process_io(const size_t);
+bool process_io(const size_t);
 
 uint64_t reactor_next_wakeup() const noexcept;
 

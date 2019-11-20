@@ -338,7 +338,8 @@ int main(int argc, char *argv[]) {
                         Content,
                         TS,
                         TS_MS,
-                        Size
+                        Size,
+			TimeSince,
                 };
                 uint8_t    displayFields{1u << uint8_t(Fields::Content)};
                 size_t     defaultMinFetchSize{128 * 1024 * 1024};
@@ -496,6 +497,8 @@ int main(int argc, char *argv[]) {
                                                         displayFields |= 1u << uint8_t(Fields::Size);
                                                 } else if (it.Eq(_S("ts_ms"))) {
                                                         displayFields |= 1u << uint8_t(Fields::TS_MS);
+						} else if (it.Eq(_S("time_since"))) {
+                                                        displayFields |= 1u << uint8_t(Fields::TimeSince);
                                                 } else {
                                                         Print("Unknown field '", it, "'\n");
                                                         return 1;
@@ -793,6 +796,9 @@ int main(int argc, char *argv[]) {
                                                                         buf.append(m->content);
                                                                 }
 
+								if (displayFields & (1u << uint8_t(Fields::TimeSince))) {
+									buf.append(duration_repr(Timings::Milliseconds::ToMicros(Timings::Milliseconds::SysTime() - m->ts)));
+								}
                                                         } else {
                                                                 buf.append(m->content);
                                                         }

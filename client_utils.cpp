@@ -1,5 +1,7 @@
 #include "tank_client.h"
+#ifdef LEAN_SWITCH
 #include <tl/optional.hpp>
+#endif
 
 void TankClient::wait_scheduled(const uint32_t req_id) {
         TANK_EXPECT(req_id);
