@@ -390,6 +390,7 @@ bool TankClient::any_requests_pending_delivery() const noexcept {
                 }
         }
 
+#if 0 // turns out, this is not necessary
         for (auto it = all_conns_list.next; it != &all_conns_list; it = it->next) {
                 const auto c = containerof(connection, all_conns_list_ll, it);
 
@@ -397,6 +398,7 @@ bool TankClient::any_requests_pending_delivery() const noexcept {
                         return true;
                 }
         }
+#endif
 
         return false;
 }

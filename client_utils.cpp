@@ -6,7 +6,7 @@
 void TankClient::wait_scheduled(const uint32_t req_id) {
         TANK_EXPECT(req_id);
 
-        while (should_poll() || any_requests_pending_delivery()) {
+        while (should_poll()) {
                 poll(2000);
 
                 if (unlikely(!faults().empty())) {
