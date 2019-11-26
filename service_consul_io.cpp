@@ -60,152 +60,162 @@ bool Service::recv_consul_resp_headers(connection *const c) {
 
 	// \0 terminated so that we won't need to check for (p < b->end())
 	b_data[b->size()] = '\0';
-        for (const auto *p = b_data + b->offset();;) {
-                while (is_ws[static_cast<uint8_t>(*p)]) {
-                        ++p;
-                }
+	for (const auto *p = b_data + b->offset();;) {
+		while (is_ws[static_cast<uint8_t>(*p)]) {
+			++p;
+		}
 
-                if (*p == '\0') {
-                        put_buf(b);
-                        c->inB = nullptr;
-                        return try_make_idle(c);
-                }
+		if (*p == '\0') {
+			put_buf(b);
+			c->inB = nullptr;
+			return try_make_idle(c);
+		}
 
-                b->set_offset(std::distance(const_cast<const char *>(b_data), p));
+		b->set_offset(std::distance(const_cast<const char *>(b_data), p));
 
-                for (s.p = p;; ++p) {
-                        if (*p == '\0') {
-                                return consider_http_headers_size(c);
-                        } else if (*p == '\n') {
-                                s.set_end(p++);
-                                break;
-                        } else if (*p == '\r' && p[1] == '\n') {
-                                s.set_end(p);
-                                p += 2;
-                                break;
-                        }
-                }
+		for (s.p = p;; ++p) {
+			if (*p == '\0') {
+				return consider_http_headers_size(c);
+			} else if (*p == '\n') {
+				s.set_end(p++);
+				break;
+			} else if (*p == '\r' && p[1] == '\n') {
+				s.set_end(p);
+				p += 2;
+				break;
+			}
+		}
 
-                if (!s.StripPrefix(_S("HTTP/"))) {
-                        return shutdown(c, __LINE__);
-                }
+		if (!s.StripPrefix(_S("HTTP/"))) {
+			return shutdown(c, __LINE__);
+		}
 
-                // process the first line
-                uint32_t major{0}, minor{0};
+		// process the first line
+		uint32_t major{0}, minor{0};
 
-                {
-                        const auto *p = s.data();
+		{
+			const auto *p = s.data();
 
-                        while (*p >= '0' && *p <= '9') {
-                                major = major * 10 + (*(p++) - '0');
-                        }
+			while (*p >= '0' && *p <= '9') {
+				major = major * 10 + (*(p++) - '0');
+			}
 
-                        if (*p != '.' || major == 0) {
-                                return shutdown(c, __LINE__);
-                        }
+			if (*p != '.' || major == 0) {
+				return shutdown(c, __LINE__);
+			}
 
-                        for (++p; *p >= '0' && *p <= '9'; ++p) {
-                                minor = minor * 10 + (*p - '0');
-                        }
+			for (++p; *p >= '0' && *p <= '9'; ++p) {
+				minor = minor * 10 + (*p - '0');
+			}
 
-                        while (*p == ' ' || *p == '\t') {
-                                ++p;
-                        }
+			while (*p == ' ' || *p == '\t') {
+				++p;
+			}
 
-                        uint32_t rc{0};
+			uint32_t rc{0};
 
-                        while (*p >= '0' && *p <= '9') {
-                                rc = rc * 10 + (*(p++) - '0');
-                        }
+			while (*p >= '0' && *p <= '9') {
+				rc = rc * 10 + (*(p++) - '0');
+			}
 
-                        while (*p == ' ' || *p == '\t') {
-                                ++p;
-                        }
+			while (*p == ' ' || *p == '\t') {
+				++p;
+			}
 
-                        c->as.consul.cur.resp.rc = rc;
-                }
+			c->as.consul.cur.resp.rc = rc;
+		}
 
-                // process all response headers
-                tl::optional<uint64_t> content_length;
-                uint64_t               consul_index{0};
-                uint8_t                flags = (major > 1 || (major == 1 && minor >= 1)) ? unsigned(connection::As::Consul::Cur::Response::Flags::KeptAlive) : 0;
+		// process all response headers
+		tl::optional<uint64_t> content_length;
+		uint64_t               consul_index{0};
+		uint8_t                flags = (major > 1 || (major == 1 && minor >= 1)) ? unsigned(connection::As::Consul::Cur::Response::Flags::KeptAlive) : 0;
 
-                for (;;) {
-                        for (name.p = p;; ++p) {
-                                if (*p == '\0') {
-                                        return consider_http_headers_size(c);
-                                } else if (*p == ':') {
-                                        name.set_end(p);
+		for (;;) {
+			// this is the correct way to parse headers
+			if (*p == '\r' && p[1] == '\n') {
+				// end of headers
+				p += 2;
+				break;
+			} else if (*p == '\n') {
+				// end of headers
+				++p;
+				break;
+			}
 
-                                        for (++p; *p == ' ' || *p == '\t'; ++p) {
-                                                continue;
-                                        }
 
-                                        for (value.p = p;; ++p) {
-                                                if (*p == '\0') {
-                                                        return consider_http_headers_size(c);
-                                                } else if (*p == '\n') {
-                                                        value.set_end(p++);
-                                                        break;
-                                                } else if (*p == '\r' && p[1] == '\n') {
-                                                        value.set_end(p);
-                                                        p += 2;
-                                                        break;
-                                                }
-                                        }
-                                        break;
-                                } else if (*p == '\n') {
-                                        name.set_end(p++);
-                                        value.reset();
-                                        break;
-                                } else if (*p == '\r' && p[1] == '\n') {
-                                        name.set_end(p);
-                                        value.reset();
-                                        p += 2;
-                                        break;
-                                }
-                        }
+			for (name.p = p;; ++p) {
+				if (*p == '\0') {
+					return consider_http_headers_size(c);
+				} else if (*p == ':') {
+					name.set_end(p);
 
-                        if (!name) {
-                                // done with headers
-                                const auto real_content_len = content_length ? content_length.value() : 0;
-                                auto &     resp             = c->as.consul.cur.resp;
+					for (++p; *p == ' ' || *p == '\t'; ++p) {
+						continue;
+					}
 
-                                b->set_offset(std::distance(const_cast<const char *>(b_data), p));
+					for (value.p = p;; ++p) {
+						if (*p == '\0') {
+							return consider_http_headers_size(c);
+						} else if (*p == '\n') {
+							value.set_end(p++);
+							break;
+						} else if (*p == '\r' && p[1] == '\n') {
+							value.set_end(p);
+							p += 2;
+							break;
+						}
+					}
+					break;
+				} else if (*p == '\n') {
+					name.set_end(p++);
+					value.reset();
+					break;
+				} else if (*p == '\r' && p[1] == '\n') {
+					name.set_end(p);
+					value.reset();
+					p += 2;
+					break;
+				}
+			}
 
-                                if (flags & unsigned(connection::As::Consul::Cur::Response::Flags::ChunksTransfer)) {
-                                        resp.decoded_content_bytes = 0;
-                                        resp.content_length        = 0;
-                                } else {
-                                        resp.remaining_content_bytes = real_content_len;
-                                        resp.content_length          = real_content_len;
-                                }
+			if (name.EqNoCase(_S("Content-Length"))) {
+				content_length = value.as_uint64();
+			} else if (name.EqNoCase(_S("X-Consul-Index"))) {
+				consul_index = value.as_uint64();
+			} else if (name.EqNoCase(_S("Connection"))) {
+				if (value.EqNoCase(_S("keep-alive")) || value.EqNoCase(_S("keepalive"))) {
+					flags|= unsigned(connection::As::Consul::Cur::Response::Flags::KeptAlive);
+				} else {
+					flags &= ~unsigned(connection::As::Consul::Cur::Response::Flags::KeptAlive);
+				}
+			} else if (name.EqNoCase(_S("Transfer-Encoding"))) {
+				if (value.EqNoCase(_S("chunked"))) {
+					flags|= unsigned(connection::As::Consul::Cur::Response::Flags::ChunksTransfer);
+				}
+			} else if (name.EqNoCase(_S("Content-Encoding"))) {
+				if (value.EqNoCase(_S("gzip"))) {
+					flags|= unsigned(connection::As::Consul::Cur::Response::Flags::GZIP_Encoding);
+				}
+			}
+		}
 
-                                resp.flags        = flags;
-                                resp.consul_index = consul_index;
-                                return consider_consul_resp_headers(c);
-                        } else {
-                                if (name.EqNoCase(_S("Content-Length"))) {
-                                        content_length = value.as_uint64();
-                                } else if (name.EqNoCase(_S("X-Consul-Index"))) {
-                                        consul_index = value.as_uint64();
-                                } else if (name.EqNoCase(_S("Connection"))) {
-                                        if (value.EqNoCase(_S("keep-alive")) || value.EqNoCase(_S("keepalive"))) {
-						flags|= unsigned(connection::As::Consul::Cur::Response::Flags::KeptAlive);
-                                        } else {
-						flags &= ~unsigned(connection::As::Consul::Cur::Response::Flags::KeptAlive);
-                                        }
-                                } else if (name.EqNoCase(_S("Transfer-Encoding"))) {
-                                        if (value.EqNoCase(_S("chunked"))) {
-						flags|= unsigned(connection::As::Consul::Cur::Response::Flags::ChunksTransfer);
-                                        }
-                                } else if (name.EqNoCase(_S("Content-Encoding"))) {
-                                        if (value.EqNoCase(_S("gzip"))) {
-						flags|= unsigned(connection::As::Consul::Cur::Response::Flags::GZIP_Encoding);
-                                        }
-                                }
-                        }
-                }
+		// done with headers
+		const auto real_content_len = content_length ? content_length.value() : 0;
+		auto &     resp             = c->as.consul.cur.resp;
+
+		b->set_offset(std::distance(const_cast<const char *>(b_data), p));
+
+		if (flags & unsigned(connection::As::Consul::Cur::Response::Flags::ChunksTransfer)) {
+			resp.decoded_content_bytes = 0;
+			resp.content_length        = 0;
+		} else {
+			resp.remaining_content_bytes = real_content_len;
+			resp.content_length          = real_content_len;
+		}
+
+		resp.flags        = flags;
+		resp.consul_index = consul_index;
+		return consider_consul_resp_headers(c);
         }
 }
 

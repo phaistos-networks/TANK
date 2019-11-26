@@ -1753,6 +1753,10 @@ bool Service::try_tx(connection *const c) {
         if (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))) {
                 return true;
         } else {
+		// TODO:
+		// see TankClient::try_transmit()
+		// This is not a _big_ deal but we should do it anyway
+		// https://github.com/phaistos-networks/TANK/issues/75
                 return tx(c);
         }
 }
