@@ -1401,13 +1401,6 @@ bool TankClient::try_transmit(broker *const br) {
                 TANK_EXPECT(c->fd != -1);
         }
 
-	// TODO:
-	// if we already transmitting, i.e haven't flushed any pending data
-	// do not invoke tx() again.
-	// we need another connection flag that's set whenever we transmit
-	// and cleared when we no longer have any data to transmit
-	// https://github.com/phaistos-networks/TANK/issues/75
-
         TANK_EXPECT(c);
         if (0 == (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail)))) {
                 return tx(c);

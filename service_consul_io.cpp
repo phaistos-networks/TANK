@@ -788,7 +788,7 @@ bool Service::recv_consul_resp_content_gzip(connection *const c) {
 				SLog("We are done\n");
 			}
 
-			auto &&cc = resp.comp_ctx;
+			auto &cc = resp.comp_ctx;
 
                         if (cc.state != CompressionContext::State::Fin) {
                                 IMPLEMENT_ME();
