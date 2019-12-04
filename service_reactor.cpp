@@ -1814,6 +1814,8 @@ bool Service::tx(connection *const c) {
                 SLog(ansifmt::bold, ansifmt::color_red, "*********** TX()", ansifmt::reset, "\n");
         }
 
+	// TODO: https://github.com/phaistos-networks/TANK/issues/76
+
         while (auto it_ = q->front()) {
                 if (it_->src == payload::Source::DataVector) {
                         if (const auto next = it_->next; nullptr == next || next->src != payload::Source::DataVector) {

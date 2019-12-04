@@ -183,6 +183,10 @@ bool TankClient::tx_tank(connection *const c) {
         auto                  fd = c->fd;
         auto                  br = c->as.tank.br; // associated broker
 
+	// TODO: https://github.com/phaistos-networks/TANK/issues/76
+	// - fast-path for a single outgoing content payload
+	// - track payload size so that we can avoid iterating the iovecs
+
         TANK_EXPECT(br);
         TANK_EXPECT(c->fd != -1);
 

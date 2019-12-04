@@ -178,6 +178,7 @@ bool Service::recv_consul_resp_headers(connection *const c) {
 				}
 			}
 
+			// TODO: https://github.com/phaistos-networks/TANK/issues/76
 			if (name.EqNoCase(_S("Content-Length"))) {
 				content_length = value.as_uint64();
 			} else if (name.EqNoCase(_S("X-Consul-Index"))) {

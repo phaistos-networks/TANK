@@ -2672,7 +2672,7 @@ class Service {
         uint32_t                       nextDistinctPartitionId{0};
         int                            listenFd{-1}, prom_listen_fd{-1};
         std::atomic<bool>              sleeping alignas(64){false};
-        EPoller                        poller;
+        EPoller                        poller{2048};
         pthread_t                      main_thread_id;
         std::unique_ptr<std::thread>   sync_thread;
         std::vector<topic_partition *> partitions_requested_eof;
