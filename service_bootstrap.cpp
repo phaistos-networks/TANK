@@ -137,7 +137,7 @@ int Service::start(int argc, char **argv) {
                                 Print("\n\nExamples:\n");
                                 Print(Buffer{}.append(left_aligned(7, "./tank -p /data/TANK -l :11011 :Starts a TANK node where the TANK data files are stored in /tmp/TANK and accepts requests at localhost:11011"_s32, 76)), "\n\n");
                                 Print(Buffer{}.append(left_aligned(7, "./tank -p /data/TANK -l 10.5.5.10:11011 :Starts a TANK node where the TANK data files are stored in /tmp/TANK and accepts requests at 10.5.5.10:11011"_s32, 76)), "\n");
-                                Print(Buffer{}.append(left_aligned(7, "./tank -p /data/TANK -l 10.5.5.10:11011 -C 1@my_cluster: Starts a TANK node where the TANK data files are stored in /tmp/TANK and accepts requests at 10.5.5.10:11011, and joins or creates the TANK cluster 'my_cluster'\nThe node maybe become the cluster leader and may replicate data from existing topic parttiions immediately. Please see TANK's documentation for Clusters terminology and guides"_s32, 76)), "\n");
+                                Print(Buffer{}.append(left_aligned(7, "./tank -p /data/TANK -l 10.5.5.10:11011 -C 1@my_cluster: Starts a TANK node where the TANK data files are stored in /tmp/TANK and accepts requests at 10.5.5.10:11011, and joins or creates the TANK cluster 'my_cluster'\nThe node maybe become the cluster leader and may replicate data from existing topic partitions immediately. Please see TANK's documentation for Clusters terminology and guides"_s32, 76)), "\n");
                                 return 0;
 
                         case 'v':
