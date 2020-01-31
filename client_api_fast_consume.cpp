@@ -819,7 +819,7 @@ bool TankClient::process_consume_content_impl(connection *const c) {
                                                 }
 
                                                 if (trace) {
-                                                        SLog("Not enough data mssage content length = ", len, ", required ", size_repr(std::distance(msgset_end, e)), " more\n");
+                                                        SLog("Not enough data message content length = ", len, ", required ", size_repr(std::distance(msgset_end, e)), " more\n");
                                                 }
 
                                                 goto try_next_bundle;
