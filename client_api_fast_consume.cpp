@@ -140,7 +140,7 @@ bool TankClient::process_consume_content_impl(connection *const c) {
         }
 
 // TODO: check if are past the rem bytes as well
-// TODO: maybe set somewhere in resp the minumum number of bytes we need before we trampoline from process_consume_content() to this function
+// TODO: maybe set somewhere in resp the minimum number of bytes we need before we trampoline from process_consume_content() to this function
 #define REQUIRE_BYTES(n)                                                                                         \
         if (p + (n) > e) {                                                                                       \
                 SLog("Required more content at ", __LINE__, " needed ", n, " have ", std::distance(p, e), "\n"); \
