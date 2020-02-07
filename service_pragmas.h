@@ -614,11 +614,17 @@ void update_isr_max_ack(topic_partition *, isr_entry *);
 
 // we need to keep this sane, we don't want to wake up too often
 // so we are just going to align this to 64ms
-static inline auto normalized_max_wait(uint64_t v) noexcept {
+static inline uint64_t normalized_max_wait(uint64_t v) noexcept {
+        if (!v) {
+                // if 0 is explicitly requested, that's OK, wait it out
+		// because likely the client needs to know immediately(very latency sensitive)
+                return 0;
+        }
+
         static const uint64_t alignment = 64;
 
-	// we don't want to wait forever
-	v = std::min<uint64_t>(v, Timings::Hours::ToMillis(1));
+        // we don't want to wait forever
+        v = std::min<uint64_t>(v, Timings::Hours::ToMillis(1));
 
         static_assert(0 == (alignment & 1));
         static_assert(std::is_same<decltype(alignment), const uint64_t>::value);

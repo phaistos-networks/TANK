@@ -36,7 +36,7 @@ else
 	# Docker complains about clang++ dep.
 	#CXX:=clang++
 endif
-
+CXXFLAGS +=  -Wstrict-aliasing
 
 SERVICE_OBJS:=$(patsubst %.cpp,%.o,$(wildcard service*.cpp))
 CLIENT_OBJS:=$(patsubst %.cpp,%.o,$(wildcard client*.cpp))

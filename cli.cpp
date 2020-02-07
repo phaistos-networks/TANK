@@ -373,7 +373,7 @@ int main(int argc, char *argv[]) {
                                         break;
 
                                 case 'f':
-                                        filter.set(optarg);
+                                        filter.set(optarg, strlen(optarg));
                                         break;
 
                                 case 'E':

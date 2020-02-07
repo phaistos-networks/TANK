@@ -9,7 +9,7 @@ static TANKUtil::range_start determine_consume_file_range_start(const uint64_t  
                                                                 const uint64_t                                             consume_req_seqnum) {
 
         enum {
-                trace = false
+                trace = false,
         };
 
         TANK_EXPECT(fd != -1);
@@ -132,7 +132,7 @@ uint32_t determine_consume_file_range_end(uint64_t                              
                                           TANKUtil::read_ahead<TANKUtil::read_ahead_default_stride> &ra,
                                           const uint64_t                                             consume_req_seqnum) {
         enum {
-                trace = false
+                trace = false,
         };
         uint64_t   last_msg_seqnum;
         int        r;
@@ -610,12 +610,12 @@ lookup_res topic_partition_log::range_for(uint64_t abs_seqnum, const uint32_t ma
 
         if (trace) {
                 puts("\n\n\n\n\n\n");
-                SLog(ansifmt::color_brown, ansifmt::inverse, ansifmt::bold, "range_for() abs_seqnum = ", abs_seqnum,
+                SLog(ansifmt::color_brown, ansifmt::inverse, ansifmt::bold, "range_for() ", ptr_repr(this), " abs_seqnum = ", abs_seqnum,
                      ", max_size = ", max_size,
                      ", max_abs_seq_num = ", max_abs_seq_num,
                      ", lastAssignedSeqNum = ", lastAssignedSeqNum,
                      ", firstAvailableSeqNum = ", firstAvailableSeqNum,
-                     ", cur.baseSeqNum = ", cur.baseSeqNum,
+                     ", cur.baseSeqNum = ", cur.baseSeqNum, // can be std::numeric_limits<uint64_t>::max() if there's no current
                      ansifmt::reset, "\n");
         }
 
@@ -872,7 +872,7 @@ l100:
         if (trace) {
                 SLog(ansifmt::color_brown, "Returning offsetCeil = ", offsetCeil,
                      ", f.baseSeqNum + ", res.record.relSeqNum,
-                     " abs_seqnum = = ", f->baseSeqNum + res.record.relSeqNum,
+                     " abs_seqnum = ", f->baseSeqNum + res.record.relSeqNum,
                      ", absPhysical = ", res.record.absPhysical, ansifmt::reset, " (span = ", size_repr(offsetCeil - res.record.absPhysical), ")\n");
         }
 
@@ -941,7 +941,7 @@ lookup_res topic_partition_log::range_for_immutable_segments(uint64_t abs_seqnum
                 SLog(ansifmt::bold, "Found abs_seqnum ", abs_seqnum,
                      " in immutable segment with base seqnum ", f->baseSeqNum,
                      ", lastAvailSeqNum = ", f->lastAvailSeqNum,
-                     ", fileSize = ", f->fileSize, ansifmt::reset, "\n");
+                     ", fileSize = ", f->fileSize /* can be 0 if it hasn't been opened yet */, ansifmt::reset, "\n");
         }
 
         return from_immutable_segment(this, f, abs_seqnum, max_size, max_abs_seq_num);

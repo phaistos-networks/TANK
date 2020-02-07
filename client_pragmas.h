@@ -376,9 +376,16 @@ bool any_responses() const noexcept {
 
 [[gnu::warn_unused_result, nodiscard]] uint32_t consume(const std::pair<topic_partition, std::pair<uint64_t, uint32_t>> *, const std::size_t, const uint64_t maxWait, const uint32_t minSize);
 
-[[gnu::warn_unused_result, nodiscard]] uint32_t consume(const std::vector<std::pair<topic_partition, std::pair<uint64_t, uint32_t>>> &req, const uint64_t maxWait, const uint32_t minSize);
+[[gnu::warn_unused_result, nodiscard]] uint32_t consume(const std::vector<std::pair<topic_partition,
+                                                                                    std::pair<uint64_t, uint32_t>>> &req,
+                                                        const uint64_t                                               maxWait,
+                                                        const uint32_t                                               minSize);
 
-[[gnu::warn_unused_result, nodiscard]] uint32_t consume_from(const topic_partition &from, const uint64_t seqNum, const uint32_t minFetchSize, const uint64_t maxWait, const uint32_t minSize);
+[[gnu::warn_unused_result, nodiscard]] uint32_t consume_from(const topic_partition &from,
+                                                             const uint64_t         seqNum,
+                                                             const uint32_t         minFetchSize,
+                                                             const uint64_t         maxWait,
+                                                             const uint32_t         minSize);
 
 [[gnu::warn_unused_result, nodiscard]] uint32_t discover_partitions(const strwlen8_t topic);
 

@@ -232,7 +232,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
 
         if (trace) {
                 SLog(ansifmt::bold, ansifmt::color_green, ansifmt::inverse, "OPENING PARTITION ", topic->name(),
-                     "/", partition->idx, ansifmt::reset, "\n");
+                     "/", partition->idx, " ", ptr_repr(this), ansifmt::reset, "\n");
         }
 
 #ifndef TANK_SRV_LAZY_PARTITION_INIT
@@ -366,7 +366,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                 const auto baseSeqNum = repr.first.as_uint64(), lastAvailSeqNum = repr.second.as_uint64();
 
                                 if (trace) {
-                                        SLog("(	baseSeqNum = ", baseSeqNum, ", lastAvailSeqNum = ", lastAvailSeqNum, ", creationTS = ", creationTS, ") r.first = ", r.first, "\n");
+                                        SLog("collected ROLog (	baseSeqNum = ", baseSeqNum, ", lastAvailSeqNum = ", lastAvailSeqNum, ", creationTS = ", creationTS, ") r.first = ", r.first, "\n");
                                 }
 
                                 roLogs.push_back({baseSeqNum, lastAvailSeqNum, creationTS});
@@ -494,7 +494,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                         const auto baseSeqNum = repr.first.as_uint64(), lastAvailSeqNum = repr.second.as_uint64();
 
                                         if (trace) {
-                                                SLog("(	", baseSeqNum, ", ", lastAvailSeqNum, ", ", creationTS, ") ", r.first, "\n");
+                                                SLog("Collected ROLog (	", baseSeqNum, ", ", lastAvailSeqNum, ", ", creationTS, ") ", r.first, "\n");
                                         }
 
                                         roLogs.push_back({baseSeqNum, lastAvailSeqNum, creationTS});
@@ -542,6 +542,13 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                 }
                         }
 
+			if (trace) {
+				SLog("All RO segments\n");
+				for (const auto s : *l->roSegments) {
+					SLog("Segment ", ptr_repr(s), " with baseSeqNum ", s->baseSeqNum, "\n");
+				}
+			}
+
                         TANK_EXPECT(std::is_sorted(l->roSegments->begin(), l->roSegments->end(), [](const auto a, const auto b) noexcept {
                                 return a->baseSeqNum < b->baseSeqNum;
                         }));
@@ -575,7 +582,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                         fd = open(basePath, read_only ? O_RDWR : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND), 0775);
 
                         if (trace) {
-                                SLog("Considering index ", basePath, " cur.fileSize = ", l->cur.fileSize, "\n");
+                                SLog("Considering index ", basePath, " cur.fileSize = ", l->cur.fileSize, ", with cur.baseSeqNum = ", l->cur.baseSeqNum, "\n");
                         }
 
                         if (fd == -1) {

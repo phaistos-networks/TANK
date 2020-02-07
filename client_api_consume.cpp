@@ -611,6 +611,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 range_base<const uint8_t *, size_t> msgset_content;
 
                                 if (0 == msgset_size) {
+					// message set(in messages) > 15
+					// so encoded separately as a varu32
                                         if (unlikely(!Compression::check_decode_varuint32(p, chunk_end))) {
                                                 break;
                                         } else {
@@ -664,7 +666,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                 if (codec) {
                                         if (trace) {
-                                                SLog("Need to decompress for ", codec, "\n");
+                                                SLog("Need to decompress for ", codec, ", ", std::distance(p, bundle_end), " bytes\n");
                                         }
 
                                         if (bundle_end > chunk_end) {
@@ -683,7 +685,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         switch (codec) {
                                                 case 1:
                                                         if (!Compression::UnCompress(Compression::Algo::SNAPPY, p, std::distance(p, bundle_end), b)) {
-                                                                Print("Failed to decompress ", topic_name, "/", partition_id, ", at ", requested_seqnum, "\n");
+                                                                Print("Failed to decompress ", std::distance(p, bundle_end), " bytes for ", topic_name, "/", partition_id, ", at ", requested_seqnum, "\n");
                                                                 IMPLEMENT_ME();
                                                         }
                                                         break;
