@@ -1008,6 +1008,9 @@ class TankClient {
         switch_dlist                                                         all_conns_list{&all_conns_list, &all_conns_list};
         uint64_t                                                             next_conns_gen{1};
         simple_allocator                                                     resultsAllocator{2 * 1024 * 1024};
+	struct {
+		bool report_drain_if_consumed_upto_hwmark{false};
+	} behavior;
 
         std::vector<partition_content>           consumed_content;
         std::vector<fault>                       all_captured_faults;

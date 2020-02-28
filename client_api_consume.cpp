@@ -916,7 +916,17 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                         req_part_resp.next.seq_num  = next_seqnum;
                         req_part_resp.next.min_size = next_min_span;
                         req_part_resp.msgs.cnt      = consumed;
-                        req_part_resp.drained       = drained_partition;
+                        // TODO:
+                        // maybe req_part_resp.drained = drained_partition || (last_bucket->data[last_bucket_size - 1].seqNum == highwater_mark)
+                        // so that we wouldn't need another request to determine that we have drained a partition
+                        // but this may cause problems with existing applications that rely on current semantics
+                        // i.e that drained is true, we also didn't get to consume any messages.
+                        //
+                        // Maybe this could be configured by some TankClient option so that
+                        // older applications wouldn't be affected by the change in the semantics
+                        //
+                        // UPDATE: implemented
+                        req_part_resp.drained = drained_partition || (behavior.report_drain_if_consumed_upto_hwmark && consumed && last_bucket->data[last_bucket_size - 1].seqNum == highwater_mark);
 
                         if (const auto n = used_buffers.size()) {
                                 req_part_resp.used_buffers.size = n;

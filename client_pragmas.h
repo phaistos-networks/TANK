@@ -449,3 +449,9 @@ uint64_t sequence_number_by_event_time(const topic_partition &, const uint64_t e
 inline size_t count_brokers() const noexcept {
 	return all_brokers.size();
 }
+
+// this is useful in very latency sensitive applications
+// where you really want to execute some logic as soon as you have drained upto the highwatermark
+void set_report_draine_if_consumed_upto_hwmark(const bool v = true) {
+	behavior.report_drain_if_consumed_upto_hwmark = true;
+}
