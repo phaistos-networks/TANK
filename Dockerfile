@@ -17,4 +17,5 @@ FROM ubuntu:18.04
 MAINTAINER Phaistos Networks
 COPY --from=compiler-image /TANK/tank /usr/local/bin/
 COPY --from=compiler-image /TANK/tank-cli /usr/local/bin/
+WORKDIR /data/
 CMD ["tank","-p",".","-l",":11011"]
