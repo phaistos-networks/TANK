@@ -135,7 +135,7 @@ uint32_t determine_consume_file_range_end(uint64_t                              
                 trace = false,
         };
         uint64_t   last_msg_seqnum;
-        int        r;
+        int        r = 0;
         const auto limit = max_size != std::numeric_limits<uint32_t>::max()
                                ? std::min<uint32_t>(file_size, std::max<uint32_t>(file_offset + max_size, 32))
                                : file_size;
@@ -264,7 +264,9 @@ uint32_t determine_consume_file_range_end(uint64_t                              
 // We should trade performance for complexitity here
 lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_t maxSize, const uint64_t max_abs_seq_num) {
         // lock is expected to be locked
-        static constexpr bool trace{false};
+	enum {
+		trace = false,
+	};
         TANK_EXPECT(absSeqNum >= cur.baseSeqNum);
 
         if (trace) {
@@ -606,7 +608,9 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
 }
 
 lookup_res topic_partition_log::range_for(uint64_t abs_seqnum, const uint32_t max_size, uint64_t max_abs_seq_num) {
-        static constexpr bool trace{false};
+	enum{
+		trace = false,
+	};
 
         if (trace) {
                 puts("\n\n\n\n\n\n");
@@ -682,7 +686,9 @@ lookup_res topic_partition_log::no_immutable_segment(const bool first_bundle_is_
         // a message with seqNum >= abs_seqnum
         //
         // so just point to the first(oldest) segment
-        static constexpr const bool trace{false};
+	enum{
+		trace = false,
+	};
         const auto                  prevSegments = roSegments;
 
         if (!prevSegments->empty()) {
@@ -708,7 +714,9 @@ lookup_res   topic_partition_log::from_immutable_segment(const topic_partition_l
                                                        const uint32_t                   max_size,
                                                        const uint64_t                   max_abs_seq_num) {
 #pragma mark snap to the offset derived from the first message set in the index with sequence number <= abs_seqnum
-        static constexpr const bool trace{false};
+	enum{
+		trace = false,
+	};
 
         if (unlikely(false == f->prepare_access(tpl->partition))) {
                 lookup_res res;
@@ -889,7 +897,9 @@ l100:
 // We don't really need to optimize this function as much as we need to care for read_cur()
 // Most clients are likely going to be consuming from the current segment / tailing it, so to speak
 lookup_res topic_partition_log::range_for_immutable_segments(uint64_t abs_seqnum, const uint32_t max_size, uint64_t max_abs_seq_num) {
-        static constexpr bool trace{false};
+	enum{
+		trace = false,
+	};
         auto                  prevSegments = roSegments.get();
         const auto            size         = static_cast<int32_t>(prevSegments->size());
         const auto            data         = prevSegments->data();
@@ -949,7 +959,9 @@ lookup_res topic_partition_log::range_for_immutable_segments(uint64_t abs_seqnum
 
 // trampoline to topic_partition_log::range_for()
 lookup_res topic_partition::read_from_local([[maybe_unused]] const bool fetch_only_committed, const uint64_t abs_seq_num, const uint32_t fetch_size) {
-        static constexpr bool trace{false};
+	enum{
+		trace = false,
+	};
         const uint64_t        max_abs_seq_num = fetch_only_committed ? hwmark() : std::numeric_limits<uint64_t>::max();
         auto                  log             = _log.get();
 

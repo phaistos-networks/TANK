@@ -366,9 +366,9 @@ bool TankClient::materialize_consume_api_request(api_request *api_req) {
                     .clientReqId       = req_id,
                     .topic             = req_part->topic,
                     .partition         = req_part->partition,
+                    .msgs              = msgs,
                     .respComplete      = true,
                     .drained           = resp_ctx.drained,
-                    .msgs              = msgs,
                     .next.seqNum       = resp_ctx.next.seq_num,
                     .next.minFetchSize = static_cast<uint32_t>(resp_ctx.next.min_size),
                 });
@@ -489,7 +489,7 @@ bool TankClient::materialize_discover_partitions_requests(api_request *api_req) 
                 });
 
                 if (trace) {
-                        for (const auto [partition, ctx] : *all) {
+                        for (const auto &[partition, ctx] : *all) {
                                 SLog(partition, " ", ctx, "\n");
                         }
                 }
@@ -1504,7 +1504,7 @@ void TankClient::capture_timeout(api_request *api_req, const str_view8 topic_nam
 
 void TankClient::capture_unknown_topic_fault(api_request *api_req, const str_view8 topic_name) {
         if (trace_captured_faults) {
-                SLog("Captured FAULT\n");
+                SLog("Captured FAULT '", topic_name, "'\n");
         }
 
         api_req->set_failed();

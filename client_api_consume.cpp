@@ -2,7 +2,7 @@
 
 // build a consume payload for a broker API request
 TankClient::broker_outgoing_payload *TankClient::build_consume_broker_req_payload(const broker_api_request *broker_req) {
-        static constexpr bool trace{false};
+	enum {trace =false,};
         auto                  payload = new_req_payload(const_cast<broker_api_request *>(broker_req));
         [[maybe_unused]] auto broker  = broker_req->br;
         auto                  b       = payload->b;
@@ -228,8 +228,10 @@ uint32_t TankClient::consume(const std::pair<topic_partition, std::pair<uint64_t
 //
 // UPDATE: see client_api_fast_consume.cpp
 bool TankClient::process_consume(connection *const c, const uint8_t *const content, const size_t len) {
-        static constexpr bool trace{false};
-        static constexpr bool trace_faults{false};
+        enum {
+                trace        = false,
+                trace_faults = false,
+        };
         TANK_EXPECT(c);
         TANK_EXPECT(c->type == connection::Type::Tank);
         TANK_EXPECT(c->fd > 2);
@@ -328,7 +330,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                 }
 
                 if (*reinterpret_cast<const uint16_t *>(p) == std::numeric_limits<uint16_t>::max()) {
-                        if (trace || trace_faults) {
+                        if (trace_faults) {
                                 SLog("Unknown topic [", topic_name, "]\n");
                         }
 
@@ -377,7 +379,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 // system error; likely open_partition_log() failed
                                 auto next = br_req_partctx_it->next;
 
-                                if (trace || trace_faults) {
+                                if (trace_faults) {
                                         SLog("system error while attempting to access  partition ", topic_name, "/", partition_id, "\n");
                                 }
 
@@ -395,7 +397,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                         } else if (err_flags == 0xff) {
                                 auto next = br_req_partctx_it->next;
 
-                                if (trace || trace_faults) {
+                                if (trace) {
                                         SLog("Undefined partition ", topic_name, "/", partition_id, "\n");
                                 }
 
@@ -524,7 +526,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                                 const auto first_avail_seqnum = decode_pod<uint64_t>(p);
 
-                                if (trace || trace_faults) {
+                                if (trace_faults) {
                                         SLog("Boundary check failed first_avail_seqnum = ", first_avail_seqnum, ", highwater_mark = ", highwater_mark, ", requested_seqnum = ", requested_seqnum, "\n");
                                 }
 
@@ -574,11 +576,12 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                         // process all bundles in this partition's bundles chunk
                         for (const auto *p = partition_bundles, *const chunk_end = std::min(end, bundles_chunk);;) {
                                 need_from = p;               // it's important to track need_from from the beginning of the bundl
-                                need_upto = need_from + 512; // 256 was a bit too low
+                                need_upto = need_from + 1024; // 256 was a bit too low
 
-                                if (unlikely(!Compression::check_decode_varuint32(p, chunk_end))) {
+                                if (unlikely(not Compression::check_decode_varuint32(p, chunk_end))) {
                                         if (trace) {
-                                                SLog("Unable to decode bundle_len:", std::distance(need_from, chunk_end), " to end of the chunk. Consumed so far ", size_repr(std::distance(content, need_from)), "\n");
+                                                SLog("Unable to decode bundle_len:", std::distance(need_from, chunk_end), 
+							" to end of the chunk. Consumed so far ", size_repr(std::distance(content, need_from)), "\n");
                                         }
 
                                         break;

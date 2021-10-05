@@ -2110,8 +2110,8 @@ _accept:
         } else {
                 TANK_EXPECT(newFd > 2);
                 TANK_EXPECT(saLen == sizeof(sockaddr_in));
-                static const auto rcvBufSize = strwlen32_t(getenv("TANK_BROKER_SOCKBUF_RCV_SIZE") ?: "0").as_uint32();
-                static const auto sndBufSize = strwlen32_t(getenv("TANK_BROKER_SOCKBUF_SND_SIZE") ?: "0").as_uint32();
+                static const auto rcvBufSize = str_view32::make_with_cstr(getenv("TANK_BROKER_SOCKBUF_RCV_SIZE") ?: "0").as_uint32();
+                static const auto sndBufSize = str_view32::make_with_cstr(getenv("TANK_BROKER_SOCKBUF_SND_SIZE") ?: "0").as_uint32();
 
                 auto c = get_connection();
 

@@ -842,6 +842,10 @@ void TankClient::check_unreachable_brokers() {
 }
 
 uint64_t TankClient::reactor_next_wakeup() const noexcept {
+	enum {
+		trace = true,
+	};
+
         uint64_t until = TANKUtil::minimum(
             unreachable_brokers_tree_next,
             retry_bundles_next,
@@ -853,6 +857,8 @@ uint64_t TankClient::reactor_next_wakeup() const noexcept {
                                   throttled_connections_read_list_next,
                                   throttled_connections_write_list_next);
 #endif
+
+	
 
         return until;
 }
@@ -894,7 +900,9 @@ void TankClient::reactor_step(uint32_t timeout_ms) {
                 }
 
                 if (unlikely(-1 == r)) {
-                        if (saved_erro != EINTR && saved_erro != EAGAIN) {
+                        if (saved_erro == EINTR) {
+                                interrupted = true;
+                        } else if (saved_erro != EAGAIN) {
                                 throw Switch::system_error("epoll_wait()");
                         }
                 } else if (r) {

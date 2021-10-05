@@ -77,10 +77,10 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 				const auto partition_id = decode_pod<uint16_t>(p);
 
                                 pr->participants.emplace_back(produce_response::participant{
-                                    .topic      = nullptr,
                                     .topic_name = res.first->first,
-                                    .partition  = partition_id});
-
+                                    .topic      = nullptr,
+                                    .partition  = partition_id,
+                                });
 
                                 if (unlikely(p > end)) {
                                         put_produce_response(pr);
@@ -163,12 +163,13 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                         }
 
                         pr->participants.emplace_back(produce_response::participant{
-                            .topic                    = topic,
                             .topic_name               = topic->name(),
-                            .partition                = partition_id,
+                            .topic                    = topic,
                             .p                        = partition,
+                            .partition                = partition_id,
                             .update.bundle            = bundle,
-                            .update.first_msg_seq_num = first_msg_seq_num});
+                            .update.first_msg_seq_num = first_msg_seq_num,
+                        });
                 }
         }
 
@@ -474,10 +475,11 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 #ifdef HWM_UPDATE_BASED_ON_ACKS
                     .isr_nodes_acknowledged_bm   = 0,
 #endif
-                    .required_acks               = required_acks,
                     .deferred_resp               = pr,
                     .deferred_resp_gen           = pr->gen,
-                    .pr_participant_idx          = static_cast<uint8_t>(pi)});
+                    .pr_participant_idx          = static_cast<uint8_t>(pi),
+                    .required_acks               = required_acks,
+		    });
 
                 it.res = produce_response::participant::OpRes::Pending;
         }

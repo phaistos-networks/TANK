@@ -6,7 +6,7 @@ int Service::verify(char *paths[], const int cnt) {
 
         for (int i{0}; i < cnt; ++i) {
                 const char *const path = paths[i];
-                const strwlen32_t fullPath(path);
+		const auto fullPath = str_view32::make_with_cstr(path);
                 const auto        ext = fullPath.Extension();
 
                 if (ext.Eq(_S("ilog")) || ext.Eq(_S("log")) || ext.Eq(_S("index"))) {

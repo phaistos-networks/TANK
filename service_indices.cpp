@@ -46,15 +46,37 @@ uint64_t Service::segment_lastmsg_seqnum(int log_fd, const uint64_t base_seqnum)
         return next > base_seqnum ? next - 1 : base_seqnum;
 }
 
+// we need to be able to repair a segment in case e.g the msg size (i.e messages in the bundle) is corrupt
+// and in that case, we need to be able to use to set bundle size to 1.e 1, and then switch to a sparse bundle for the next
+// bundle, so that we can effectively skip the bogus bundle
 void Service::rebuild_index(int logFd, int indexFd, const uint64_t base_seqnum) {
-        static constexpr bool         trace{false};
-        const auto                    fileSize = lseek64(logFd, 0, SEEK_END);
+        enum {
+                trace = false,
+        };
+        const auto fileSize = lseek64(logFd, 0, SEEK_END);
+
+        if (fileSize == -1) {
+                throw Switch::system_error("Unable to access file:", strerror(errno));
+        }
+
         auto *const                   fileData = mmap(nullptr, fileSize, PROT_READ, MAP_SHARED, logFd, 0);
         IOBuffer                      b;
         uint32_t                      next = 0;
         static constexpr const size_t step{4096};        // TODO: respect configuration
         uint64_t                      firstMsgSeqNum{0}; // this is the _relative_ sequence number
         std::size_t                   bundles{0}, sparse_bundles{0};
+        std::size_t                   _max       = 0u;
+        std::size_t                   _max_bytes = 0u;
+
+        static const auto checked_msgs_size = [](const uint64_t msg_size, const std::size_t bundle_len) -> uint32_t {
+                if (msg_size > bundle_len) {
+                        Print(ansifmt::bold, ansifmt::color_red, "Unexpected msg_size ", msg_size, " for bundle_len ", bundle_len, ansifmt::reset, "\n");
+
+                        return 1u;
+                }
+
+                return msg_size;
+        };
 
         if (fileData == MAP_FAILED) {
                 throw Switch::system_error("Unable to mmap():", strerror(errno));
@@ -63,7 +85,8 @@ void Service::rebuild_index(int logFd, int indexFd, const uint64_t base_seqnum) 
         DEFER({ munmap(fileData, fileSize); });
         madvise(fileData, fileSize, MADV_SEQUENTIAL | MADV_DONTDUMP);
 
-        Print("Rebuilding index of log of size ", size_repr(fileSize), " with base seq.number ", base_seqnum, " ..\n");
+        Print(ansifmt::bold, ansifmt::color_brown, "Rebuilding index of log of size ", size_repr(fileSize), " with base seq.number ", base_seqnum, ansifmt::reset, " ..\n");
+
         for (const auto *      p         = static_cast<const uint8_t *>(fileData),
                         *const e         = p + fileSize,
                         *const base      = p,
@@ -95,16 +118,25 @@ void Service::rebuild_index(int logFd, int indexFd, const uint64_t base_seqnum) 
 
                 const auto     bundle_hdr_flags = decode_pod<uint8_t>(p);
                 const bool     sparse_bundle    = bundle_hdr_flags & (1u << 6);
-                const uint32_t msgset_size      = ((bundle_hdr_flags >> 2) & 0xf) ?: Compression::decode_varuint32(p);
+                const uint32_t msgset_size      = checked_msgs_size(((bundle_hdr_flags >> 2) & 0xf) ?: Compression::decode_varuint32(p), bundleLen);
+                const auto     maybe_bogus      = msgset_size > bundleLen; // this can't possibly be
+                const auto     deep_trace       = maybe_bogus;
 
                 TANK_EXPECT(p <= e);
 
-                if (trace) {
-                        SLog("New bundle bundle_hdr_flags = ", bundle_hdr_flags, ", msgSetSize = ", msgset_size, ", sparse_bundle = ", sparse_bundle, "\n");
+                _max       = std::max<std::size_t>(_max, msgset_size);
+                _max_bytes = std::max<std::size_t>(_max_bytes, bundleLen);
+
+                if (deep_trace) {
+                        SLog("New bundle bundle_hdr_flags = ", bundle_hdr_flags,
+                             ", msgSetSize = ", msgset_size,
+                             ", bundleLen = ", bundleLen, " (", size_repr(bundleLen), ")",
+                             ", sparse_bundle = ", sparse_bundle, "\n");
                 }
 
                 if (sparse_bundle) {
-                        uint64_t lastMsgSeqNum;
+                        uint64_t   lastMsgSeqNum;
+                        const auto _saved = next;
 
                         firstMsgSeqNum = decode_pod<uint64_t>(p) - base_seqnum; // XXX: important, index encodes _relative_ sequence numbers
 
@@ -115,7 +147,7 @@ void Service::rebuild_index(int logFd, int indexFd, const uint64_t base_seqnum) 
                         }
 
                         if (trace) {
-                                SLog("bundle's sparse first ", firstMsgSeqNum, ", last ", lastMsgSeqNum, "\n");
+                                SLog("bundle's sparse first (rel) ", firstMsgSeqNum, ", last (rel) ", lastMsgSeqNum, ", would have been ", _saved, "\n");
                         }
 
                         next = lastMsgSeqNum + 1;
@@ -125,16 +157,28 @@ void Service::rebuild_index(int logFd, int indexFd, const uint64_t base_seqnum) 
                         next += msgset_size;
                 }
 
-                if (p >= next_checkpoint) {
-                        if (trace) {
-                                SLog("Indexing ", firstMsgSeqNum, " ", bundle_base - base, "\n");
+                if (deep_trace) {
+                        SLog("First message of deep traced bundle is ", firstMsgSeqNum, ", next is:", firstMsgSeqNum + msgset_size, "\n");
+                }
+
+
+                if (p >= next_checkpoint or maybe_bogus) {
+                        const auto size = std::distance(base, bundle_base);
+
+                        if (maybe_bogus) {
+                                SLog("Indexing first msg seqnum = ", firstMsgSeqNum, "(", firstMsgSeqNum + base_seqnum, ")  size = ", size, " (", size_repr(size), ")\n");
                         }
 
                         b.pack(static_cast<uint32_t>(firstMsgSeqNum),
-                               static_cast<uint32_t>(std::distance(base, bundle_base)));
+                               static_cast<uint32_t>(size));
 
-                        next_checkpoint = bundle_base + step;
+			if (maybe_bogus) {
+				next_checkpoint = next_bundle;
+			} else {
+				next_checkpoint = bundle_base + step;
+			}
                 }
+
 
                 p = next_bundle;
                 TANK_EXPECT(p <= e);
@@ -143,7 +187,12 @@ void Service::rebuild_index(int logFd, int indexFd, const uint64_t base_seqnum) 
 
         const auto last_seqnum = next ? next - 1 : 0;
 
-        Print("Rebuilt index of size ", size_repr(b.size()), ", last msg relative seq.num ", last_seqnum, "(first_abseqnum = ", base_seqnum, ", last_abseqnum = ", base_seqnum + last_seqnum, ")\n");
+        Print("Rebuilt index of size ", size_repr(b.size()),
+              ", last msg relative seq.num ", last_seqnum,
+              "(first_abseqnum = ", base_seqnum,
+              ", last_abseqnum = ", base_seqnum + last_seqnum,
+              "), largest bundle size ", _max,
+              ", largest bundle in bytes ", size_repr(_max_bytes), "\n");
         Print(dotnotation_repr(bundles), " bundles processed ", dotnotation_repr(sparse_bundles), " sparse\n");
 
         if (pwrite64(indexFd, b.data(), b.size(), 0) != b.size()) {

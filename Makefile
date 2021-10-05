@@ -12,7 +12,7 @@ ifeq ($(ORIGIN), 1)
 # When building on our dev.system
 	include /home/system/Development/Switch/Makefile.dfl
 	LIBTREE_PATH:=/home/system/Development/Switch/ext/ebtree/libtree.a
-	CXXFLAGS:=$(CPPFLAGS_SANITY_DEBUG) #-fsanitize=address
+	CXXFLAGS:=$(CPPFLAGS_SANITY_RELEASE) #-fsanitize=address
 	LDFLAGS:=$(LDFLAGS_SANITY) -L$(SWITCH_BASE) -lswitch -pthread -ldl \
 	/usr/lib/x86_64-linux-gnu/libssl.a /usr/lib/x86_64-linux-gnu/libcrypto.a  \
 	-lz -ljemalloc  $(LIBTREE_PATH)

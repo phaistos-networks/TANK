@@ -101,6 +101,11 @@ struct strwithlen {
                 return *this;
         }
 
+        static inline auto make_with_cstr(const CT *p) {
+                return strwithlen{p, static_cast<uint32_t>(strlen(p))};
+        }
+
+
         [[gnu::always_inline]] inline bool IsConstant() {
                 return p == nullptr || ::IsConstant(p);
         }

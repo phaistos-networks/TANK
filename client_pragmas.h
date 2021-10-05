@@ -309,6 +309,11 @@ void flush_broker(broker *bs);
 public:
 TankClient(const strwlen32_t endpoints = {});
 
+TankClient(const char *s)
+	: TankClient(str_view32::make_with_cstr(s)) {
+	//
+}
+
 ~TankClient();
 
 const auto &consumed() const noexcept {
@@ -343,6 +348,10 @@ inline void poll(const uint32_t timeout_ms) {
         reactor_step(timeout_ms);
 }
 
+inline void poll() {
+	reactor_step(std::numeric_limits<uint32_t>::max());
+}
+
 // Maybe you want to use it after poll() has returned
 // TODO: check if (!vector.empty()) instead; should be faster for std::vector<>
 bool any_responses() const noexcept {
@@ -363,6 +372,12 @@ bool any_responses() const noexcept {
 
 [[gnu::warn_unused_result, nodiscard]] uint32_t produce_to(const topic_partition &to, const std::vector<msg> &msgs);
 
+[[gnu::warn_unused_result, nodiscard]] inline uint32_t produce_one_to(const topic_partition &to, const msg &msg) {
+        return produce_to(to, {
+                                  msg,
+                              });
+}
+
 // This is needed for Tank system tools. Applications should never need to use this method
 // e.g tank-ctl mirroring functionality
 //
@@ -374,7 +389,11 @@ bool any_responses() const noexcept {
 	return produce_with_seqnum(req.data(), req.size());
 }
 
-[[gnu::warn_unused_result, nodiscard]] uint32_t consume(const std::pair<topic_partition, std::pair<uint64_t, uint32_t>> *, const std::size_t, const uint64_t maxWait, const uint32_t minSize);
+[[gnu::warn_unused_result, nodiscard]] uint32_t consume(const std::pair<topic_partition,
+                                                                        std::pair<uint64_t, uint32_t>> *,
+                                                        const std::size_t,
+                                                        const uint64_t maxWait,
+                                                        const uint32_t minSize);
 
 [[gnu::warn_unused_result, nodiscard]] uint32_t consume(const std::vector<std::pair<topic_partition,
                                                                                     std::pair<uint64_t, uint32_t>>> &req,
@@ -429,6 +448,10 @@ void set_default_leader(const strwlen32_t e) {
         set_default_leader(Switch::ParseSrvEndpoint(e, {_S("tank")}, 11011));
 }
 
+void set_default_leader(const char *p) {
+	set_default_leader(str_view32::make_with_cstr(p));
+}
+	
 void interrupt_poll();
 
 bool should_poll() const noexcept;
@@ -444,14 +467,20 @@ void wait_scheduled(const uint32_t reqID);
 // cut_off_threshold is time, in milliseconds, that determines how far from the target event time the event, identified by the returned sequence number, can be
 // The lower that value, the fewer binary search probles it will take. Depending on the size of your messages, you may want to
 // set this very high or very low -- and then just consume messages until you have reached or exceeded that target event_time
-uint64_t sequence_number_by_event_time(const topic_partition &, const uint64_t event_time, const uint64_t cut_off_threshold = Timings::Minutes::ToMillis(5));
+uint64_t sequence_number_by_event_time(const topic_partition &,
+                                       const uint64_t event_time,
+                                       const uint64_t cut_off_threshold = Timings::Minutes::ToMillis(5));
 
 inline size_t count_brokers() const noexcept {
 	return all_brokers.size();
 }
 
-// this is useful in very latency sensitive applications
+// This is useful in very latency sensitive applications
 // where you really want to execute some logic as soon as you have drained upto the highwatermark
-void set_report_draine_if_consumed_upto_hwmark(const bool v = true) {
+//
+// You won't need to e.g use consume_from() with maxWait = 0 so that you 'll get back a partition that's drained.
+// If you get a response with messages, and the last seq_num consumed from that request is the partition's high watermark
+// we can then set the partition as drained.
+void set_report_drained_if_consumed_upto_hwmark(const bool v = true) {
 	behavior.report_drain_if_consumed_upto_hwmark = true;
 }

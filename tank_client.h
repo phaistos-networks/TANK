@@ -59,7 +59,7 @@ namespace std {
                 using argument_type = std::pair<str_view8, uint16_t>;
                 using result_type   = std::size_t;
 
-                inline result_type operator()(const argument_type &v) const noexcept  {
+                inline result_type operator()(const argument_type &v) const noexcept {
                         size_t hash{2166136261U};
 
                         for (const auto c : v.first) {
@@ -167,7 +167,7 @@ class TankClient {
                 } cluster_name;
 
                 time32_t startup_ts;
-		uint32_t version;
+                uint32_t version;
         };
 
         struct partition_content final {
@@ -358,8 +358,8 @@ class TankClient {
                         struct {
                                 decltype(std::declval<srv_status>().counts)  counts;
                                 decltype(std::declval<srv_status>().metrics) metrics;
-				time32_t startup_ts;
-				uint32_t version;
+                                time32_t                                     startup_ts;
+                                uint32_t                                     version;
 
                                 struct {
                                         char    data[64];
@@ -638,7 +638,6 @@ class TankClient {
                         return rc;
                 }
         };
-
 
         struct connection final {
                 int fd{-1};
@@ -1002,15 +1001,15 @@ class TankClient {
         robin_hood::unordered_map<str_view8, bool>                           topics_intern_map;
         bool                                                                 allowStreamingConsumeResponses{false};
         int                                                                  sndBufSize{128 * 1024}, rcvBufSize{1 * 1024 * 1024};
-        strwlen8_t                                                           clientId{"c++"};
+        strwlen8_t                                                           clientId{_S("c++")};
         switch_dlist                                                         conns_pend_est_list{&conns_pend_est_list, &conns_pend_est_list};
         uint64_t                                                             conns_pend_est_next_expiration{std::numeric_limits<uint64_t>::max()};
         switch_dlist                                                         all_conns_list{&all_conns_list, &all_conns_list};
         uint64_t                                                             next_conns_gen{1};
         simple_allocator                                                     resultsAllocator{2 * 1024 * 1024};
-	struct {
-		bool report_drain_if_consumed_upto_hwmark{false};
-	} behavior;
+        struct {
+                bool report_drain_if_consumed_upto_hwmark{false};
+        } behavior;
 
         std::vector<partition_content>           consumed_content;
         std::vector<fault>                       all_captured_faults;

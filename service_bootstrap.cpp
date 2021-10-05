@@ -11,6 +11,9 @@ namespace {
         [[maybe_unused]] std::atomic<bool> bootstrap_failed{false};
 }
 
+
+int rebuild_segment(const char *);
+
 int Service::start(int argc, char **argv) {
         static constexpr bool trace{false};
         sockaddr_in           sa;
@@ -37,10 +40,13 @@ int Service::start(int argc, char **argv) {
                 goto help;
         }
 
-        while ((r = getopt(argc, argv, "p:l:hvP:rC:")) != -1) {
+        while ((r = getopt(argc, argv, "p:l:hvP:rC:R:")) != -1) {
                 switch (r) {
+			case 'R':
+				return rebuild_segment(optarg);
+				
                         case 'C': {
-                                auto [id_repr, cluster_name] = str_view32(optarg).divided('@');
+                                auto [id_repr, cluster_name] = str_view32::make_with_cstr(optarg).divided('@');
                                 str_view32 endpoint_repr;
 
                                 if (const auto p = cluster_name.Search('|')) {
@@ -112,7 +118,7 @@ int Service::start(int argc, char **argv) {
                                 break;
 
                         case 'P':
-                                prom_endpoint = Switch::ParseSrvEndpoint({optarg}, "http"_s8, 9102);
+                                prom_endpoint = Switch::ParseSrvEndpoint(str_view32::make_with_cstr(optarg), "http"_s8, 9102);
                                 if (!prom_endpoint) {
                                         Print("Failed to parse endpoint for prometheus metrics from ", optarg, "\n");
                                         return 1;
@@ -125,7 +131,7 @@ int Service::start(int argc, char **argv) {
                                 break;
 
                         case 'l':
-                                tank_listen_ep = Switch::ParseSrvEndpoint({optarg}, _S8("tank"), 11011);
+                                tank_listen_ep = Switch::ParseSrvEndpoint(str_view32::make_with_cstr(optarg), _S8("tank"), 11011);
                                 if (!tank_listen_ep) {
                                         Print("Failed to parse endpoint from ", optarg, "\n");
                                         return 1;
@@ -138,7 +144,7 @@ int Service::start(int argc, char **argv) {
                                 Print("Settings:\n");
                                 Print(Buffer{}.append(align_to(5), "-p <path>"_s32, align_to(24), "Specifies the base path for all TANK data"_s32), "\n");
                                 Print(Buffer{}.append(align_to(5), "-l <endpoint>"_s32, align_to(24), "Specifies the endpoint to to listen for incoming connections."_s32), "\n", Buffer{}.append(align_to(24), "Endpoint notation is [address:]port"_s32), "\n");
-                                Print(Buffer{}.append(align_to(5), "-C <spec>"_s32, align_to(24), "Have this node join a TANK cluster. spec notation is nodeid@cluster_name"_s32), "\n", Buffer{}.append(left_aligned(24, "This is how TANK clusters are built. One or more TANK nodes can form clusters. Multiple TANK clusters can be defined. Each TANK node is identified by a unique node id that is specified using this option.\nCurrently, Consul is supported for leadership election and metadata storage, so TANK will connect to the local Consul node.\nFor more information about Consul, please see https://www.consul.io/ and TANK's Documentation", 76), "\n\n"));
+                                Print(Buffer{}.append(align_to(5), "-C <spec>"_s32, align_to(24), "Have this node join a TANK cluster. spec notation is nodeid@cluster_name"_s32), "\n", Buffer{}.append(left_aligned(24, "This is how TANK clusters are built. One or more TANK nodes can form clusters. Multiple TANK clusters can be defined. Each TANK node is identified by a unique node id that is specified using this option.\nCurrently, Consul is supported for leadership election and metadata storage, so TANK will connect to the local Consul node.\nFor more information about Consul, please see https://www.consul.io/ and TANK's Documentation"_s32, 76), "\n\n"));
 
                                 Print("\nOther Options:\n");
                                 Print(Buffer{}.append(align_to(5), "-v"_s32, align_to(24), "Enable verbose messages output"_s32), "\n");
@@ -294,7 +300,7 @@ int Service::start(int argc, char **argv) {
                         }
 
                         try {
-                                for (const auto name : collectedTopics) {
+                                for (const auto &name : collectedTopics) {
                                         // we are not going to be using std::async()
                                         // it creates a new thread for each call, which is far from optimal
                                         // for now, we will not parallelize the work, but eventually we will use a fixed-size thread pool

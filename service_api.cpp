@@ -1,5 +1,7 @@
 #include "service_common.h"
-static constexpr bool trace{false};
+enum {
+	trace = false,
+};
 
 bool Service::process_status(connection *const c, [[maybe_unused]] const uint8_t *p, [[maybe_unused]] const size_t len) {
         if (unlikely(len < sizeof(uint32_t))) {
@@ -45,7 +47,9 @@ bool Service::process_status(connection *const c, [[maybe_unused]] const uint8_t
 }
 
 bool Service::process_create_topic(connection *const c, const uint8_t *p, const size_t len) {
-        static constexpr bool trace{false};
+	enum {
+		trace = false,
+	};
 
         if (unlikely(len < sizeof(uint32_t) + sizeof(uint8_t) + sizeof(uint8_t))) {
                 if (trace) {
@@ -352,7 +356,9 @@ bool Service::process_load_conf(connection *const c, const uint8_t *p, const siz
 }
 
 bool Service::process_discover_partitions(connection *const c, const uint8_t *p, const size_t len) {
-        static constexpr bool trace{false};
+	enum {
+		trace =true,
+	};
 
         if (unlikely(len < sizeof(uint32_t) + sizeof(uint8_t) + sizeof(uint8_t))) {
                 return shutdown(c, __LINE__);
@@ -421,6 +427,10 @@ bool Service::process_discover_partitions(connection *const c, const uint8_t *p,
                                         }
                                 }
                         } else {
+				if (trace) {
+					SLog("total_enabled_partitions:", topic->total_enabled_partitions, "\n");
+				}
+
                                 for (size_t i{0}; i < topic->total_enabled_partitions; ++i) {
                                         auto it = topic->partitions_->at(i);
 
@@ -430,6 +440,10 @@ bool Service::process_discover_partitions(connection *const c, const uint8_t *p,
                                                 resp->pack(log->firstAvailableSeqNum);
                                                 resp->pack(partition_hwmark(it));
                                         } catch (const std::exception &e) {
+						if (trace){
+							SLog("Failed to access log:", e.what(), "\n");
+						}
+
                                                 resp->pack(std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint64_t>::max());
                                                 resp->pack(static_cast<uint8_t>(0xfb));
                                         }

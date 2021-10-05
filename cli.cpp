@@ -141,11 +141,11 @@ int main(int argc, char *argv[]) {
         {
                 switch (r) {
                         case 'S':
-                                tank_client.set_sock_sndbuf_size(strwlen32_t(optarg).AsUint32());
+                                tank_client.set_sock_sndbuf_size(strwlen32_t::make_with_cstr(optarg).AsUint32());
                                 break;
 
                         case 'R':
-                                tank_client.set_sock_rcvbuf_size(strwlen32_t(optarg).AsUint32());
+                                tank_client.set_sock_rcvbuf_size(strwlen32_t::make_with_cstr(optarg).AsUint32());
                                 break;
 
                         case 'r':
@@ -163,7 +163,7 @@ int main(int argc, char *argv[]) {
                                 break;
 
                         case 't': {
-                                const strwlen32_t s(optarg);
+				const auto s= str_view32::make_with_cstr(optarg);
 
                                 topic.clear();
 
@@ -196,7 +196,7 @@ int main(int argc, char *argv[]) {
                         } break;
 
                         case 'p': {
-                                const strwlen32_t s(optarg);
+				const auto s = str_view32::make_with_cstr(optarg);
 
                                 if (!s.IsDigits()) {
                                         Print("Invalid partition '", s, "'. Expected numeric id from 0 upto ", UINT16_MAX, "\n");
@@ -269,7 +269,7 @@ int main(int argc, char *argv[]) {
                 return 1;
         }
 
-        const strwlen32_t cmd(argv[0]);
+	const auto cmd = str_view32::make_with_cstr(argv[0]);
 
         if (topic.empty()) {
                 if (!cmd.Eq(_S("status"))) {
@@ -361,7 +361,7 @@ int main(int argc, char *argv[]) {
                 while ((r = getopt(argc, argv, "+SF:hBT:KdE:s:f:l:LZ:")) != -1) {
                         switch (r) {
 				case 'Z':
-                                        minFetchSize = str_view32(optarg).as_uint32();
+                                        minFetchSize = str_view32::make_with_cstr(optarg).as_uint32();
                                         break;
 
                                 case 'L':
@@ -369,7 +369,7 @@ int main(int argc, char *argv[]) {
                                         break;
 
                                 case 'l':
-                                        msgs_limit = str_view32(optarg).as_uint64();
+                                        msgs_limit = str_view32::make_with_cstr(optarg).as_uint64();
                                         break;
 
                                 case 'f':
@@ -377,7 +377,7 @@ int main(int argc, char *argv[]) {
                                         break;
 
                                 case 'E':
-                                        endSeqNum = strwlen32_t(optarg).AsUint64();
+                                        endSeqNum = strwlen32_t::make_with_cstr(optarg).AsUint64();
                                         break;
 
                                 case 'd':
@@ -389,7 +389,7 @@ int main(int argc, char *argv[]) {
                                         break;
 
                                 case 's':
-                                        defaultMinFetchSize = strwlen32_t(optarg).AsUint64();
+                                        defaultMinFetchSize = strwlen32_t::make_with_cstr(optarg).AsUint64();
                                         if (!defaultMinFetchSize) {
                                                 Print("Invalid fetch size value\n");
                                                 return 1;
@@ -397,7 +397,7 @@ int main(int argc, char *argv[]) {
                                         break;
 
                                 case 'T': {
-                                        str_view32  s(optarg), s2;
+                                        str_view32  s = str_view32::make_with_cstr(optarg), s2;
                                         const char *p = s.data(), *const e = p + s.size();
                                         char c = 0;
 
@@ -484,7 +484,7 @@ int main(int argc, char *argv[]) {
 
                                 case 'F':
                                         displayFields = 0;
-                                        for (const auto it : strwlen32_t(optarg).Split(',')) {
+                                        for (const auto it : strwlen32_t::make_with_cstr(optarg).Split(',')) {
                                                 if (it.Eq(_S("seqnum"))) {
                                                         displayFields |= 1u << uint8_t(Fields::SeqNum);
                                                 } else if (it.Eq(_S("key"))) {
@@ -549,7 +549,7 @@ int main(int argc, char *argv[]) {
                         Print("Expected <sequence-number> with _no additional_arguments_  to begin consuming from. Please see ", app, " consume -h\n");
                         return 1;
                 } else {
-                        const strwlen32_t from(argv[0]);
+			const auto from = str_view32::make_with_cstr(argv[0]);
 
                         if (from.EqNoCase(_S("beginning")) || from.Eq(_S("first")))
                                 next = 0;
@@ -590,7 +590,10 @@ int main(int argc, char *argv[]) {
                                         Print("Requesting from ", next, " ", minFetchSize, "\n");
                                 }
 
-                                pendingResp = tank_client.consume({{topicPartition, {next, minFetchSize}}}, drain_and_exit ? 0 : 8e3, 0);
+                                pendingResp = tank_client.consume({{topicPartition,
+                                                                    {next, minFetchSize}}},
+                                                                  drain_and_exit ? 0 : std::numeric_limits<uint32_t>::max(),
+                                                                  0);
 
                                 if (!pendingResp) {
                                         Print("Unable to issue consume request. Will abort\n");
@@ -599,7 +602,7 @@ int main(int argc, char *argv[]) {
                         }
 
                         try {
-                                tank_client.poll(1e3);
+                                tank_client.poll();
                         } catch (const std::exception &e) {
                                 tank_client.reset();
                                 Timings::Seconds::Sleep(1);
@@ -761,7 +764,7 @@ int main(int argc, char *argv[]) {
                                         buf.clear();
                                         buf.reserve(sum);
                                         for (const auto m : it.msgs) {
-                                                if (m->seqNum > endSeqNum || m->ts >= time_range_end) {
+                                                if (m->seqNum > endSeqNum or m->ts >= time_range_end) {
                                                         should_abort = true;
                                                         break;
                                                 } else if (time_range.Contains(m->ts)) {
@@ -941,7 +944,7 @@ int main(int argc, char *argv[]) {
                                         return 0;
 
                                 case 'o':
-                                        for (const auto &it : strwlen32_t(optarg).Split(',')) {
+                                        for (const auto it : strwlen32_t::make_with_cstr(optarg).Split(',')) {
                                                 strwlen32_t k, v;
 
                                                 std::tie(k, v) = it.Divided('=');
@@ -965,7 +968,7 @@ int main(int argc, char *argv[]) {
                         return 1;
                 }
 
-                const strwlen32_t s(argv[0]);
+		const auto s = str_view32::make_with_cstr(argv[0]);
 
                 if (!s.IsDigits() || s.AsUint32() > UINT16_MAX || !s.AsUint32()) {
                         Print("Invalid total partitions specified\n");
@@ -1007,7 +1010,7 @@ int main(int argc, char *argv[]) {
                 while ((r = getopt(argc, argv, "+hC:S:z:")) != -1) {
                         switch (r) {
                                 case 'z':
-                                        sleepTime = strwlen32_t(optarg).AsUint64();
+                                        sleepTime = strwlen32_t::make_with_cstr(optarg).AsUint64();
                                         break;
 
                                 case 'h':
@@ -1021,7 +1024,7 @@ int main(int argc, char *argv[]) {
                                         return 0;
 
                                 case 'C':
-                                        bundleMsgsSetCntThreshold = strwlen32_t(optarg).AsUint32();
+                                        bundleMsgsSetCntThreshold = strwlen32_t::make_with_cstr(optarg).AsUint32();
                                         if (!IsBetweenRange<size_t>(bundleMsgsSetCntThreshold, 1, TANK_Limits::max_topic_partitions)) {
                                                 Print("Invalid value ", optarg, "\n");
                                                 return 1;
@@ -1029,7 +1032,7 @@ int main(int argc, char *argv[]) {
                                         break;
 
                                 case 'S':
-                                        bundleMsgsSetSizeThreshold = strwlen32_t(optarg).AsUint32();
+                                        bundleMsgsSetSizeThreshold = strwlen32_t::make_with_cstr(optarg).AsUint32();
                                         if (!IsBetweenRange<size_t>(bundleMsgsSetSizeThreshold, 64, 8 * 1024 * 1024)) {
                                                 Print("Invalid value ", optarg, "\n");
                                                 return 1;
@@ -1050,7 +1053,7 @@ int main(int argc, char *argv[]) {
                 }
 
                 try {
-                        dest.set_default_leader(strwlen32_t(argv[0]));
+                        dest.set_default_leader(strwlen32_t::make_with_cstr(argv[0]));
                 } catch (...) {
                         Print("Invalid destination endpoint '", argv[0], "'\n");
                         return 1;
@@ -1469,11 +1472,11 @@ int main(int argc, char *argv[]) {
                 while ((r = getopt(argc, argv, "+s:f:F:hS:Ka:t:v")) != -1) {
                         switch (r) {
                                 case 't':
-                                        ts_advance_step = str_view32(optarg).as_uint64();
+                                        ts_advance_step = str_view32::make_with_cstr(optarg).as_uint64();
                                         break;
 
                                 case 'a':
-                                        seqnum_advance_step = str_view32(optarg).as_uint64();
+                                        seqnum_advance_step = str_view32::make_with_cstr(optarg).as_uint64();
                                         if (!seqnum_advance_step) {
                                                 Print("Invalid seqnum_advance_step\n");
                                         }
@@ -1484,11 +1487,11 @@ int main(int argc, char *argv[]) {
                                         break;
 
                                 case 'S':
-                                        baseSeqNum = strwlen32_t(optarg).AsUint64();
+                                        baseSeqNum = strwlen32_t::make_with_cstr(optarg).AsUint64();
                                         break;
 
                                 case 's':
-                                        bundleSize = strwlen32_t(optarg).AsUint32();
+                                        bundleSize = strwlen32_t::make_with_cstr(optarg).AsUint32();
                                         if (!bundleSize) {
                                                 Print("Invalid bundle size specified\n");
                                                 return 1;
@@ -1580,8 +1583,8 @@ int main(int argc, char *argv[]) {
                                 for (const auto &it : msgs) {
                                         all.emplace_back(TankClient::consumed_msg{
                                             .seqNum  = next,
-                                            .key     = it.key,
                                             .ts      = it.ts,
+                                            .key     = it.key,
                                             .content = it.content,
                                         });
 
@@ -1772,12 +1775,12 @@ int main(int argc, char *argv[]) {
 
                         for (uint32_t i{0}; i != argc; ++i) {
                                 if (asKV) {
-                                        const strwlen32_t s(argv[i]);
-                                        const auto        r = s.divided('=');
+                                        const auto s = str_view32::make_with_cstr(argv[i]);
+                                        const auto r = s.divided('=');
 
                                         msgs.push_back({r.second, ts, {r.first.p, uint8_t(r.first.len)}});
                                 } else {
-                                        msgs.push_back({strwlen32_t(argv[i]), ts, {}});
+                                        msgs.push_back({strwlen32_t::make_with_cstr(argv[i]), ts, {}});
                                 }
 
                                 ts += ts_advance_step;
@@ -1834,7 +1837,7 @@ int main(int argc, char *argv[]) {
                         return 1;
                 }
 
-                const strwlen32_t type(argv[0]);
+		const auto type = str_view32::make_with_cstr(argv[0]);
 
                 if (type.Eq(_S("p2c"))) {
                         // Measure latency when publishing from publisher to broker and from broker to consume
@@ -1849,15 +1852,15 @@ int main(int argc, char *argv[]) {
                                                 break;
 
                                         case 'c':
-                                                cnt = strwlen32_t(optarg).AsUint32();
+                                                cnt = strwlen32_t::make_with_cstr(optarg).AsUint32();
                                                 break;
 
                                         case 's':
-                                                size = strwlen32_t(optarg).AsUint32();
+                                                size = strwlen32_t::make_with_cstr(optarg).AsUint32();
                                                 break;
 
                                         case 'B':
-                                                batchSize = strwlen32_t(optarg).AsUint32();
+                                                batchSize = strwlen32_t::make_with_cstr(optarg).AsUint32();
                                                 break;
 
                                         case 'h':
@@ -1936,7 +1939,7 @@ int main(int argc, char *argv[]) {
                         while ((r = getopt(argc, argv, "+hc:s:RB:")) != -1) {
                                 switch (r) {
                                         case 'B':
-                                                batchSize = strwlen32_t(optarg).AsUint32();
+                                                batchSize = strwlen32_t::make_with_cstr(optarg).AsUint32();
                                                 break;
 
                                         case 'R':
@@ -1945,11 +1948,11 @@ int main(int argc, char *argv[]) {
                                                 break;
 
                                         case 'c':
-                                                cnt = strwlen32_t(optarg).AsUint32();
+                                                cnt = strwlen32_t::make_with_cstr(optarg).AsUint32();
                                                 break;
 
                                         case 's':
-                                                size = strwlen32_t(optarg).AsUint32();
+                                                size = strwlen32_t::make_with_cstr(optarg).AsUint32();
                                                 break;
 
                                         case 'h':
