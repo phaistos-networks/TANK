@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <vector>
 
 int rebuild_segment(const char *path) {
         struct msg final {

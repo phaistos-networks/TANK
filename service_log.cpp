@@ -215,8 +215,12 @@ int Service::reset_partition_log(topic_partition *partition) {
         return 0;
 }
 
+// XXX: if running in cluster-aware mode, we shouldn't open_partition_log() for each discovered partition if TANK_SRV_LAZY_PARTITION_INIT is defined
+// TODO:
 void Service::open_partition_log(topic_partition *partition, const partition_config &conf) {
-        static constexpr bool trace{false};
+	enum {
+		trace = false,
+	};
         const auto            before = Timings::Microseconds::Tick();
         char                  basePath[PATH_MAX];
         auto                  topic       = partition->owner;
@@ -226,22 +230,17 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                           static_cast<int>(topic->name_.size()),
                                           topic->name_.data(), partition->idx);
 
-        TANK_EXPECT(!partition->_log); // already initialized?
+        TANK_EXPECT(not partition->_log); // already initialized?
 
         track_accessed_partition(partition, curTime);
 
         if (trace) {
+		puts("");
                 SLog(ansifmt::bold, ansifmt::color_green, ansifmt::inverse, "OPENING PARTITION ", topic->name(),
-                     "/", partition->idx, " ", ptr_repr(this), ansifmt::reset, "\n");
+                     "/", partition->idx, " ", ptr_repr(this), ", basePath:", basePath,  ansifmt::reset, "\n");
+		puts("");
         }
 
-#ifndef TANK_SRV_LAZY_PARTITION_INIT
-#ifndef LEAN_SWITCH
-        if (!SwitchFS::BuildPath(basePath)) {
-                throw Switch::system_error("Failed to create or access directory ", basePath);
-        }
-#endif
-#endif
 	const auto __before = Timings::Milliseconds::Tick();
 
         DEFER({
@@ -285,13 +284,13 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
 
                 // Scan the partitiond directory
                 for (auto &&name : DirectoryEntries(basePath)) {
-                        if (*name.p == '.') {
+			if (name.front() == '.') {
                                 continue;
                         }
 
                         any_files = true;
 
-                        if (!cluster_aware() && name.Eq(_S("config"))) {
+                        if (not cluster_aware() and  name.Eq(_S("config"))) {
                                 // override
                                 parse_partition_config(Buffer::build(basePath, "/", name).data(), &l->config);
                                 continue;
@@ -369,7 +368,11 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                         SLog("collected ROLog (	baseSeqNum = ", baseSeqNum, ", lastAvailSeqNum = ", lastAvailSeqNum, ", creationTS = ", creationTS, ") r.first = ", r.first, "\n");
                                 }
 
-                                roLogs.push_back({baseSeqNum, lastAvailSeqNum, creationTS});
+                                roLogs.push_back({
+                                    baseSeqNum,
+                                    lastAvailSeqNum,
+                                    creationTS,
+                                });
                         } else if (r.second.Eq(_S("log"))) {
                                 // current, mutable log(segment)
                                 //
@@ -457,7 +460,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                 SLog("Can process swapped files\n");
                         }
 
-                        while (!swapped.empty()) {
+                        while (not swapped.empty()) {
                                 auto name = swapped.back();
 
                                 name.StripSuffix(".swap"_len);
@@ -497,7 +500,11 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                                 SLog("Collected ROLog (	", baseSeqNum, ", ", lastAvailSeqNum, ", ", creationTS, ") ", r.first, "\n");
                                         }
 
-                                        roLogs.push_back({baseSeqNum, lastAvailSeqNum, creationTS});
+                                        roLogs.push_back({
+                                            baseSeqNum,
+                                            lastAvailSeqNum,
+                                            creationTS,
+                                        });
                                 }
 
                                 swapped.pop_back();
@@ -532,6 +539,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                                                               it.creationTS,
                                                                               wideEntyRoLogIndices.count(it.firstAvailableSeqNum));
 
+					assert(not s->fdh);
                                         l->roSegments->emplace_back(s.release());
                                 } catch (const std::exception &e) {
                                         if (trace) {
@@ -552,6 +560,10 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                         TANK_EXPECT(std::is_sorted(l->roSegments->begin(), l->roSegments->end(), [](const auto a, const auto b) noexcept {
                                 return a->baseSeqNum < b->baseSeqNum;
                         }));
+
+			for (auto seg : *l->roSegments) {
+				assert(not seg->fdh);
+			}
                 } else {
                         l->firstAvailableSeqNum = curLogSeqNum;
                         l->roSegments.reset(new std::vector<ro_segment *>());
@@ -571,8 +583,6 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                         }
 
                         l->cur.fdh.reset(new fd_handle(fd));
-                        TANK_EXPECT(l->cur.fdh->use_count() == 2);
-                        l->cur.fdh->Release();
                         l->cur.baseSeqNum = curLogSeqNum;
                         l->cur.fileSize   = lseek64(fd, 0, SEEK_END);
 
@@ -619,6 +629,11 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                         l->cur.index.fd        = fd;
                         l->cur.sinceLastUpdate = l->cur.fileSize == 0 ? UINT32_MAX : 0;
                         l->cur.ra_proxy.ra.reset_to(l->cur.fdh->fd);
+
+                        assert(l->cur.fdh);
+                        assert(l->cur.fdh->fd > 2);
+                        assert(l->cur.ra_proxy.ra.get_fd() > 2);
+                        assert(l->cur.ra_proxy.ra.get_fd() == l->cur.fdh->fd);
 
                         if (const auto size = lseek64(fd, 0, SEEK_END); size > 0) {
                                 // we don't want to deserialize the skiplist for faster startup
@@ -703,7 +718,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
 
                                 DEFER({ free(data); });
 
-                                TANK_EXPECT(fd != -1);
+				assert(fd > 2);
 
                                 const auto     res = pread(fd, data, span, o);
                                 const uint8_t *lastCheckpoint{data};
@@ -835,7 +850,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                 } else {
                         // We 'll just create those on demand in append() (lazily)
                 new_cur_segment:
-                        l->cur.fdh.reset(nullptr);
+                        l->cur.fdh.reset();
                         l->cur.fileSize              = UINT32_MAX;
                         l->cur.index.fd              = -1;
                         l->cur.sinceLastUpdate       = UINT32_MAX;
@@ -844,7 +859,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                         l->cur.index.haveWideEntries = false;
                         l->cur.reset_cache();
 
-                        if (l->roSegments && !l->roSegments->empty()) {
+                        if (l->roSegments and not l->roSegments->empty()) {
                                 // We can still use the last immutable segment
                                 Print(ansifmt::bold, ansifmt::color_red, "Looks like someone deleted the active segment from ", basePath, ansifmt::reset, "\n");
 
@@ -874,9 +889,12 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
 }
 
 topic_partition_log *Service::partition_log(topic_partition *const p) {
+	enum {
+		trace = false,
+	};
         TANK_EXPECT(p);
 
-        if (!p->_log) {
+	if (not p->_log) {
                 open_partition_log(p, p->owner->partitionConf);
         } else {
                 TANK_EXPECT(p->access.ll.empty() == false);
@@ -956,4 +974,26 @@ bool Service::can_accept_messages(const topic_partition *p) const TANK_NOEXCEPT_
         }
 
         return true;
+}
+
+append_res topic_partition_log::append_msg(const time_t ts, const strwlen8_t key, const str_view32 msg) {
+        const std::size_t required = (key.size() + msg.size()) * 24;
+        const uint8_t     msgFlags = key.size() ? uint8_t(TankFlags::BundleMsgFlags::HaveKey) : 0;
+        IOBuffer          _msgBuf; // XXX: Service instance
+        auto             &b{_msgBuf};
+
+        b.clear();
+        b.reserve(required);
+        b.pack(uint8_t(1 << 2)); // bundle flags: 1 message in the bundle
+        b.pack(msgFlags, ts);    // message header: flags and timestamp
+
+        if (key) {
+                b.pack(key.size());
+                b.serialize(key.data(), key.size());
+        }
+
+        b.encode_varuint32(msg.size());
+        b.serialize(msg.data(), msg.size());
+
+        return append_bundle(ts, b.data(), b.size(), 1);
 }

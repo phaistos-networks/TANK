@@ -11,10 +11,12 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                               connection *const    c,
                               const uint8_t *      p,
                               const size_t         _len) {
-        TANK_EXPECT(c);
-        TANK_EXPECT(c->fd > 2);
-        static constexpr bool trace{false};
-        static constexpr bool trace_faults{false};
+        assert(c);
+        assert(c->fd > 2);
+        enum {
+                trace        = true,
+                trace_faults = true,
+        };
         const bool            consume_peer_req = _msg == TankAPIMsgType::ConsumePeer;
         const auto            consume_req      = !consume_peer_req;
         const auto            ca               = cluster_aware();
@@ -33,14 +35,14 @@ bool Service::process_consume(const TankAPIMsgType _msg,
 
         if (_msg == TankAPIMsgType::Consume) {
                 if (unlikely(p + sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint8_t) > end)) {
-                        return shutdown(c, __LINE__);
+                        return shutdown(c);
                 }
 
                 client_version = decode_pod<uint16_t>(p);
                 request_id     = decode_pod<uint32_t>(p);
 
                 if (unlikely(p + p[0] + sizeof(uint8_t) > end)) {
-                        return shutdown(c, __LINE__);
+                        return shutdown(c);
                 }
 
                 const strwlen8_t client_id(reinterpret_cast<const char *>(p) + 1, *p);
@@ -57,7 +59,7 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                 }
         } else {
                 if (unlikely(p + sizeof(uint16_t) > end)) {
-                        return shutdown(c, __LINE__);
+                        return shutdown(c);
                 }
 
                 replica_id     = decode_pod<uint16_t>(p);
@@ -76,7 +78,7 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                              std::distance(end, p + sizeof(uint64_t) + sizeof(uint32_t) + sizeof(uint16_t)), " for header\n");
                 }
 
-                return shutdown(c, __LINE__);
+                return shutdown(c);
         }
 
         const auto     max_wait   = normalized_max_wait(decode_pod<uint64_t>(p));
@@ -141,13 +143,13 @@ bool Service::process_consume(const TankAPIMsgType _msg,
 
         if (unlikely(p + topics_cnt * sizeof(uint8_t) > end)) {
                 put_buf(resp_hdr);
-                return shutdown(c, __LINE__);
+                return shutdown(c);
         }
 
         for (uint32_t i{0}; i < topics_cnt; ++i) {
                 if (unlikely(p + (*p) + sizeof(uint16_t) > end)) {
                         put_buf(resp_hdr);
-                        return shutdown(c, __LINE__);
+                        return shutdown(c);
                 }
 
                 const str_view8 topic_name(reinterpret_cast<const char *>(p) + 1, *p);
@@ -177,7 +179,7 @@ bool Service::process_consume(const TankAPIMsgType _msg,
 
                         if (unlikely(p > end)) {
                                 put_buf(resp_hdr);
-                                return shutdown(c, __LINE__);
+                                return shutdown(c);
                         }
 
                         // Absuse scheme so that we won't have another field for this fault
@@ -193,7 +195,7 @@ bool Service::process_consume(const TankAPIMsgType _msg,
 
                 if (unlikely(p + ((sizeof(uint16_t) + sizeof(uint64_t) + sizeof(uint32_t)) * partitions_cnt) > end)) {
                         put_buf(resp_hdr);
-                        return shutdown(c, __LINE__);
+                        return shutdown(c);
                 }
 
                 for (uint32_t k{0}; k < partitions_cnt; ++k) {
@@ -234,7 +236,7 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                                 } else if (partition_leader != self) {
                                         // ask to redirect for this partition
                                         if (trace) {
-                                                SLog("Different leader\n");
+                                                SLog("Different leader:", partition_leader->ep, "\n");
                                         }
 
                                         resp_hdr->pack(static_cast<uint8_t>(0xfc));
@@ -246,8 +248,9 @@ bool Service::process_consume(const TankAPIMsgType _msg,
 
                         topic_partition_log *log;
 
+			assert(c->fd > 2);
+
                         try {
-                                TANK_EXPECT(c->fd > 2);
 
                                 log = partition_log(partition);
                         } catch (const std::exception &e) {
@@ -255,14 +258,12 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                                         SLog("Failed to partition_log():", e.what(), "\n");
                                 }
 
-                                TANK_EXPECT(c->fd > 2);
-
                                 resp_hdr->pack(static_cast<uint8_t>(0xfb));
                                 respond_now = true;
                                 continue;
                         }
 
-                        TANK_EXPECT(log);
+			assert(log);
 
                         if (trace) {
                                 SLog(ansifmt::color_green, ansifmt::inverse, "> REQUEST FOR partition ", partition_id,
@@ -294,6 +295,10 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                                 const auto ceil_seqnum          = (false == cluster_aware() || _msg != TankAPIMsgType::Consume)
                                                              ? log->lastAssignedSeqNum
                                                              : hwmark;
+
+                                if (trace) {
+                                        SLog("Partition HWM is ", hwmark, "\n");
+                                }
 
                                 switch (res.fault) {
 					case lookup_res::Fault::SystemFault:
@@ -329,7 +334,7 @@ bool Service::process_consume(const TankAPIMsgType _msg,
 
                                                         respond_now = true;
 
-                                                        if (trace || trace_faults) {
+                                                        if (trace) {
                                                                 SLog(ansifmt::color_green, ansifmt::inverse, "> REQUEST FOR partition ", partition_id,
                                                                      ", absSeqNum ", abs_seq_num,
                                                                      " (request:", _msg == TankAPIMsgType::Consume ? "CONSUME" : "CONSUME PEER", ")",
@@ -423,11 +428,10 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                                                 {
                                                         auto p = get_file_contents_payload();
 
-                                                        p->init(res.fdh.get(), range, start, topic);
+                                                        p->init(res.fdh, range, start, topic);
                                                         q->push_back(p);
 
                                                         TANK_EXPECT(p->file_range.fdhandle);
-                                                        TANK_EXPECT(p->file_range.fdhandle->use_count() > 1);
                                                 }
 
                                                 respond_now = true;

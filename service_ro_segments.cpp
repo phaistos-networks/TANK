@@ -1,8 +1,11 @@
 #include "service_common.h"
 
 bool ro_segment::prepare_access(const topic_partition *const partition) {
-        static constexpr const bool trace{false};
-        TANK_EXPECT(partition);
+	enum {
+		trace = false,
+	};
+	
+	assert(partition);
 
         // TODO:
         // if we were unable to prepare_access() earlier, we need to fail explicitly for sometime and retry e.g 1 hour later
@@ -13,6 +16,8 @@ bool ro_segment::prepare_access(const topic_partition *const partition) {
                         SLog(ansifmt::color_green, "Already Initialised", ansifmt::reset, "\n");
                 }
 
+		assert(fdh->fd != -1);
+		assert(fdh->fd > 2);
                 return true;
         }
 
@@ -21,7 +26,7 @@ bool ro_segment::prepare_access(const topic_partition *const partition) {
         int        fd, indexFd{-1};
         char       path[PATH_MAX];
         const auto cleanup = [&]() {
-                fdh.reset(nullptr);
+                fdh.reset();
                 return false;
         };
         const auto    topic         = partition->owner;
@@ -64,17 +69,18 @@ bool ro_segment::prepare_access(const topic_partition *const partition) {
         }
 
         fdh.reset(new fd_handle(fd));
-        TANK_EXPECT(fdh.use_count() == 2);
-        fdh->Release();
+	assert(fdh);
+	assert(fdh->fd > 2);
+	assert(fdh->fd == fd);
 
-        if (fstat64(fd, &st) == -1) {
+        if (fstat64(fd, &st) == -1) [[unlikely]] {
                 Print("Failed to fstat():", strerror(errno));
                 return cleanup();
         }
 
         auto size = st.st_size;
 
-        if (unlikely(size == (off64_t)-1)) {
+        if (size == (off64_t)-1) [[unlikely]] {
                 Print("lseek64() failed: ", strerror(errno));
                 return cleanup();
         }
@@ -182,6 +188,9 @@ bool ro_segment::prepare_access(const topic_partition *const partition) {
                 index.data = nullptr;
         }
 
+	assert(fdh);
+	assert(fdh->fd > 2);
+
         return true;
 }
 
@@ -190,7 +199,9 @@ ro_segment::ro_segment(const uint64_t    absSeqNum,
                        const strwlen32_t base,
                        const uint32_t    creationTS,
                        const bool        wideEntries)
-    : baseSeqNum{absSeqNum}, createdTS{creationTS}, haveWideEntries{wideEntries} {
+    : baseSeqNum{absSeqNum}
+    , createdTS{creationTS}
+    , haveWideEntries{wideEntries} {
         static constexpr const bool trace{false};
 
         if (trace) {
@@ -242,5 +253,6 @@ ro_segment::ro_segment(const uint64_t    absSeqNum,
         }
 #endif
 
+	assert(not fdh);
         this->lastAvailSeqNum = lastAbsSeqNum;
 }

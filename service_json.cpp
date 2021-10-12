@@ -1,5 +1,14 @@
 #include "service_common.h"
+#ifdef __clang__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wtautological-overlap-compare"
+#endif
+
 #include <ext/json/single_include/nlohmann/json.hpp>
+#ifdef __clang__
+#pragma GCC diagnostic pop
+#endif
+
 #include <iostream>
 #include <base64.h>
 #include <boost/sort/spreadsort/spreadsort.hpp>
@@ -9,8 +18,10 @@
 using json = nlohmann::json;
 
 Switch::endpoint Service::decode_endpointb64(const std::string &s) {
-        static constexpr bool trace{false};
-        Switch::endpoint      res{.addr4 = 0, .port = 0};
+        enum {
+                trace = false,
+        };
+        Switch::endpoint res{.addr4 = 0, .port = 0};
 
         if (!s.empty()) {
                 base64_dec_buffer.clear();
@@ -87,7 +98,9 @@ static void decode_replica_ids(const str_view32 s, std::vector<nodeid_t> *out) {
 // set modify_index_limit to 0 if you don't want only the
 // keys that were updated since last time we monitored that keyspace
 static void iterate_consul_keys(const str_view32 tank_ns, const str_view32 cluster_name,
-                                const str_view32 content, const uint64_t modify_index_limit, const str_view32 ns, std::function<void(const str_view32, const uint64_t, const json &)> f) {
+                                const str_view32 content,
+                                const uint64_t   modify_index_limit,
+                                const str_view32 ns, std::function<void(const str_view32, const uint64_t, const json &)> f) {
         if (!content) {
                 return;
         }
@@ -103,17 +116,17 @@ static void iterate_consul_keys(const str_view32 tank_ns, const str_view32 clust
                                         auto       key_str = key.get<std::string>();
                                         str_view32 key_s32(key_str.data(), key_str.size());
 
-                                        if (!key_s32.StripPrefix(tank_ns.data(), tank_ns.size()) || !key_s32.StripPrefix(_S("/clusters/"))) {
+                                        if (not key_s32.StripPrefix(tank_ns.data(), tank_ns.size()) or not key_s32.StripPrefix(_S("/clusters/"))) {
                                                 SLog("Expected <namespace>/clusters/\n");
                                                 continue;
                                         }
 
-                                        if (!key_s32.StripPrefix(cluster_name.data(), cluster_name.size())) {
+                                        if (not key_s32.StripPrefix(cluster_name.data(), cluster_name.size())) {
                                                 SLog("Expected <cluster_name>, instead [", key_s32, "] cluster name [", cluster_name, "]\n");
                                                 continue;
                                         }
 
-                                        if (!key_s32.StripPrefix(_S("/")) || !key_s32.StripPrefix(ns.data(), ns.size()) || !key_s32.StripPrefix(_S("/"))) {
+                                        if (not key_s32.StripPrefix(_S("/")) or not key_s32.StripPrefix(ns.data(), ns.size()) or not key_s32.StripPrefix(_S("/"))) {
                                                 SLog("Epected /", ns, "/ from [", key_s32, "]\n");
                                                 continue;
                                         }
@@ -182,9 +195,9 @@ bool Service::handle_consul_resp_conf_updates(const str_view32 content, const bo
 // where Flags is used to hold the replica_id (there is no need to use the value)
 bool Service::handle_consul_resp_leaders(const str_view32 content) {
         static constexpr bool trace{false};
-        auto &                a              = reusable.json_a;
-        auto &                new_leadership = reusable.new_leadership;
-        auto &                intern_map     = reusable.intern_map;
+        auto                 &a              = reusable.json_a;
+        auto                 &new_leadership = reusable.new_leadership;
+        auto                 &intern_map     = reusable.intern_map;
 
         a.reuse();
         new_leadership.clear();
@@ -299,7 +312,7 @@ bool Service::handle_consul_resp_leaders(const str_view32 content) {
 // that once owned that id is not available now. It's very important
 bool Service::handle_consul_resp_nodes(const str_view32 content) {
         static constexpr bool trace{false};
-        auto &                updates = reusable.nodes_updates;
+        auto                 &updates = reusable.nodes_updates;
 
         if (trace) {
                 SLog("Procesing response from:", content, "\n");
@@ -384,10 +397,10 @@ bool Service::handle_consul_resp_nodes(const str_view32 content) {
 // This is pretty much identical to handle_consul_resp_topology()
 bool Service::handle_consul_resp_isr(const str_view32 content) {
         static constexpr bool trace{false};
-        auto &                a            = reusable.json_a;
-        auto &                updates      = reusable.isr_updates;
-        auto &                all_replicas = reusable.all_replicas;
-        auto &                intern_map   = reusable.intern_map;
+        auto                 &a            = reusable.json_a;
+        auto                 &updates      = reusable.isr_updates;
+        auto                 &all_replicas = reusable.all_replicas;
+        auto                 &intern_map   = reusable.intern_map;
 
         a.reuse();
         updates.clear();
@@ -483,11 +496,13 @@ bool Service::handle_consul_resp_isr(const str_view32 content) {
 }
 
 bool Service::handle_consul_resp_topology(const str_view32 content) {
-        static constexpr bool trace{false};
-        auto &                a            = reusable.json_a;
-        auto &                new_topology = reusable.new_topology;
-        auto &                all_replicas = reusable.all_replicas;
-        auto &                intern_map   = reusable.intern_map;
+	enum {
+		trace = false,
+	};
+        auto                 &a            = reusable.json_a;
+        auto                 &new_topology = reusable.new_topology;
+        auto                 &all_replicas = reusable.all_replicas;
+        auto                 &intern_map   = reusable.intern_map;
 
         a.reuse();
         new_topology.clear();
@@ -498,7 +513,7 @@ bool Service::handle_consul_resp_topology(const str_view32 content) {
                             content, /* consul_state.topology_monitor_modify_index */ 0, "topology"_s32, [&](const auto key, const uint64_t modify_index, const json &v) {
                                     const auto [first, second] = key.divided('/');
 
-                                    if (!first || !second || !second.all_of_digits()) {
+                                    if (not first or not second or not second.all_of_digits()) {
                                             SLog("Expected <token>/<partition> from ", key, "\n");
                                             return;
                                     }
@@ -528,13 +543,16 @@ bool Service::handle_consul_resp_topology(const str_view32 content) {
                                             } else if (it->is_null()) {
                                                     // allowed
                                             } else {
+						    if (trace) {
+							    SLog("Got value, but not string neither null\n");
+						    }
                                                     return;
                                             }
                                     }
 
                                     const auto n = all_replicas.size();
 
-                                    if (!v_str.empty()) {
+                                    if (not v_str.empty()) {
                                             base64_dec_buffer.clear();
 
                                             if (Base64::Decode(reinterpret_cast<const uint8_t *>(v_str.data()), v_str.size(), &base64_dec_buffer) > 0) {
@@ -562,11 +580,16 @@ bool Service::handle_consul_resp_topology(const str_view32 content) {
                                             SLog("Value is unset for ", topic_name, "/", _partition_id, "\n");
                                     }
 
+                                    if (trace) {
+                                            SLog("For ", topic_name, "/", _partition_id, " => replicas [", values_repr(all_replicas.data(), all_replicas.size()), "]\n");
+                                    }
+
                                     new_topology.emplace_back(topology_partition{
                                         .topic     = topic_name,
                                         .partition = static_cast<uint16_t>(_partition_id),
                                         .gen       = modify_index,
-                                        .replicas  = range_base<uint16_t *, uint8_t>{reinterpret_cast<uint16_t *>(n), static_cast<uint8_t>(all_replicas.size() - n)}});
+                                        .replicas  = range_base<uint16_t *, uint8_t>{reinterpret_cast<uint16_t *>(n), static_cast<uint8_t>(all_replicas.size() - n)},
+                                    });
                             });
         // patch
         for (auto &it : new_topology) {
@@ -579,7 +602,7 @@ bool Service::handle_consul_resp_topology(const str_view32 content) {
 
 void Service::process_consul_cluster_configurations(const consul_request *const req, const str_view32 content) {
         simple_allocator a{64 * 1024};
-        auto &           updates = reusable.json_conf_updates;
+        auto            &updates = reusable.json_conf_updates;
 
         updates.clear();
 
@@ -617,7 +640,9 @@ void Service::process_consul_cluster_configurations(const consul_request *const 
 }
 
 void Service::process_ready_consul_resp_impl(connection *c, const str_view32 content) {
-        static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(c);
         TANK_EXPECT(c->is_consul());
         const auto rc  = c->as.consul.cur.resp.rc;
@@ -935,7 +960,7 @@ void Service::process_ready_consul_resp_impl(connection *c, const str_view32 con
                                 SLog("For TryBecomeClusterLeader we got ", rc, " [", content, "], cluster_state.leader_id = ", cluster_state.leader_id, "\n");
                         }
 
-			cancel_timer(&try_become_cluster_leader_timer.node); // just in case
+                        cancel_timer(&try_become_cluster_leader_timer.node); // just in case
 
                         if (rc == 404 && content.BeginsWith(_S("Session id")) && content.EndsWith(_S("not found"))) {
                                 // looks like our session has expired?
@@ -967,7 +992,7 @@ void Service::process_ready_consul_resp_impl(connection *c, const str_view32 con
                                                 register_timer(&try_become_cluster_leader_timer.node);
                                         }
                                 }
-                        } 
+                        }
                 } break;
 
                 case consul_request::Type::ReleaseClusterLeadership:

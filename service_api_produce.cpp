@@ -10,13 +10,13 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
         static constexpr bool trace{false};
 	static constexpr bool trace_faults{false};
         if (unlikely(len < sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint8_t))) {
-                return shutdown(c, __LINE__);
+                return shutdown(c);
         }
 
         const auto *const end = p + len;
 
         if (unlikely(p + (*p) + sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint8_t) >= end)) {
-                return shutdown(c, __LINE__);
+                return shutdown(c);
         }
 
         [[maybe_unused]] const auto ca             = cluster_aware();
@@ -26,7 +26,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
         p += decode_pod<uint8_t>(p); // skip client id
 
         if (unlikely(p + sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint8_t) > end)) {
-                return shutdown(c, __LINE__);
+                return shutdown(c);
         }
 
         [[maybe_unused]] const auto         op_required_acks = decode_pod<uint8_t>(p);
@@ -43,7 +43,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
         for (size_t i{0}; i < topics_cnt; ++i) {
                 if (unlikely(p + (*p) + sizeof(uint8_t) + sizeof(uint8_t) > end)) {
                         put_produce_response(pr);
-                        return shutdown(c, __LINE__);
+                        return shutdown(c);
                 }
 
                 const str_view8 topic_name(reinterpret_cast<const char *>(p) + 1, *p);
@@ -84,12 +84,12 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 
                                 if (unlikely(p > end)) {
                                         put_produce_response(pr);
-                                        return shutdown(c, __LINE__);
+                                        return shutdown(c);
                                 }
 
                                 if (unlikely(!Compression::check_decode_varuint32(p, end))) {
                                         put_produce_response(pr);
-                                        return shutdown(c, __LINE__);
+                                        return shutdown(c);
                                 }
 
                                 const auto bundle_len = Compression::decode_varuint32(p);
@@ -102,7 +102,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 
                                 if (unlikely(p > end)) {
                                         put_produce_response(pr);
-                                        return shutdown(c, __LINE__);
+                                        return shutdown(c);
                                 }
                         }
 
@@ -111,7 +111,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 
                 if (unlikely(p + cnt * sizeof(uint16_t) > end)) {
                         put_produce_response(pr);
-                        return shutdown(c, __LINE__);
+                        return shutdown(c);
                 }
 
                 for (size_t i{0}; i < cnt; ++i) {
@@ -119,7 +119,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 
                         if (unlikely(!Compression::check_decode_varuint32(p, end))) {
                                 put_produce_response(pr);
-                                return shutdown(c, __LINE__);
+                                return shutdown(c);
                         }
 
                         const auto                                bundle_len = Compression::decode_varuint32(p);
@@ -137,7 +137,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 				// (which could have required decompressing it) to determine that.
                                 if (unlikely(p + sizeof(uint64_t) > end)) {
                                         put_produce_response(pr);
-                                        return shutdown(c, __LINE__);
+                                        return shutdown(c);
                                 }
 
                                 first_msg_seq_num = decode_pod<uint64_t>(p);
@@ -159,7 +159,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 				}
 
                                 put_produce_response(pr);
-                                return shutdown(c, __LINE__);
+                                return shutdown(c);
                         }
 
                         pr->participants.emplace_back(produce_response::participant{
@@ -388,7 +388,8 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                         partition->cluster.pending_client_produce_acks_tracker.acknowledged.push(topic_partition::Cluster::pending_ack_bundle_desc{
                             .last_msg_seqnum = bundle_last_msg_seq_num,
                             .next.handle     = log->cur.fdh.get(),
-                            .next.size       = log->cur.fileSize});
+                            .next.size       = log->cur.fileSize,
+                        });
 
                         consider_acknowledged_product_reqs(partition);
 #else

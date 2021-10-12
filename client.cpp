@@ -112,7 +112,7 @@ void TankClient::reset(const bool dtor_context) {
         }
 
         for (auto br_req : reqs) {
-                while (!br_req->partitions_list.empty()) {
+                while (not br_req->partitions_list.empty()) {
                         auto part    = containerof(request_partition_ctx, partitions_list_ll,
                                                 br_req->partitions_list.next);
                         auto api_req = br_req->api_req;
@@ -120,8 +120,8 @@ void TankClient::reset(const bool dtor_context) {
                         TANK_EXPECT(api_req);
 
                         part->partitions_list_ll.detach();
-                        clear_request_partition_ctx(api_req, part);
-                        put_request_partition_ctx(part);
+
+			discard_request_partition_ctx(api_req, part);
                 }
                 put_broker_api_request(br_req);
         }
@@ -204,6 +204,9 @@ void TankClient::reset(const bool dtor_context) {
         all_captured_faults.clear();
         produce_acks_v.clear();
         all_discovered_partitions.clear();
+	_discovered_topologies.clear();
+	all_discovered_topics.clear();
+
         reload_conf_results_v.clear();
         created_topics_v.clear();
         collected_cluster_status_v.clear();
@@ -236,6 +239,8 @@ void TankClient::reset(const bool dtor_context) {
         TANK_EXPECT(all_captured_faults.empty());
         TANK_EXPECT(produce_acks_v.empty());
         TANK_EXPECT(all_discovered_partitions.empty());
+	TANK_EXPECT(all_discovered_topics.empty());
+	TANK_EXPECT(_discovered_topologies.empty());
         TANK_EXPECT(reload_conf_results_v.empty());
         TANK_EXPECT(created_topics_v.empty());
         TANK_EXPECT(collected_cluster_status_v.empty());
@@ -257,7 +262,7 @@ void TankClient::reset(const bool dtor_context) {
 void TankClient::set_leader(const str_view8 topic, const uint16_t partition, const str_view32 endpoint) {
         const auto e = Switch::ParseSrvEndpoint(endpoint, {_S("tank")}, 11011);
 
-        if (!e) {
+        if (not e) [[unlikely]] {
                 throw Switch::data_error("Unable to parse leader endpoint");
         }
 
@@ -265,7 +270,9 @@ void TankClient::set_leader(const str_view8 topic, const uint16_t partition, con
 }
 
 void TankClient::set_leader(const str_view8 topic, const uint16_t partition, const Switch::endpoint e) {
-        static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
 
         if (trace) {
                 SLog(ansifmt::bold, ansifmt::color_brown, "Setting leader for [", topic, "/", partition, "] to ", e, ansifmt::reset, "\n");

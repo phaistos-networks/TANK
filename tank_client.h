@@ -110,30 +110,85 @@ class TankClient {
                 strwlen8_t       topic;
                 uint16_t         partitionId;
                 uint64_t         baseSeqNum;
-                const msg *      msgs;
+                const msg       *msgs;
                 size_t           msgsCnt;
         };
 
         struct discovered_topic_partitions final {
-                uint32_t clientReqId;
+                union {
+                        uint32_t clientReqId;
+                        uint32_t client_req_id;
+                };
 
                 strwlen8_t                                            topic;
                 range_base<std::pair<uint64_t, uint64_t> *, uint16_t> watermarks;
         };
 
+        struct srv_node final {
+                Switch::endpoint ep;
+                uint16_t         partitions;
+                uint8_t          id;
+                bool             available;
+                bool             blocked;
+        };
+
+        struct srv_topic final {
+                str_view8 name;
+                uint16_t  partitions;
+                bool      enabled;
+                uint8_t   repl_factor;
+        };
+
+        struct discovered_srv_topics final {
+                union {
+                        uint32_t clientReqId;
+                        uint32_t client_req_id;
+                };
+
+                struct {
+                        uint32_t   size;
+                        srv_topic *data;
+                } topics;
+        };
+
+        struct discovered_topology final {
+                union {
+                        uint32_t clientReqId;
+                        uint32_t client_req_id;
+                };
+
+                str_view8 cluster_name;
+
+                struct {
+                        uint32_t  size;
+                        srv_node *data;
+                } nodes;
+        };
+
         struct reload_conf_result final {
-                uint32_t  clientReqId;
+                union {
+                        uint32_t clientReqId;
+                        uint32_t client_req_id;
+                };
+
                 str_view8 topic;
                 uint16_t  partition;
         };
 
         struct created_topic final {
-                uint32_t   clientReqId;
+                union {
+                        uint32_t clientReqId;
+                        uint32_t client_req_id;
+                };
+
                 strwlen8_t topic;
         };
 
         struct produce_ack final {
-                uint32_t   clientReqId;
+                union {
+                        uint32_t clientReqId;
+                        uint32_t client_req_id;
+                };
                 strwlen8_t topic;
                 uint16_t   partition;
         };
@@ -171,7 +226,10 @@ class TankClient {
         };
 
         struct partition_content final {
-                uint32_t                             clientReqId;
+                union {
+                        uint32_t clientReqId;
+                        uint32_t client_req_id;
+                };
                 strwlen8_t                           topic;
                 uint16_t                             partition;
                 range_base<consumed_msg *, uint32_t> msgs;
@@ -212,7 +270,10 @@ class TankClient {
         };
 
         struct fault final {
-                uint32_t clientReqId;
+                union {
+                        uint32_t clientReqId;
+                        uint32_t client_req_id;
+                };
 
                 enum class Type : uint8_t {
                         UnknownTopic = 1,
@@ -303,75 +364,102 @@ class TankClient {
         struct request_partition_ctx final {
                 str_view8 topic;
                 // for some types of requests, partition is not used
+                // for some other topic is not used either (e.g SrvStatus)
                 uint16_t     partition;
                 switch_dlist partitions_list_ll;
 
                 // for no_leader, retry chaining where it makes sense
                 request_partition_ctx *_next;
 
-                union Op final {
-                        struct {
-                                uint64_t seq_num;
-                                uint32_t min_fetch_size;
+                // XXX:
+                // clear_request_partition_ctx() shouldn't attempt to clear
+                // as_op.<foo>.response data if state there is not initialized or
+                // the resources associated with it were already released e.g in a materialize impl.
+                //
+                // UPDATE: we are now using response_valid for that
+                struct Op final {
+                        union {
+                                struct {
+                                        uint64_t seq_num;
+                                        uint32_t min_fetch_size;
+
+                                        struct {
+                                                struct {
+                                                        uint64_t seq_num;
+                                                        size_t   min_size;
+                                                } next;
+
+                                                struct {
+                                                        IOBuffer **data;
+                                                        uint32_t   size;
+                                                } used_buffers;
+
+                                                struct {
+                                                        uint32_t cnt;
+
+                                                        union {
+                                                                consumed_msg  small[8];
+                                                                consumed_msg *large; // if (cnt >= sizeof_array(small)) we are going to be allocating
+                                                        } list;
+                                                } msgs;
+
+                                                bool drained;
+                                        } response;
+                                } consume;
 
                                 struct {
                                         struct {
-                                                uint64_t seq_num;
-                                                size_t   min_size;
-                                        } next;
+                                                // we will sort them when we construct the response
+                                                std::vector<std::pair<uint16_t, std::pair<uint64_t, uint64_t>>> *all;
+                                        } response;
+                                } discover_partitions;
+
+                                struct {
+                                        struct {
+                                                std::vector<srv_topic> *all;
+                                        } response;
+                                } discover_topics;
+
+                                struct {
+                                        struct {
+                                                str_view8              cluster_name;
+                                                std::vector<srv_node> *all;
+                                        } response;
+                                } discover_topology;
+
+                                struct {
+                                        struct {
+                                                uint8_t *data;
+                                                uint32_t size;
+                                        } payload;
+
+                                        // for ProduceWithBase requests
+                                        uint64_t first_msg_seqnum;
+                                } produce;
+
+                                struct {
+                                        decltype(std::declval<srv_status>().counts)  counts;
+                                        decltype(std::declval<srv_status>().metrics) metrics;
+                                        time32_t                                     startup_ts;
+                                        uint32_t                                     version;
 
                                         struct {
-                                                IOBuffer **data;
-                                                uint32_t   size;
-                                        } used_buffers;
+                                                char    data[64];
+                                                uint8_t len; // 0 if not cluster aware
+                                        } cluster_name;
+                                } srv_status;
+                        };
 
-                                        struct {
-                                                uint32_t cnt;
-
-                                                union {
-                                                        consumed_msg  small[8];
-                                                        consumed_msg *large; // if (cnt >= sizeof_array(small)) we are going to be allocating
-                                                } list;
-                                        } msgs;
-
-                                        bool drained;
-                                } response;
-                        } consume;
-
-                        struct {
-                                struct {
-                                        // we will sort them when we construct the response
-                                        std::vector<std::pair<uint16_t, std::pair<uint64_t, uint64_t>>> *all;
-                                } response;
-                        } discover_partitions;
-
-                        struct {
-                                struct {
-                                        uint8_t *data;
-                                        uint32_t size;
-                                } payload;
-
-                                // for ProduceWithBase requests
-                                uint64_t first_msg_seqnum;
-                        } produce;
-
-                        struct {
-                                decltype(std::declval<srv_status>().counts)  counts;
-                                decltype(std::declval<srv_status>().metrics) metrics;
-                                time32_t                                     startup_ts;
-                                uint32_t                                     version;
-
-                                struct {
-                                        char    data[64];
-                                        uint8_t len; // 0 if not cluster aware
-                                } cluster_name;
-                        } srv_status;
+                        // UPDATE: 2021-10-11
+                        // now using response_valid to track wether the response is initialized/valid
+                        // so that we will only attempt to release response state if necessary
+                        bool response_valid;
                 } as_op;
 
                 void reset() {
                         partitions_list_ll.reset();
-                        _next                                  = nullptr;
-                        as_op.discover_partitions.response.all = nullptr;
+                        _next                = nullptr;
+                        as_op.response_valid = false;
                 }
         };
 
@@ -379,7 +467,7 @@ class TankClient {
         struct retry_bundle final {
                 switch_dlist           retry_bundles_ll;
                 uint64_t               expiration;
-                api_request *          api_req;
+                api_request           *api_req;
                 eb64_node              node;
                 uint16_t               size;
                 request_partition_ctx *data[0];
@@ -390,7 +478,7 @@ class TankClient {
         //
         // each partition involved with this broker request has a request specific configuration
         struct broker_api_request final {
-                broker *     br;
+                broker      *br;
                 api_request *api_req;
 
                 // we need a distinct id for every such request, and that's encoded
@@ -439,6 +527,8 @@ class TankClient {
                         CreateTopic,
                         ReloadConfig,
                         SrvStatus,
+                        DiscoverTopics,
+                        DiscoverTopology,
                 } type;
                 uint32_t request_id; // client request ID
 
@@ -448,6 +538,7 @@ class TankClient {
                 eb64_node api_reqs_expirations_tree_node;
 
                 switch_dlist broker_requests_list;
+
                 // those are migrated from broker_api_request to api_request
                 // when we get a response for them
                 switch_dlist               ready_partitions_list;
@@ -455,8 +546,16 @@ class TankClient {
                 std::vector<managed_buf *> managed_bufs;
                 bool                       _failed;
 
+                void track_ready_part_req(request_partition_ctx *const req_part) {
+                        assert(req_part);
+                        assert(not req_part->partitions_list_ll.empty());
+
+                        req_part->partitions_list_ll.detach_and_reset();
+                        ready_partitions_list.push_back(&req_part->partitions_list_ll);
+                }
+
                 bool ready() const noexcept {
-                        return retry_bundles_list.empty() && broker_requests_list.empty();
+                        return retry_bundles_list.empty() and broker_requests_list.empty();
                 }
 
                 void set_failed() noexcept {
@@ -474,10 +573,21 @@ class TankClient {
                 // for some types of requests, we may
                 // want to materialize something in-memory
                 // so that when we gc_api_request() it will be destroyed
+		//
+		// XXX: maybe we need a response_valid for materialied_resp like in request_partition_ctx
                 union {
                         struct {
                                 std::pair<uint64_t, uint64_t> *v;
                         } discover_partitions;
+
+                        struct {
+                                std::vector<srv_topic> *v;
+                        } discover_topics;
+
+                        struct {
+                                std::vector<srv_node> *v;
+                                char                  *_cluster_name_ptr;
+                        } discover_topology;
                 } materialized_resp;
 
                 union As final {
@@ -515,8 +625,8 @@ class TankClient {
         // it's really just holds a buffer and the iovecs
         struct broker_outgoing_payload final {
                 broker_outgoing_payload *next;
-                IOBuffer *               b;
-                broker_api_request *     broker_req;
+                IOBuffer                *b;
+                broker_api_request      *broker_req;
 
                 struct IOVECS final {
                         struct iovec data[256];
@@ -525,7 +635,7 @@ class TankClient {
         };
 
         struct buf_llhdr final {
-                IOBuffer * b;
+                IOBuffer  *b;
                 buf_llhdr *next;
         };
 
@@ -539,7 +649,7 @@ class TankClient {
                 uint32_t     capacity_{0};
                 uint32_t     length{0};
                 uint32_t     offset_{0};
-                char *       data_{nullptr};
+                char        *data_{nullptr};
                 // an object may depend on 0+ buffers
                 // a buffer may be a dependncy of 0+ objects
                 switch_dlist users_list{&users_list, &users_list};
@@ -709,13 +819,13 @@ class TankClient {
                                         bool                   any_faults;
                                         bool                   retain_buf;
                                         uint32_t               resp_end_offset;
-                                        broker_api_request *   breq;
+                                        broker_api_request    *breq;
                                         uint32_t               req_id;
                                         uint32_t               hdr_size;
                                         uint8_t                topics_cnt;
                                         uint8_t                topic_partitions_cnt;
-                                        switch_dlist *         br_req_partctx_it;
-                                        buf_llhdr *            used_bufs;
+                                        switch_dlist          *br_req_partctx_it;
+                                        buf_llhdr             *used_bufs;
                                         struct {
                                                 char    data_[256];
                                                 uint8_t len;
@@ -821,14 +931,18 @@ class TankClient {
         uint32_t next_api_request_id{1};
 
         struct broker final {
-                static constexpr size_t max_consequtive_connection_failures{5};
-                uint64_t                blocked_until{0};
-                eb64_node               unreachable_brokers_tree_node{.node.leaf_p = nullptr};
-                connection_handle       ch;
-                const Switch::endpoint  ep;
-                uint8_t                 consequtive_connection_failures{0};
-                switch_dlist            all_brokers_ll{&all_brokers_ll, &all_brokers_ll};
-                uint8_t                 flags{0};
+                enum : size_t {
+                        max_consequtive_connection_failures = 5,
+                };
+                uint64_t               blocked_until{0};
+                eb64_node              unreachable_brokers_tree_node{
+                                 .node.leaf_p = nullptr,
+                };
+                connection_handle      ch;
+                const Switch::endpoint ep;
+                uint8_t                consequtive_connection_failures{0};
+                switch_dlist           all_brokers_ll{&all_brokers_ll, &all_brokers_ll};
+                uint8_t                flags{0};
 
                 enum class Flags : uint8_t {
                         Important = 0,
@@ -1015,6 +1129,8 @@ class TankClient {
         std::vector<fault>                       all_captured_faults;
         std::vector<produce_ack>                 produce_acks_v;
         std::vector<discovered_topic_partitions> all_discovered_partitions;
+        std::vector<discovered_topology>         _discovered_topologies;
+        std::vector<discovered_srv_topics>       all_discovered_topics;
         std::vector<reload_conf_result>          reload_conf_results_v;
         std::vector<created_topic>               created_topics_v;
         std::vector<srv_status>                  collected_cluster_status_v;

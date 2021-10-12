@@ -474,7 +474,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                                 out.Serialize(bundleFlags);
                                         } else {
                                                 out.Serialize(bundleFlags);
-                                                out.SerializeVarUInt32(msgSetSize);
+                                                out.encode_varuint32(msgSetSize);
                                         }
 
                                         const auto first = all[base].seqNum, last = all[i - 1].seqNum;
@@ -485,7 +485,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
 
                                         out.Serialize<uint64_t>(first);
                                         if (msgSetSize != 1) {
-                                                out.SerializeVarUInt32(last - first - 1);
+                                                out.encode_varuint32(last - first - 1);
                                         }
                                 } else {
                                         bundleFlags = 0;
@@ -495,7 +495,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                                 out.Serialize(bundleFlags);
                                         } else {
                                                 out.Serialize(bundleFlags);
-                                                out.SerializeVarUInt32(msgSetSize);
+                                                out.encode_varuint32(msgSetSize);
                                         }
                                 }
 
@@ -544,7 +544,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                         out.Serialize(msgFlags);
 
                                         if (encodeSparseDelta) {
-                                                out.SerializeVarUInt32(m.seqNum - all[k - 1].seqNum - 1);
+                                                out.encode_varuint32(m.seqNum - all[k - 1].seqNum - 1);
                                                 if (trace_msgs) {
                                                         SLog("Serializing delta ", m.seqNum - all[k - 1].seqNum - 1, "\n");
                                                 }
@@ -559,7 +559,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                                 out.Serialize(m.key.data(), m.key.size());
                                         }
 
-                                        out.SerializeVarUInt32(m.content.size());
+                                        out.encode_varuint32(m.content.size());
                                         out.Serialize(m.content.data(), m.content.size());
                                 }
 
@@ -606,7 +606,7 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                                 const auto bundleLength = outFileSize - savedOutFileSize;
                                 const auto _l           = out.size();
 
-                                out.SerializeVarUInt32(bundleLength);
+                                out.encode_varuint32(bundleLength);
                                 const auto bundleLengthReprLen = out.size() - _l;
                                 iov[bundleLengthIOVIdx]        = {(void *)uintptr_t(_l | (1u << 31)), bundleLengthReprLen};
 
@@ -671,8 +671,6 @@ static void compact_partition(topic_partition_log *const log, const char *const 
                         auto newSegment = std::make_unique<ro_segment>(baseSeqNum, lastAvailSeqNum, curSegment->createdTS);
 
                         newSegment->fdh.reset(new fd_handle(logFd));
-                        TANK_EXPECT(newSegment->fdh.use_count() == 2);
-                        newSegment->fdh->Release();
                         newSegment->fileSize           = outFileSize;
                         newSegment->index.data         = reinterpret_cast<const uint8_t *>(mmap(nullptr, index.size(), PROT_READ, MAP_SHARED, fd, 0));
                         newSegment->index.fileSize     = index.size();

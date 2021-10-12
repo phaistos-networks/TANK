@@ -84,35 +84,28 @@ bool TankClient::process_reload_partition_conf(connection *const c, const uint8_
         if (err == 12) {
                 // cluster aware
 		capture_unsupported_request(api_req);
-                clear_request_partition_ctx(api_req, req_part);
-                put_request_partition_ctx(req_part);
+		discard_request_partition_ctx(api_req, req_part);
         } else if (err == 11) {
                 // invalid request
-                clear_request_partition_ctx(api_req, req_part);
-                put_request_partition_ctx(req_part);
+		discard_request_partition_ctx(api_req, req_part);
         } else if (err == 2) {
                 // I/O
 		capture_system_fault(api_req, req_part->topic, req_part->partition);
-                clear_request_partition_ctx(api_req, req_part);
-                put_request_partition_ctx(req_part);
+		discard_request_partition_ctx(api_req, req_part);
         } else if (err == 3) {
                 // failed to apply configuration
-                clear_request_partition_ctx(api_req, req_part);
-                put_request_partition_ctx(req_part);
+		discard_request_partition_ctx(api_req, req_part);
         } else if (err == 0) {
                 // OK
                 api_req->ready_partitions_list.push_back(&req_part->partitions_list_ll);
 	} else if (err == 1) {
 		capture_unknown_topic_fault(api_req, req_part->topic);
-                clear_request_partition_ctx(api_req, req_part);
-                put_request_partition_ctx(req_part);
+		discard_request_partition_ctx(api_req, req_part);
 	} else if (err == 10) {
 		capture_unknown_partition_fault(api_req, req_part->topic, req_part->partition);
-                clear_request_partition_ctx(api_req, req_part);
-                put_request_partition_ctx(req_part);
+		discard_request_partition_ctx(api_req, req_part);
         } else {
-                clear_request_partition_ctx(api_req, req_part);
-                put_request_partition_ctx(req_part);
+		discard_request_partition_ctx(api_req, req_part);
                 IMPLEMENT_ME();
         }
 

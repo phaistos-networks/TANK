@@ -94,7 +94,7 @@ uint32_t TankClient::service_status() {
         api_req->type = api_request::Type::SrvStatus;
 
         req_part->topic.reset();
-        req_part->partition = 0; // no tused
+        req_part->partition = 0; // not used
 
         contexts.emplace_back(std::make_pair(br, req_part));
         assign_req_partitions_to_api_req(api_req.get(), &contexts);

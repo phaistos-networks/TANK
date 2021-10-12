@@ -1,7 +1,9 @@
 #include "service_common.h"
 
 void Service::set_hwmark(topic_partition *p, const uint64_t seqnum) {
-        static constexpr bool trace{false};
+	enum {
+		trace = false,
+	};
         TANK_EXPECT(p);
 
         p->highwater_mark.seq_num = seqnum;
@@ -13,26 +15,34 @@ void Service::set_hwmark(topic_partition *p, const uint64_t seqnum) {
         if (cluster_aware()) {
                 // also track the current segment and file offset
                 if (auto l = p->_log.get()) {
+			if (seqnum >  l->lastAssignedSeqNum) [[unlikely]] {
+				// This can happen if TANK is misconfigured, where for example
+				// a replica(not the leader) of a partition has content (e.g for topic/0 
+				// but thep partition leader of topic/0 doesnt).
+                                Print(ansifmt::bold, ansifmt::color_red, "Attempted to set hwmark to ", seqnum,
+                                      ", whereas, lastAssignedSeqNum = ", l->lastAssignedSeqNum, ansifmt::reset, "\n");
+                                std::abort();
+			}
 
-                        TANK_EXPECT(seqnum <= l->lastAssignedSeqNum);
+                        assert(seqnum <= l->lastAssignedSeqNum);
 
-                        p->highwater_mark.file.handle.reset(l->cur.fdh.get());
-                        p->highwater_mark.file.size = l->cur.fileSize;
+                        p->highwater_mark.file.handle = l->cur.fdh;
+                        p->highwater_mark.file.size   = l->cur.fileSize;
 
                 } else {
-                        p->highwater_mark.file.handle.reset(nullptr);
+                        p->highwater_mark.file.handle.reset();
                         p->highwater_mark.file.size = 0;
                 }
         }
 }
 
 void Service::set_hwmark(topic_partition *p, const uint64_t seqnum, fd_handle *fh, const uint32_t file_size) {
-	static constexpr bool trace{false};
-	TANK_EXPECT(p);
+        static constexpr bool trace{false};
+        TANK_EXPECT(p);
 
-	if (trace) {
-		SLog("Updating hwmark of ", p->owner->name(), "/", p->idx, " to ", seqnum, "\n");
-	}
+        if (trace) {
+                SLog("Updating hwmark of ", p->owner->name(), "/", p->idx, " to ", seqnum, "\n");
+        }
 
         p->highwater_mark.seq_num = seqnum;
 
@@ -46,7 +56,7 @@ uint64_t topic_partition::hwmark() const noexcept {
         return highwater_mark.seq_num;
 }
 
-uint64_t Service::partition_hwmark(topic_partition *p) TANK_NOEXCEPT_IF_NORUNTIME_CHECKS{
+uint64_t Service::partition_hwmark(topic_partition *const p) TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
         TANK_EXPECT(p);
 
         if (cluster_aware()) {
@@ -72,8 +82,8 @@ void Service::update_hwmark(topic_partition *p, const topic_partition::Cluster::
         TANK_EXPECT(hwmark >= before);
 
         if (trace) {
-                SLog(ansifmt::bold, ansifmt::color_red, ansifmt::bgcolor_brown, "Updating HWMark for ", p->owner->name(), "/", p->idx, 
-			" from ", before, " to ", hwmark, ansifmt::reset, "\n");
+                SLog(ansifmt::bold, ansifmt::color_red, ansifmt::bgcolor_brown, "Updating HWMark for ", p->owner->name(), "/", p->idx,
+                     " from ", before, " to ", hwmark, ansifmt::reset, "\n");
         }
 
         // XXX:
@@ -97,15 +107,15 @@ void Service::update_hwmark(topic_partition *p, const uint64_t hwmark) {
         TANK_EXPECT(hwmark >= before);
 
         if (trace) {
-                SLog(ansifmt::bold, ansifmt::color_red, ansifmt::bgcolor_gray, "Updating HWMark for ", p->owner->name(), "/", p->idx, 
-			" from ", before, " to ", hwmark, ansifmt::reset, "\n");
+                SLog(ansifmt::bold, ansifmt::color_red, ansifmt::bgcolor_gray, "Updating HWMark for ", p->owner->name(), "/", p->idx,
+                     " from ", before, " to ", hwmark, ansifmt::reset, "\n");
         }
 
         set_hwmark(p, hwmark);
 
-	if (trace) {
-		SLog("Did set_hwmark(), will consider_highwatermark_update()\n");
-	}
+        if (trace) {
+                SLog("Did set_hwmark(), will consider_highwatermark_update()\n");
+        }
 
         consider_highwatermark_update(p, hwmark);
 }

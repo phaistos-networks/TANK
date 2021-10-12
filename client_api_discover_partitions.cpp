@@ -25,7 +25,7 @@ TankClient::broker_outgoing_payload *TankClient::build_discover_partitions_broke
         [[maybe_unused]] auto broker   = broker_req->br;
         auto                  b        = payload->b;
         [[maybe_unused]] auto api_req  = broker_req->api_req;
-        auto                  req_part = switch_list_entry(request_partition_ctx, partitions_list_ll, broker_req->partitions_list.next);
+        auto                  req_part = containerof(request_partition_ctx, partitions_list_ll, broker_req->partitions_list.next);
 
         TANK_EXPECT(b);
 
@@ -41,7 +41,7 @@ TankClient::broker_outgoing_payload *TankClient::build_discover_partitions_broke
         } else {
                 // for select partitions
                 for (auto it : broker_req->partitions_list) {
-                        const auto req_part = switch_list_entry(request_partition_ctx, partitions_list_ll, it);
+                        const auto req_part = containerof(request_partition_ctx, partitions_list_ll, it);
 
                         b->pack(req_part->partition);
                 }
@@ -57,10 +57,12 @@ TankClient::broker_outgoing_payload *TankClient::build_discover_partitions_broke
 }
 
 bool TankClient::process_discover_partitions(connection *const c, const uint8_t *const content, const size_t len) {
-        static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(c);
         TANK_EXPECT(c->type == connection::Type::Tank);
-        const auto *                p      = content;
+        const auto                 *p      = content;
         [[maybe_unused]] const auto end    = p + len;
         const auto                  req_id = decode_pod<uint32_t>(p);
         const auto                  _it    = pending_brokers_requests.find(req_id);
@@ -76,22 +78,24 @@ bool TankClient::process_discover_partitions(connection *const c, const uint8_t 
 
         auto br_req  = _it->second;
         auto api_req = br_req->api_req;
-        TANK_EXPECT(br_req->partitions_list.empty() == false);
+
+        TANK_EXPECT(not br_req->partitions_list.empty());
+
         auto      it       = br_req->partitions_list.next;
-        auto      req_part = switch_list_entry(request_partition_ctx, partitions_list_ll, it);
+        auto      req_part = containerof(request_partition_ctx, partitions_list_ll, it);
         str_view8 topic_name(reinterpret_cast<const char *>(p) + 1, *p);
 
         p += topic_name.size() + sizeof(uint8_t);
 
         if (topic_name != req_part->topic) {
-		// what is this?
+                // what is this?
                 IMPLEMENT_ME();
         }
 
-	// total partitions
+        // total partitions
         auto cnt = decode_pod<uint16_t>(p);
 
-        if (!cnt) {
+        if (0 == cnt) {
                 if (trace) {
                         SLog("Topic unknown?\n");
                 }
@@ -102,30 +106,30 @@ bool TankClient::process_discover_partitions(connection *const c, const uint8_t 
         }
 
         std::vector<request_partition_ctx *> no_leader, retry;
-        auto                  all = std::make_unique<std::vector<std::pair<uint16_t, std::pair<uint64_t, uint64_t>>>>();
+        auto                                 all = std::make_unique<std::vector<std::pair<uint16_t, std::pair<uint64_t, uint64_t>>>>();
 
-	topic_name = intern_topic(topic_name);
+        topic_name = intern_topic(topic_name);
         if (req_part->partition == std::numeric_limits<uint16_t>::max()) {
                 // first request, where we didn't specify partitions
-		if (trace) {
-			SLog(ansifmt::bold, ansifmt::color_green, ansifmt::inverse, "Got *first* response for discover_partitions", ansifmt::reset, "\n");
-		}
+                if (trace) {
+                        SLog(ansifmt::bold, ansifmt::color_green, ansifmt::inverse, "Got *first* response for discover_partitions", ansifmt::reset, "\n");
+                }
 
                 for (uint16_t i{0}; i < cnt; ++i) {
                         const auto first_available_seqnum = decode_pod<uint64_t>(p);
                         const auto hwmark                 = decode_pod<uint64_t>(p);
 
-                        if (first_available_seqnum == std::numeric_limits<uint64_t>::max() && hwmark == std::numeric_limits<uint64_t>::max()) {
+                        if (first_available_seqnum == std::numeric_limits<uint64_t>::max() and hwmark == std::numeric_limits<uint64_t>::max()) {
                                 // special whatever
                                 const auto reason = decode_pod<uint8_t>(p);
 
-				if (reason == 0xfb) {
-					// system failure, likely transient
-					// for now, we 'll fail this outright
-					capture_system_fault(api_req, topic_name, i);
-					make_api_req_ready(api_req, __LINE__);
-					return true;
-				} else if (reason == 0xfd) {
+                                if (reason == 0xfb) {
+                                        // system failure, likely transient
+                                        // for now, we 'll fail this outright
+                                        capture_system_fault(api_req, topic_name, i);
+                                        make_api_req_ready(api_req, __LINE__);
+                                        return true;
+                                } else if (reason == 0xfd) {
                                         auto req_part = get_request_partition_ctx();
 
                                         if (trace) {
@@ -153,8 +157,8 @@ bool TankClient::process_discover_partitions(connection *const c, const uint8_t 
 
                                         retry.emplace_back(req_part);
                                 } else {
-					IMPLEMENT_ME();
-				}
+                                        IMPLEMENT_ME();
+                                }
                         } else {
                                 if (trace) {
                                         SLog("For partition ", i, " ", first_available_seqnum, ", ", hwmark, "\n");
@@ -165,18 +169,21 @@ bool TankClient::process_discover_partitions(connection *const c, const uint8_t 
                         }
                 }
 
+                // i.e api_req->track_ready_part_req(req_part);
                 req_part->partitions_list_ll.detach_and_reset();
                 api_req->ready_partitions_list.push_back(&req_part->partitions_list_ll);
+
+		req_part->as_op.response_valid = true;
                 req_part->as_op.discover_partitions.response.all = all.release();
         } else {
-		if (trace) {
-			SLog(ansifmt::bold, ansifmt::color_green, ansifmt::inverse, "Got *second* response for discover_partitions", ansifmt::reset, "\n");
-		}
+                if (trace) {
+                        SLog(ansifmt::bold, ansifmt::color_green, ansifmt::inverse, "Got *second* response for discover_partitions", ansifmt::reset, "\n");
+                }
 
                 while (it != &br_req->partitions_list) {
-                        auto       next                   = it->next;
-                        auto       req_part               = switch_list_entry(request_partition_ctx, partitions_list_ll, it);
-                        const auto partition              = req_part->partition;
+                        auto        next      = it->next;
+                        auto *const req_part  = containerof(request_partition_ctx, partitions_list_ll, it);
+                        const auto  partition = req_part->partition;
 
                         TANK_EXPECT(p + sizeof(uint64_t) + sizeof(uint64_t) <= end);
 
@@ -189,45 +196,45 @@ bool TankClient::process_discover_partitions(connection *const c, const uint8_t 
                                 const auto reason = decode_pod<uint8_t>(p);
 
                                 if (reason == 0xfd) {
-					if (trace) {
-						SLog("No leader for ", req_part->topic, "/", req_part->partition, "\n");
-					}
+                                        if (trace) {
+                                                SLog("No leader for ", req_part->topic, "/", req_part->partition, "\n");
+                                        }
 
                                         no_leader.emplace_back(req_part);
                                 } else if (reason == 0xfc) {
                                         const auto addr4 = decode_pod<uint32_t>(p);
                                         const auto port  = decode_pod<uint16_t>(p);
 
-					if (trace) {
-						SLog("New leader for ", req_part->topic, "/", req_part->partition, " ", Switch::endpoint{addr4, port}, "\n");
-					}
+                                        if (trace) {
+                                                SLog("New leader for ", req_part->topic, "/", req_part->partition, " ", Switch::endpoint{addr4, port}, "\n");
+                                        }
 
                                         set_leader(req_part->topic, partition, {addr4, port});
                                         retry.emplace_back(req_part);
                                 } else {
-					IMPLEMENT_ME();
-				}
+                                        IMPLEMENT_ME();
+                                }
                         } else {
-				if (trace) {
-					SLog("For ", req_part->topic, "/", req_part->partition, " {", first_available_seqnum, ", ", hwmark, "}\n");
-				}
+                                if (trace) {
+                                        SLog("For ", req_part->topic, "/", req_part->partition, " {", first_available_seqnum, ", ", hwmark, "}\n");
+                                }
 
                                 set_leader(req_part->topic, partition, br_req->br->ep);
                                 all->emplace_back(std::make_pair(partition, std::make_pair(first_available_seqnum, hwmark)));
+
                                 api_req->ready_partitions_list.push_back(it);
                         }
 
                         it = next;
                 }
 
-                // just have it all in the first partition
+		req_part->as_op.response_valid = true;
                 req_part->as_op.discover_partitions.response.all = all.release();
         }
 
-        unlink_broker_req(br_req, __LINE__);
-        put_broker_api_request(br_req);
+        release_broker_req(br_req);
 
-	update_api_req(api_req, false, &no_leader, &retry);
+        update_api_req(api_req, false, &no_leader, &retry);
 
         try_make_api_req_ready(api_req, __LINE__);
         return true;

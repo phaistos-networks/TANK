@@ -39,13 +39,34 @@
 #include "service.h"
 #include <unordered_set>
 #include <queue>
+
+#ifdef __clang__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wtautological-overlap-compare"
+#endif
+
 #include <ext/json/single_include/nlohmann/json.hpp>
+
+#ifdef __clang__
+#pragma GCC diagnostic pop
+#endif
+
 #include <base64.h>
 #include <compress.h>
 
+std::size_t Service::determine_min_fetch_size_for_new_stream() {
+        // TODO:
+        // We should probably figure out an initial min_fetch_size based on how many streams
+        // are currently active and have a global budget that for all of them. For now, start with a relatively low constant fetch size
+        // for all new streams
+        return 2 * 1024 * 1024;
+}
+
 // generate and schedule a new request for peer `node`, for replication of content for `partitions`
 void Service::replicate_from(cluster_node *const node, topic_partition *const *partitions, std::size_t partitions_cnt) {
-        static constexpr bool trace{false};
+	enum {
+		trace = false,
+	};
 
         TANK_EXPECT(node);
         TANK_EXPECT(partitions);
@@ -89,7 +110,7 @@ void Service::replicate_from(cluster_node *const node, topic_partition *const *p
 
                 c = new_peer_connection(node);
 
-                if (!c) {
+		if (not c) {
                         IMPLEMENT_ME();
                 }
 
@@ -146,13 +167,14 @@ void Service::replicate_from(cluster_node *const node, topic_partition *const *p
                                 next = partition_log(p)->lastAssignedSeqNum + 1;
                         }
 
-                        if (!stream) {
+                        if (not stream) {
                                 // no replication stream for that partition
                                 // we need to track all replication streams so that we can know
                                 // (peer providing us content for that partition, which is usually the leader but when
                                 // the partition leader changes, we need to know that we are not replicating from that node anymore)
                                 stream = p->cluster.rs = get_repl_stream();
                                 stream->partition      = p;
+                                stream->min_fetch_size = determine_min_fetch_size_for_new_stream();
 
                                 cluster_state.replication_streams.push_back(&stream->repl_streams_ll);
                         }
@@ -189,10 +211,12 @@ void Service::replicate_from(cluster_node *const node, topic_partition *const *p
 // Attempt to replicate from a peer content
 // for all partitions this node is a replica of and that peer is their leader
 void Service::try_replicate_from(cluster_node *peer) {
+	enum {
+		trace = false,
+	};
         TANK_EXPECT(peer);
-        static constexpr bool trace{false};
 
-        if (!peer->available()) {
+        if (not peer->available()) {
                 if (trace) {
                         SLog("Will NOT replicate from peer ", peer->id, "@", peer->ep, " because it is not available\n");
                 }
@@ -206,14 +230,14 @@ void Service::try_replicate_from(cluster_node *peer) {
                 SLog("Total partitions to replicate from peer ", partitions ? partitions->size() : 0, "\n");
         }
 
-        if (partitions && !partitions->empty()) {
+        if (partitions and not partitions->empty()) {
                 replicate_from(peer, partitions->data(), partitions->size());
         } else if (auto c = peer->consume_conn.ch.get()) {
                 if (trace) {
                         SLog("Connection to peer is no longer required, no partitions to replicate\n");
                 }
 
-                if (!c->as.consumer.attached_timer.node.node.leaf_p) {
+                if (not c->as.consumer.attached_timer.node.node.leaf_p) {
                         // We no longer need this connection, but we 'll keep it around in case we need it later
                         // We 'll ready a timer so that if we don't need this within some time, we 'll shut it down
 			// TODO: verify again
@@ -235,7 +259,9 @@ void Service::try_replicate_from(cluster_node *peer) {
 // TODO: maybe just iterate cluster_state.local_node.replication_streams
 // and collect all partitions where src is in peers
 void Service::try_replicate_from(const std::unordered_set<cluster_node *> &peers) {
-        static constexpr bool trace{false};
+	enum {
+		trace = false,
+	};
 
         if (trace) {
                 SLog("Will attempt to replicate from ", peers.size(), " cluster peers\n");
@@ -248,8 +274,11 @@ void Service::try_replicate_from(const std::unordered_set<cluster_node *> &peers
 
 // `start`: the partitions to begin replicating from
 // `stop`: the partitions to stop replicating from
-void Service::replicate_partitions(std::vector<std::pair<topic_partition *, cluster_node *>> *start, std::vector<std::pair<topic_partition *, cluster_node *>> *stop) {
-        static constexpr bool trace{false};
+void Service::replicate_partitions(std::vector<std::pair<topic_partition *, cluster_node *>> *start,
+                                   std::vector<std::pair<topic_partition *, cluster_node *>> *stop) {
+	enum {
+		trace =true,
+	};
         auto                  self      = cluster_state.local_node.ref;
         auto &                peers_set = reusable.peers_set;
 
@@ -290,7 +319,7 @@ void Service::replicate_partitions(std::vector<std::pair<topic_partition *, clus
                 }
         }
 
-        if (!peers_set.empty()) {
+        if (not peers_set.empty()) {
                 try_replicate_from(peers_set);
         }
 }
@@ -303,7 +332,9 @@ void Service::process_cluster_config(const str_view32 conf, const uint64_t gen) 
 }
 
 void Service::process_topic_config(const str_view8 topic_name, const str_view32 conf, const uint64_t gen) {
-        static constexpr bool trace{false};
+	enum {
+		trace = false,
+	};
         using json = nlohmann::json;
 
         if (trace) {
@@ -325,6 +356,10 @@ void Service::process_topic_config(const str_view8 topic_name, const str_view32 
                                                         SLog("Ignoring: bogus RF ", rf, "\n");
                                                 }
                                         } else {
+						if (trace) {
+							SLog("RF to ", rf, " for '", topic_name, "'\n");
+						}
+
                                                 if (auto t = topic_by_name(topic_name)) {
                                                         auto _t = cluster_state.updates.get_topic(t);
 
@@ -334,7 +369,9 @@ void Service::process_topic_config(const str_view8 topic_name, const str_view32 
 							SLog("Topic [", topic_name, "] is not defined\n");
 						}
                                         }
-                                }
+                                } else if (trace) {
+					SLog("Unexpected key '", key, "'\n");
+				}
                         }
                 } else if (trace) {
                         SLog("Unexpected response\n");

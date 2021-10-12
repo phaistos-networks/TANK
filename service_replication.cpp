@@ -1,6 +1,10 @@
 #include "service_common.h"
 #include <date.h>
 
+static inline std::size_t aligned_to(const std::size_t v, const std::size_t alignment) noexcept {
+        return (v + alignment - 1) & (-alignment);
+}
+
 #ifndef HWM_UPDATE_BASED_ON_ACKS
 void Service::rebuild_partition_tracked_isrs(topic_partition *const partition) {
 	static constexpr bool trace{false};
@@ -1467,7 +1471,8 @@ bool Service::process_peer_consume_resp(connection *const c, const uint8_t *p, c
                                                     .seqNum = msg_abs_seqnum,
                                                     .ts     = ts,
                                                     .key    = key,
-                                                    .data   = str_view32(reinterpret_cast<const char *>(p), len)});
+                                                    .data   = str_view32(reinterpret_cast<const char *>(p), len),
+                                                });
                                         }
 
                                         p += len; // to next bundle for this partition
@@ -1476,22 +1481,32 @@ bool Service::process_peer_consume_resp(connection *const c, const uint8_t *p, c
 
                 next_partition:
                         if (trace) {
-                                SLog("DONE WITH that partition ", partition_msgs.size(), " collected\n");
+                                SLog("DONE WITH that partition ", partition_msgs.size(), " collected, need span  = ", std::distance(need_from,  need_upto), "\n");
                         }
 
-                        if (!partition) {
+                        if (not partition) {
                                 continue;
                         }
 
-                        TANK_EXPECT(need_from <= need_upto);
-                        static constexpr const size_t alignment     = 4 * 1024;
-                        const auto                    next_min_span = (std::distance(need_from, need_upto) + alignment - 1) & (-alignment); // aligned to 4k
+                        assert(need_from <= need_upto);
 
+
+                        enum : std::size_t {
+                                alignment = 512 * 1024,
+                        };
                         if (auto stream = partition->cluster.rs) {
                                 // there's a replication stream already
                                 // we use it to replicate partition messages from the leader to this node
                                 // update min_fetch_size for the next CONSUME request from that
-                                stream->min_fetch_size = next_min_span;
+                                //
+                                // TODO:
+                                // Service::determine_min_fetch_size_for_new_stream().
+                                // maybe next should also account for that
+                                const auto next = aligned_to(std::max<std::size_t>(stream->min_fetch_size,
+                                                                                   aligned_to(std::distance(need_from, need_upto), 4096)),
+										   alignment);
+
+                                stream->min_fetch_size = next;
                         }
 
                         persist_peer_partitions_content(partition, partition_msgs, first_sparse);

@@ -1,11 +1,11 @@
 #include "service_common.h"
 enum {
-	trace = false,
+        trace = false,
 };
 
 bool Service::process_status(connection *const c, [[maybe_unused]] const uint8_t *p, [[maybe_unused]] const size_t len) {
         if (unlikely(len < sizeof(uint32_t))) {
-                return shutdown(c, __LINE__);
+                return shutdown(c);
         }
 
         auto       resp   = get_buf();
@@ -14,7 +14,7 @@ bool Service::process_status(connection *const c, [[maybe_unused]] const uint8_t
         resp->pack(static_cast<uint8_t>(TankAPIMsgType::Status));
         const auto size_offset = resp->size();
 
-        resp->RoomFor(sizeof(uint32_t));
+        resp->RoomFor(sizeof(uint32_t)); // will patch length later
         resp->pack(req_id);
 
         resp->pack(static_cast<uint8_t>(0)); // global flags
@@ -23,14 +23,16 @@ bool Service::process_status(connection *const c, [[maybe_unused]] const uint8_t
         resp->pack(static_cast<uint32_t>(partitions_v.size()));
         if (cluster_aware()) {
                 resp->pack(static_cast<uint8_t>(0)); // cluster flags
-                resp->pack(cluster_state._name_len).serialize(cluster_state._name, cluster_state._name_len);
-                resp->pack(static_cast<uint32_t>(std::accumulate(cluster_state.all_nodes.begin(), cluster_state.all_nodes.end(), 0, [](const auto prev, const auto node) noexcept { return prev + node->available(); })));
+                resp->pack(cluster_state._name_len)
+                    .serialize(cluster_state._name, cluster_state._name_len);
+                resp->pack(static_cast<uint32_t>(std::accumulate(cluster_state.all_nodes.begin(), cluster_state.all_nodes.end(), 0,
+                                                                 [](const auto prev, const auto node) noexcept { return prev + node->available(); })));
         }
 
         resp->pack(static_cast<uint32_t>(total_open_partitions));
         resp->pack(static_cast<uint32_t>(open_partitions_time));
-	resp->pack(static_cast<time32_t>(startup_ts));
-	resp->pack(static_cast<uint32_t>(TANK_VERSION));
+        resp->pack(static_cast<time32_t>(startup_ts));
+        resp->pack(static_cast<uint32_t>(TANK_VERSION));
 
         *reinterpret_cast<uint32_t *>(resp->At(size_offset)) = resp->size() - size_offset - sizeof(uint32_t);
 
@@ -47,16 +49,16 @@ bool Service::process_status(connection *const c, [[maybe_unused]] const uint8_t
 }
 
 bool Service::process_create_topic(connection *const c, const uint8_t *p, const size_t len) {
-	enum {
-		trace = false,
-	};
+        enum {
+                trace = false,
+        };
 
         if (unlikely(len < sizeof(uint32_t) + sizeof(uint8_t) + sizeof(uint8_t))) {
                 if (trace) {
                         SLog("Unexpected len = ", len, "\n");
                 }
 
-                return shutdown(c, __LINE__);
+                return shutdown(c);
         }
 
         auto             resp      = get_buf();
@@ -78,8 +80,8 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
         p += config.size();
 
         resp->pack(static_cast<uint8_t>(TankAPIMsgType::CreateTopic));
-        const auto                     sizeOffset = resp->size();
-        std::vector<topic_partition *> list;
+        const auto                                    sizeOffset = resp->size();
+        std::vector<std::shared_ptr<topic_partition>> list;
 
         resp->RoomFor(sizeof(uint32_t));
 
@@ -155,18 +157,16 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
                                 };
 
                                 try {
-                                        auto t = Switch::make_sharedref<topic>(topicName, partitionConfig);
+                                        auto t = std::make_shared<topic>(topicName, partitionConfig);
 
-                                        TANK_EXPECT(t->use_count() == 1);
                                         // see Service::open_partition_log()
                                         t->flags |= unsigned(topic::Flags::under_construction);
 
                                         for (uint16_t i{0}; i < partitionsCnt; ++i) {
                                                 try {
-                                                        auto _p = init_local_partition(i, t.get(), partitionConfig, true).release();
+                                                        auto _p = init_local_partition(i, t.get(), partitionConfig, true);
 
-                                                        TANK_EXPECT(_p->use_count() == 1);
-                                                        list.emplace_back(_p);
+                                                        list.emplace_back(std::move(_p));
                                                 } catch (...) {
                                                         cleanup();
                                                         resp->pack(static_cast<uint8_t>(2));
@@ -222,9 +222,7 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
                                         t->register_partitions(list.data(), list.size());
                                         list.clear();
 
-                                        TANK_EXPECT(t->use_count() == 1);
-
-                                        register_topic(t.get());
+                                        register_topic(std::move(t));
                                         resp->pack(static_cast<uint8_t>(0));
                                 } catch (const std::exception &e) {
                                         if (trace) {
@@ -239,10 +237,7 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
         }
 
 l1:
-        while (!list.empty()) {
-                list.back()->Release();
-                list.pop_back();
-        }
+        list.clear();
 
         *reinterpret_cast<uint32_t *>(resp->At(sizeOffset)) = resp->size() - sizeOffset - sizeof(uint32_t);
 
@@ -265,7 +260,7 @@ l1:
 bool Service::process_load_conf(connection *const c, const uint8_t *p, const size_t len) {
         if (len < sizeof(uint32_t) + sizeof(uint8_t) + sizeof(uint16_t)) {
                 track_shutdown(c, __LINE__, "Unexpected length ", len, "\n");
-                return shutdown(c, __LINE__);
+                return shutdown(c);
         }
 
         const auto e         = p + len;
@@ -274,7 +269,7 @@ bool Service::process_load_conf(connection *const c, const uint8_t *p, const siz
 
         if (p + topic_len + sizeof(uint16_t) > e) {
                 track_shutdown(c, __LINE__, "Unexpected length ", len, "\n");
-                return shutdown(c, __LINE__);
+                return shutdown(c);
         }
         const str_view8 topic_name(reinterpret_cast<const char *>(p), topic_len);
 
@@ -346,6 +341,114 @@ bool Service::process_load_conf(connection *const c, const uint8_t *p, const siz
 
         auto payload = get_data_vector_payload();
 
+        payload->buf     = resp;
+        payload->iov_cnt = 1;
+        payload->iov[0]  = {static_cast<void *>(resp->data()), resp->size()};
+
+        q->push_back(payload);
+
+        return try_tx(c);
+}
+
+bool Service::process_discover_topology(connection *const c, const uint8_t *p, const size_t len) {
+        if (len < sizeof(uint8_t)) [[unlikely]] {
+                return shutdown(c);
+        }
+        const auto                  q      = c->outQ ?: (c->outQ = get_outgoing_queue());
+        auto                        resp   = get_buf();
+        const auto                  req_id = decode_pod<uint32_t>(p);
+        [[maybe_unused]] const auto flags  = decode_pod<uint8_t>(p);
+
+        resp->pack(static_cast<uint8_t>(TankAPIMsgType::DiscoverTopology));
+
+        const auto size_offset = resp->size();
+
+        resp->RoomFor(sizeof(uint32_t));
+        resp->pack(req_id);
+
+        if (not cluster_aware()) {
+                resp->pack(static_cast<uint16_t>(std::numeric_limits<uint16_t>::max()));
+        } else {
+                const auto name = cluster_state.name();
+
+                resp->pack(static_cast<uint16_t>(cluster_state.nodes.size()));
+                resp->pack(static_cast<uint8_t>(name.size()));
+                resp->serialize(name.data(), name.size());
+
+                for (const auto &[id, it] : cluster_state.nodes) {
+                        const auto n     = it.get();
+                        uint8_t    flags = 0;
+
+                        if (n->ep) {
+                                flags |= 1 << 0;
+                        }
+
+                        if (n->available_) {
+                                flags |= 1 << 1;
+                        }
+                        if (n->blocked) {
+                                flags |= 1 << 2;
+                        }
+
+                        static_assert(std::is_same_v<std::remove_cv_t<decltype(n->id)>, uint16_t>);
+
+                        resp->pack(n->id, flags);
+                        if (n->ep) {
+                                resp->pack(n->ep.addr4, n->ep.port);
+                        }
+
+                        resp->pack(static_cast<uint16_t>(n->replica_for.size()));
+                }
+        }
+
+        *reinterpret_cast<uint32_t *>(resp->data() + size_offset) = resp->size() - size_offset - sizeof(uint32_t);
+
+        auto payload = get_data_vector_payload();
+
+        q->push_back(payload);
+
+        payload->buf     = resp;
+        payload->iov_cnt = 1;
+        payload->iov[0]  = {static_cast<void *>(resp->data()), resp->size()};
+
+        return try_tx(c);
+}
+
+bool Service::process_discover_topics(connection *const c, const uint8_t *p, const size_t len) {
+        if (len < sizeof(uint32_t) + sizeof(uint8_t)) [[unlikely]] {
+                return shutdown(c);
+        }
+        const auto                  q      = c->outQ ?: (c->outQ = get_outgoing_queue());
+        auto                        resp   = get_buf();
+        const auto                  req_id = decode_pod<uint32_t>(p); // this identifies a broker_api_request in the context of the client
+        [[maybe_unused]] const auto flags  = decode_pod<uint8_t>(p);
+
+        resp->pack(static_cast<uint8_t>(TankAPIMsgType::DiscoverTopics));
+
+        const auto size_offset = resp->size();
+
+        resp->RoomFor(sizeof(uint32_t));
+        resp->pack(req_id);
+
+        resp->pack(static_cast<uint32_t>(topics.size()));
+        resp->pack(static_cast<bool>(cluster_aware()));
+
+        for (const auto &[name, it] : topics) {
+                const auto t = it.get();
+
+                resp->pack(name.size());
+                resp->serialize(name.data(), name.size());
+                resp->pack(t->enabled);
+                resp->pack(static_cast<uint16_t>(t->partitions_ ? t->partitions_->size() : 0));
+                if (cluster_aware()) {
+                        resp->pack(t->cluster.rf_);
+                }
+        }
+
+        *reinterpret_cast<uint32_t *>(resp->data() + size_offset) = resp->size() - size_offset - sizeof(uint32_t);
+
+        auto payload = get_data_vector_payload();
+
         q->push_back(payload);
 
         payload->buf     = resp;
@@ -356,12 +459,12 @@ bool Service::process_load_conf(connection *const c, const uint8_t *p, const siz
 }
 
 bool Service::process_discover_partitions(connection *const c, const uint8_t *p, const size_t len) {
-	enum {
-		trace =true,
-	};
+        enum {
+                trace = false,
+        };
 
         if (unlikely(len < sizeof(uint32_t) + sizeof(uint8_t) + sizeof(uint8_t))) {
-                return shutdown(c, __LINE__);
+                return shutdown(c);
         }
 
         auto             q      = c->outQ ?: (c->outQ = get_outgoing_queue());
@@ -383,7 +486,7 @@ bool Service::process_discover_partitions(connection *const c, const uint8_t *p,
 
         resp->pack(topic_name);
 
-        if (!topic) {
+        if (not topic) {
                 if (trace) {
                         SLog("Unknown topic\n");
                 }
@@ -405,7 +508,7 @@ bool Service::process_discover_partitions(connection *const c, const uint8_t *p,
                                         auto it               = topic->partitions_->at(i);
                                         auto partition_leader = it->cluster.leader.node;
 
-                                        if (!partition_leader) {
+                                        if (not partition_leader) {
                                                 resp->pack(std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint64_t>::max());
                                                 resp->pack(static_cast<uint8_t>(0xfd));
                                         } else if (partition_leader != self) {
@@ -414,10 +517,10 @@ bool Service::process_discover_partitions(connection *const c, const uint8_t *p,
                                                 resp->pack(partition_leader->ep.addr4, partition_leader->ep.port);
                                         } else {
                                                 try {
-                                                        auto log = partition_log(it);
+                                                        auto log = partition_log(it.get());
 
                                                         resp->pack(log->firstAvailableSeqNum);
-                                                        resp->pack(partition_hwmark(it));
+                                                        resp->pack(partition_hwmark(it.get()));
                                                 } catch (const std::exception &e) {
                                                         // this *can* fail
                                                         // so we need to do something appropriate here
@@ -427,22 +530,22 @@ bool Service::process_discover_partitions(connection *const c, const uint8_t *p,
                                         }
                                 }
                         } else {
-				if (trace) {
-					SLog("total_enabled_partitions:", topic->total_enabled_partitions, "\n");
-				}
+                                if (trace) {
+                                        SLog("total_enabled_partitions:", topic->total_enabled_partitions, "\n");
+                                }
 
                                 for (size_t i{0}; i < topic->total_enabled_partitions; ++i) {
                                         auto it = topic->partitions_->at(i);
 
                                         try {
-                                                auto log = partition_log(it);
+                                                auto log = partition_log(it.get());
 
                                                 resp->pack(log->firstAvailableSeqNum);
-                                                resp->pack(partition_hwmark(it));
+                                                resp->pack(partition_hwmark(it.get()));
                                         } catch (const std::exception &e) {
-						if (trace){
-							SLog("Failed to access log:", e.what(), "\n");
-						}
+                                                if (trace) {
+                                                        SLog("Failed to access log:", e.what(), "\n");
+                                                }
 
                                                 resp->pack(std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint64_t>::max());
                                                 resp->pack(static_cast<uint8_t>(0xfb));
@@ -525,11 +628,15 @@ bool Service::process_peer_msg(connection *const c, const uint8_t msg, const uin
 
                 default:
                         SLog("Unexpected message ", unsigned(msg), "\n");
-                        return shutdown(c, __LINE__);
+                        return shutdown(c);
         }
 }
 
 bool Service::process_msg(connection *const c, const uint8_t msg, const uint8_t *const data, const size_t len) {
+	enum {
+		trace = false,
+	};
+
         TANK_EXPECT(c);
         TANK_EXPECT(c->fd > 2);
 
@@ -552,6 +659,12 @@ bool Service::process_msg(connection *const c, const uint8_t msg, const uint8_t 
                 case TankAPIMsgType::Ping:
                         return true;
 
+                case TankAPIMsgType::DiscoverTopology:
+                        return process_discover_topology(c, data, len);
+
+                case TankAPIMsgType::DiscoverTopics:
+                        return process_discover_topics(c, data, len);
+
                 case TankAPIMsgType::DiscoverPartitions:
                         return process_discover_partitions(c, data, len);
 
@@ -565,7 +678,7 @@ bool Service::process_msg(connection *const c, const uint8_t msg, const uint8_t 
                         return process_status(c, data, len);
 
                 default:
-                        return shutdown(c, __LINE__);
+                        return shutdown(c);
         }
 }
 

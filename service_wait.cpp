@@ -113,8 +113,8 @@ bool Service::register_consumer_wait(const TankAPIMsgType _msg, connection *cons
 
                 // initialize wait_ctx_partition
                 out->partition = p;
-                out->fdh       = nullptr;
-                out->seqNum    = 0;
+                out->fdh.reset();
+                out->seqNum = 0;
 
                 // we can't set hwmark_threshold to 0
                 // because 0 is a valid(in this context) sequence number
@@ -148,18 +148,17 @@ bool Service::register_consumer_wait(const TankAPIMsgType _msg, connection *cons
                                 if (trace) {
                                         SLog("No hwmark_fh\n");
                                 }
-                        } else if (hwmark_fh != cur_fh) {
+                        } else if (hwmark_fh.get() != cur_fh) {
                                 // current segment changed since we checkpointed the highwater mark
                                 //
                                 // we 'll fallback to read_from_local()
                                 // this should be very rare
                                 if (trace) {
-                                        SLog("hwmark_fh(", ptr_repr(hwmark_fh), ") != cur_fh(", ptr_repr(cur_fh), ")\n");
+                                        SLog("hwmark_fh(", ptr_repr(hwmark_fh.get()), ") != cur_fh(", ptr_repr(cur_fh), ")\n");
                                 }
                         } else {
                                 // most likely path
                                 out->fdh = hwmark_fh;
-                                out->fdh->Retain();
 
                                 out->range.offset = p->highwater_mark.file.size;
                                 out->range.len    = cur_filesize != std::numeric_limits<uint32_t>::max()
@@ -177,7 +176,7 @@ bool Service::register_consumer_wait(const TankAPIMsgType _msg, connection *cons
                                 SLog("cur_filesize = ", cur_filesize,
                                      ", highwater_mark.file.size = ", p->highwater_mark.file.size,
                                      ", range =", out->range,
-                                     ", fdh = ", ptr_repr(out->fdh), "\n");
+                                     ", fdh = ", ptr_repr(out->fdh.get()), "\n");
                         }
                 }
 
@@ -268,8 +267,8 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, connection *const produceCon
                                              ", seqNum = ", it->seqNum,
                                              ", hwmark = ", p->hwmark(),
                                              ", range = ", it->range,
-                                             " (", it->range.len, ")", ptr_repr(it->fdh),
-                                             " ", it->fdh->use_count(), "\n");
+                                             " (", it->range.len, ")", ptr_repr(it->fdh.get()),
+                                             " ", it->fdh.use_count(), "\n");
                                 }
 
                                 static_assert(sizeof(it->seqNum) == sizeof(uint64_t));
@@ -280,16 +279,10 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, connection *const produceCon
 
                                 sum += it->range.len;
 
-                                const auto __v = it->fdh->use_count();
-                                auto       p   = get_file_contents_payload();
+                                auto p = get_file_contents_payload();
 
                                 p->init(it->fdh, it->range, Timings::Microseconds::Tick(), t);
                                 q->push_back(p);
-
-                                TANK_EXPECT(it->fdh->use_count() == __v + 1);
-
-                                it->fdh->Release(); // was retained in consider_append_res()
-                                it->fdh = nullptr;
                         } else {
                                 response_hdr->pack(static_cast<uint64_t>(0));
                                 response_hdr->pack(p->hwmark());
@@ -388,10 +381,7 @@ void Service::abort_wait_ctx(wait_ctx *const wctx) {
                                 SLog("partition ", p->idx, "\n");
                         }
 
-                        if (it->fdh) {
-                                it->fdh->Release();
-                                it->fdh = nullptr;
-                        }
+			it->fdh.reset();
 
                         response_hdr->pack(static_cast<uint16_t>(p->idx));
                         response_hdr->pack(static_cast<uint8_t>(0));
@@ -465,12 +455,11 @@ void Service::destroy_wait_ctx(wait_ctx *const wctx) {
                 if (it.fdh) {
                         // release strong ref to the segment
                         if (trace) {
-                                SLog("Releasing ", ptr_repr(it.fdh), " ", it.fdh->use_count(), "\n");
+                                SLog("Releasing ", ptr_repr(it.fdh.get()), " ", it.fdh.use_count(), "\n");
                         }
 
-                        it.fdh->Release();
-                        it.fdh = nullptr;
-                }
+			it.fdh.reset();
+		}
 
                 // erase this wait_ctx from partition's waiting list
                 // TODO: optimize me?
@@ -519,7 +508,7 @@ void Service::consider_highwatermark_update(topic_partition *partition, const ui
                 TANK_EXPECT(ctx->partition == partition);
 
                 if (trace) {
-                        SLog("Considering partition wctx, hwmark_threshold = ", ctx->hwmark_threshold, ", fdh = ", ptr_repr(ctx->fdh), "\n");
+                        SLog("Considering partition wctx, hwmark_threshold = ", ctx->hwmark_threshold, ", fdh = ", ptr_repr(ctx->fdh.get()), "\n");
                 }
 
                 if (ctx->hwmark_threshold == std::numeric_limits<uint64_t>::max()) {
@@ -573,9 +562,8 @@ void Service::consider_highwatermark_update(topic_partition *partition, const ui
                                      res.fileOffsetCeiling, "}\n");
                         }
 
-                        ctx->fdh = res.fdh.get();
+                        ctx->fdh = res.fdh;
                         ctx->range.set(res.fileOffset, res.fileOffsetCeiling - res.fileOffset);
-                        ctx->fdh->Retain();
 
                         if (trace) {
                                 SLog("Updated range to ", ctx->range, "\n");
@@ -644,23 +632,17 @@ void Service::consider_append_res(topic_partition *partition, append_res &res, s
                 if (!ctx->fdh) {
                         // not bound to a log segment yet
                         // bind it now
-                        const auto __n = res.fdh->use_count();
-
-                        ctx->fdh = res.fdh.get();
-                        ctx->fdh->Retain();
-
-                        TANK_EXPECT(ctx->fdh->use_count() == __n + 1);
-
+                        ctx->fdh         = res.fdh;
                         ctx->range       = res.dataRange;
                         ctx->seqNum      = res.msgSeqNumRange.offset;
                         it->capturedSize = res.dataRange.len;
 
                         if (trace) {
                                 SLog("Just registered fdh for wait ctx, capturedSize(", it->capturedSize,
-                                     "), range = ", ctx->range, " ptr(fdh)=", ptr_repr(ctx->fdh), " rc=", ctx->fdh->use_count(), ", minBytes = ", it->minBytes, "\n");
+                                     "), range = ", ctx->range, " ptr(fdh)=", ptr_repr(ctx->fdh.get()), " rc=", ctx->fdh.use_count(), ", minBytes = ", it->minBytes, "\n");
                         }
 
-                } else if (res.fdh.get() != ctx->fdh) {
+                } else if (res.fdh.get() != ctx->fdh.get()) {
                         // was bound to a log segment, but that changed because
                         // e.g siwtched to another one
                         have_switched_segment = true;
@@ -674,8 +656,9 @@ void Service::consider_append_res(topic_partition *partition, append_res &res, s
                         ctx->range.len += res.dataRange.size();
                         it->capturedSize += res.dataRange.size();
 
-                        if (trace)
+                        if (trace) {
                                 SLog("Extending range, capturedSize(", it->capturedSize, "), range ", ctx->range, "\n");
+			}
                 }
 
                 if (have_switched_segment) {

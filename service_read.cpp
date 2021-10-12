@@ -15,6 +15,7 @@ static TANKUtil::range_start determine_consume_file_range_start(const uint64_t  
         TANK_EXPECT(fd != -1);
         TANK_EXPECT(ra.get_fd() != -1);
         TANK_EXPECT(ra.get_fd() == fd);
+        TANK_EXPECT(ra.get_fd() > 2);
 
         auto                  o                      = file_offset;
         const auto            ceiling                = file_size;
@@ -45,9 +46,14 @@ static TANKUtil::range_start determine_consume_file_range_start(const uint64_t  
                         // TODO:
                 }
 
-                const auto        tiny_buf   = data.offset;
+                const auto tiny_buf = data.offset;
+
+                // read_ahead::read() _can_ fail and if it does
+                // it returns a zero range
+                assert(tiny_buf);
+
                 const auto *const base_buf   = tiny_buf;
-                const uint8_t *   p          = base_buf;
+                const uint8_t    *p          = base_buf;
                 const auto        bundle_len = Compression::decode_varuint32(p);
 
                 TANK_EXPECT(bundle_len);
@@ -134,12 +140,12 @@ uint32_t determine_consume_file_range_end(uint64_t                              
         enum {
                 trace = false,
         };
-        uint64_t   last_msg_seqnum;
-        int        r = 0;
-        const auto limit = max_size != std::numeric_limits<uint32_t>::max()
-                               ? std::min<uint32_t>(file_size, std::max<uint32_t>(file_offset + max_size, 32))
-                               : file_size;
-	[[maybe_unused]] const auto start_ = file_offset;
+        uint64_t                    last_msg_seqnum;
+        int                         r      = 0;
+        const auto                  limit  = max_size != std::numeric_limits<uint32_t>::max()
+                                                 ? std::min<uint32_t>(file_size, std::max<uint32_t>(file_offset + max_size, 32))
+                                                 : file_size;
+        [[maybe_unused]] const auto start_ = file_offset;
 
         TANK_EXPECT(fd != -1);
         TANK_EXPECT(ra.get_fd() != -1);
@@ -198,7 +204,7 @@ uint32_t determine_consume_file_range_end(uint64_t                              
                 }
 
                 const auto     buf                     = data.offset;
-                const auto *   p                       = buf;
+                const auto    *p                       = buf;
                 const auto     bundle_len              = Compression::decode_varuint32(p);
                 const auto     encoded_bundle_len_len  = std::distance(buf, const_cast<const uint8_t *>(p)); // how many bytes used to varint encode the bundle length
                 const auto     bundle_hdr_flags        = decode_pod<uint8_t>(p);
@@ -264,9 +270,9 @@ uint32_t determine_consume_file_range_end(uint64_t                              
 // We should trade performance for complexitity here
 lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_t maxSize, const uint64_t max_abs_seq_num) {
         // lock is expected to be locked
-	enum {
-		trace = false,
-	};
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(absSeqNum >= cur.baseSeqNum);
 
         if (trace) {
@@ -304,7 +310,7 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
         }
 
         res.fdh = cur.fdh;
-	TANK_EXPECT(res.fdh.get());
+        assert(res.fdh);
 
         if (trace) {
                 SLog("Got top = ", top, " / ", skiplist_size, "\n");
@@ -608,9 +614,9 @@ lookup_res topic_partition_log::read_cur(const uint64_t absSeqNum, const uint32_
 }
 
 lookup_res topic_partition_log::range_for(uint64_t abs_seqnum, const uint32_t max_size, uint64_t max_abs_seq_num) {
-	enum{
-		trace = false,
-	};
+        enum {
+                trace = false,
+        };
 
         if (trace) {
                 puts("\n\n\n\n\n\n");
@@ -686,52 +692,69 @@ lookup_res topic_partition_log::no_immutable_segment(const bool first_bundle_is_
         // a message with seqNum >= abs_seqnum
         //
         // so just point to the first(oldest) segment
-	enum{
-		trace = false,
-	};
-        const auto                  prevSegments = roSegments;
+        enum {
+                trace = false,
+        };
+        const auto prevSegments = roSegments;
 
-        if (!prevSegments->empty()) {
+        if (not prevSegments->empty()) {
                 const auto f = prevSegments->front();
 
                 if (trace) {
                         SLog("Will use first R/O segment\n");
                 }
 
-                return {f->fdh, f->fileSize, f->baseSeqNum, 0, first_bundle_is_sparse};
+                return {
+                    f->fdh,
+                    f->fileSize,
+                    f->baseSeqNum,
+                    0u,
+                    first_bundle_is_sparse,
+                };
         } else {
                 if (trace) {
                         SLog("Will use current segment\n");
                 }
 
-                return {cur.fdh, cur.fileSize, cur.baseSeqNum, 0, first_bundle_is_sparse};
+                return {
+                    cur.fdh,
+                    cur.fileSize,
+                    cur.baseSeqNum,
+                    0u,
+                    first_bundle_is_sparse,
+                };
         }
 }
 
 lookup_res   topic_partition_log::from_immutable_segment(const topic_partition_log *const tpl,
-                                                       ro_segment *const                f,
-                                                       const uint64_t                   abs_seqnum,
-                                                       const uint32_t                   max_size,
-                                                       const uint64_t                   max_abs_seq_num) {
+                                                         ro_segment *const                f,
+                                                         const uint64_t                   abs_seqnum,
+                                                         const uint32_t                   max_size,
+                                                         const uint64_t                   max_abs_seq_num) {
 #pragma mark snap to the offset derived from the first message set in the index with sequence number <= abs_seqnum
-	enum{
-		trace = false,
-	};
+        enum {
+                trace = false,
+        };
 
-        if (unlikely(false == f->prepare_access(tpl->partition))) {
+        assert(f);
+
+        if (not f->prepare_access(tpl->partition)) [[unlikely]] {
                 lookup_res res;
 
                 res.fault                  = lookup_res::Fault::SystemFault;
                 res.fileOffsetCeiling      = 0;
-                res.fdh                    = nullptr;
                 res.absBaseSeqNum          = 0;
                 res.fileOffset             = 0;
                 res.first_bundle_is_sparse = false;
+                res.fdh.reset();
 
                 return res;
         }
 
-        const auto                  skiplist_size = static_cast<int32_t>(f->index.fileSize / sizeof(index_record));
+        assert(f->fdh);
+        assert(f->fdh->fd > 2);
+
+        const auto skiplist_size = static_cast<int32_t>(f->index.fileSize / sizeof(index_record));
         TANK_EXPECT(skiplist_size);
         const auto skiplist_data = reinterpret_cast<const index_record *>(f->index.data);
         int32_t    top           = skiplist_size - 1;
@@ -752,7 +775,7 @@ lookup_res   topic_partition_log::from_immutable_segment(const topic_partition_l
         }
 
         const auto            sl_index    = top;
-        const auto &          skiplist_it = skiplist_data[top >= 0 ? top : 0];
+        const auto           &skiplist_it = skiplist_data[top >= 0 ? top : 0];
         ro_segment_lookup_res res{
             .record = skiplist_it,
             .span   = static_cast<uint32_t>(f->fileSize - skiplist_it.absPhysical)};
@@ -794,9 +817,9 @@ lookup_res   topic_partition_log::from_immutable_segment(const topic_partition_l
                 res.record.absPhysical = rs.file_offset;
                 first_bundle_is_sparse = rs.first_bundle_is_sparse;
 
-		if (trace) {
-			SLog("Determined start {absSeqNum = ", rs.abs_seqnum, ", offset = ", rs.file_offset, "\n");
-		}
+                if (trace) {
+                        SLog("Determined start {absSeqNum = ", rs.abs_seqnum, ", offset = ", rs.file_offset, "\n");
+                }
         }
 
         if (max_abs_seq_num >= f->lastAvailSeqNum) {
@@ -884,9 +907,13 @@ l100:
                      ", absPhysical = ", res.record.absPhysical, ansifmt::reset, " (span = ", size_repr(offsetCeil - res.record.absPhysical), ")\n");
         }
 
-        return {f->fdh, offsetCeil,
-                f->baseSeqNum + res.record.relSeqNum,
-                res.record.absPhysical, first_bundle_is_sparse};
+        return {
+            f->fdh,
+            offsetCeil,
+            f->baseSeqNum + res.record.relSeqNum,
+            res.record.absPhysical,
+            first_bundle_is_sparse,
+        };
 }
 
 // Consider all RO segments. Look for the segment which includes abs_seqnum
@@ -897,13 +924,13 @@ l100:
 // We don't really need to optimize this function as much as we need to care for read_cur()
 // Most clients are likely going to be consuming from the current segment / tailing it, so to speak
 lookup_res topic_partition_log::range_for_immutable_segments(uint64_t abs_seqnum, const uint32_t max_size, uint64_t max_abs_seq_num) {
-	enum{
-		trace = false,
-	};
-        auto                  prevSegments = roSegments.get();
-        const auto            size         = static_cast<int32_t>(prevSegments->size());
-        const auto            data         = prevSegments->data();
-        auto                  top          = size - 1;
+        enum {
+                trace = false,
+        };
+        auto       prevSegments = roSegments.get();
+        const auto size         = static_cast<int32_t>(prevSegments->size());
+        const auto data         = prevSegments->data();
+        auto       top          = size - 1;
 
         for (int32_t btm = 0; btm <= top;) {
                 const auto mid = btm + (top - btm) / 2;
@@ -959,11 +986,14 @@ lookup_res topic_partition_log::range_for_immutable_segments(uint64_t abs_seqnum
 
 // trampoline to topic_partition_log::range_for()
 lookup_res topic_partition::read_from_local([[maybe_unused]] const bool fetch_only_committed, const uint64_t abs_seq_num, const uint32_t fetch_size) {
-	enum{
-		trace = false,
-	};
-        const uint64_t        max_abs_seq_num = fetch_only_committed ? hwmark() : std::numeric_limits<uint64_t>::max();
-        auto                  log             = _log.get();
+        enum {
+                trace = false,
+        };
+        const uint64_t max_abs_seq_num = fetch_only_committed ? hwmark() : std::numeric_limits<uint64_t>::max();
+        auto           log             = _log.get();
+
+        assert(log);
+        assert(_log);
 
         if (trace) {
                 SLog("Fetching log segment for partition ", idx,

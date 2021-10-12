@@ -83,7 +83,7 @@ std::unique_ptr<TankClient::api_request> TankClient::get_api_request(const uint6
         // may hace been invoked outside the reactor loop, and we need now_ms to be correct
         now_ms = Timings::Milliseconds::Tick();
 
-        if (!reusable_api_requests.empty()) {
+        if (not reusable_api_requests.empty()) {
                 req = std::move(reusable_api_requests.back());
                 reusable_api_requests.pop_back();
         } else {
@@ -150,7 +150,7 @@ TankClient::request_partition_ctx *TankClient::get_request_partition_ctx() {
 
         ++rsrc_tracker.request_partition_ctx;
 
-        if (!reusable_request_partition_contexts.empty()) {
+        if (not reusable_request_partition_contexts.empty()) {
                 ctx = reusable_request_partition_contexts.back();
                 reusable_request_partition_contexts.pop_back();
         } else {
@@ -160,6 +160,7 @@ TankClient::request_partition_ctx *TankClient::get_request_partition_ctx() {
                 ctx = static_cast<request_partition_ctx *>(reqs_allocator.Alloc(sizeof(request_partition_ctx)));
 #endif
         }
+
         ctx->reset();
         return ctx;
 }

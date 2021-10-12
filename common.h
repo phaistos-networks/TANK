@@ -7,7 +7,10 @@
 
 #ifdef TANK_RUNTIME_CHECKS
 //#define TANK_EXPECT(...) EXPECT(__VA_ARGS__)
-#define TANK_EXPECT(...) do { assert(__VA_ARGS__); } while (0)
+#define TANK_EXPECT(...)             \
+        do {                         \
+                assert(__VA_ARGS__); \
+        } while (0)
 #define TANK_NOEXCEPT_IF_NORUNTIME_CHECKS
 #else
 #define TANK_EXPECT(...) \
@@ -18,7 +21,7 @@
 #endif
 
 #define MAKE_TANK_RELEASE(major, minor) ((major)*100 + (minor))
-#define TANK_VERSION (MAKE_TANK_RELEASE(3, 7))
+#define TANK_VERSION (MAKE_TANK_RELEASE(3, 8))
 
 namespace TankFlags {
         enum class BundleMsgFlags : uint8_t {
@@ -31,7 +34,7 @@ namespace TankFlags {
 namespace TANK_Limits {
         static constexpr const std::size_t max_topic_partitions{65530};
         static constexpr const std::size_t max_topic_name_len{64};
-}
+} // namespace TANK_Limits
 
 enum class TankAPIMsgType : uint8_t {
         Produce               = 0x1,
@@ -55,6 +58,8 @@ enum class TankAPIMsgType : uint8_t {
         ReloadConf         = 0x8,
         ConsumePeer        = 0x9,
         Status             = 10,
+        DiscoverTopics     = 0xb,
+        DiscoverTopology   = 0xc,
 };
 
 namespace TANKUtil {
@@ -63,7 +68,7 @@ namespace TANKUtil {
                 return t;
         }
         template <typename T, typename... P>
-        inline auto minimum(const T &t, const P &... p) noexcept {
+        inline auto minimum(const T &t, const P &...p) noexcept {
                 using res_type = std::common_type_t<T, P...>;
 
                 return std::min(res_type(t), res_type(minimum(p...)));
@@ -93,10 +98,10 @@ namespace TANKUtil {
                 return end >= start ? end - start : 0;
         }
 
-	inline void safe_close(int fd) {
-		TANK_EXPECT(fd > 2);
-		close(fd);
-	}
+        inline void safe_close(int fd) {
+                TANK_EXPECT(fd > 2);
+                close(fd);
+        }
 
         // saniy check
         static_assert(time32_delta(0, 10) == 10);

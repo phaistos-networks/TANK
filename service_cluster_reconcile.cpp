@@ -178,7 +178,9 @@ void Service::reconcile_leadership(std::vector<partition_leader_update> *new_lea
 // which is the initial request to conf-updates, where we only need the ModifyIndex for each key
 // as a subsequent request RetrieveConfigs will fetch them all anyway
 void Service::consider_updated_consul_configs(const std::vector<std::pair<str_view8, uint64_t>> &updates, const bool no_apply) {
-        static constexpr bool trace{false};
+	enum {
+		trace = false,
+	};
 
         if constexpr (trace) {
                 SLog("From /conf-updates/ ", updates.size(), ", no_apply = ", no_apply, "\n");
@@ -228,7 +230,7 @@ void Service::consider_updated_consul_configs(const std::vector<std::pair<str_vi
                         }
 
                         if constexpr (trace) {
-                                SLog("Topic configuation updated for ", it.first, "\n");
+                                SLog("Topic configuration updated for ", it.first, "\n");
                         }
 
                         t->cluster.last_update_gen = it.second;
@@ -248,7 +250,9 @@ void Service::consider_updated_consul_configs(const std::vector<std::pair<str_vi
 // (topic, partition, gen, replica...)
 // TODO: https://github.com/phaistos-networks/TANK/issues/70
 void Service::reconcile_cluster_topology(std::vector<topology_partition> *const new_topology) {
-        static constexpr bool                                           trace{false};
+	enum {
+		trace = false,
+	};
         partition_config                                                pc;
         char                                                            topic_path[PATH_MAX];
         bool                                                            any{false};
@@ -280,14 +284,15 @@ void Service::reconcile_cluster_topology(std::vector<topology_partition> *const 
                 const auto tn = p->topic;
                 uint16_t   partitions{0};
 
-                if (!is_valid_topic_name(tn)) {
+                if (not is_valid_topic_name(tn)) {
+			// bogus?
                         if (trace) {
                                 SLog("Ignoring invalid topic name\n");
                         }
 
                         do {
                                 //
-                        } while (++p < e && p->topic == tn);
+                        } while (++p < e and p->topic == tn);
                         continue;
                 }
 
@@ -312,7 +317,7 @@ void Service::reconcile_cluster_topology(std::vector<topology_partition> *const 
 
                                 do {
                                         //
-                                } while (++p < e && p->topic == tn);
+                                } while (++p < e and p->topic == tn);
                                 break;
                         }
 
@@ -342,7 +347,7 @@ void Service::reconcile_cluster_topology(std::vector<topology_partition> *const 
                         cluster_state.updates.get_topic(t)->set_enabled();
                         retained_topics.insert(t);
 
-                        if (was_enabled != t->enabled || t->total_enabled_partitions != partitions) {
+                        if (was_enabled != t->enabled or t->total_enabled_partitions != partitions) {
                                 // for simplicity sake, include all
                                 // will also include partitions in updates
                                 if (trace) {
@@ -351,7 +356,7 @@ void Service::reconcile_cluster_topology(std::vector<topology_partition> *const 
                                 }
 
                                 for (auto p : *topic_partitions) {
-                                        cluster_state.updates.get_partition(p);
+                                        cluster_state.updates.get_partition(p.get());
                                 }
 
                                 any = true;
@@ -394,11 +399,7 @@ void Service::reconcile_cluster_topology(std::vector<topology_partition> *const 
                                 }
                         }
 
-                        auto new_topic = Switch::make_sharedref<topic>(topic_name, pc);
-
-                        TANK_EXPECT(new_topic->use_count() == 1);
-			TANK_EXPECT(new_topic->cluster.rf_ > 0);
-
+                        auto new_topic = std::make_shared<topic>(topic_name, pc);
 
                         pending_partitions.emplace_back(new_topic.get(), range_base<uint16_t, uint16_t>{0, partitions});
                         pending_reg_topics.emplace_back(std::move(new_topic));
@@ -406,12 +407,16 @@ void Service::reconcile_cluster_topology(std::vector<topology_partition> *const 
                 }
         }
 
-        std::mutex                                                              collected_lock;
-        std::vector<std::pair<topic *, Switch::shared_refptr<topic_partition>>> collected;
-        std::vector<topic_partition *>                                          partitions, all_partitions;
+        std::mutex                                                        collected_lock;
+        std::vector<std::pair<topic *, std::shared_ptr<topic_partition>>> collected;
+        std::vector<std::shared_ptr<topic_partition>>                     partitions;
 
         for (auto &it : pending_partitions) {
-                auto [topic, range] = it;
+                auto [topic, range]       = it;
+                const auto topic_name     = topic->name();
+                const auto topic_path_len = snprintf(topic_path, sizeof(topic_path), "%.*s/%.*s/",
+                                                     basePath_.size(), basePath_.data(),
+                                                     topic_name.size(), topic_name.data());
 
                 if (trace) {
                         SLog("Pending for ", topic->name(), " ", range, "\n");
@@ -422,7 +427,43 @@ void Service::reconcile_cluster_topology(std::vector<topology_partition> *const 
                         // we won't initialize it's log unless we become a replica
                         auto p = define_partition(partition, topic);
 
-                        TANK_EXPECT(p->use_count() == 1);
+                        // the partition dataset may already be available locally e.g for
+                        // when migrating from a single node to a cluster-aware configureation
+#ifndef TANK_SRV_LAZY_PARTITION_INIT
+                        try {
+                                open_partition_log(p.get(), pc);
+                        } catch (...) {
+                                throw;
+                        }
+#else
+			// we still need to create the directories so that open_partition_log() won't fail
+                        sprintf(topic_path + topic_path_len, "%u", partition);
+
+                        if (-1 == mkdir(topic_path,  S_IRWXU | S_IRWXG) and EEXIST != errno) {
+                                IMPLEMENT_ME();
+                        }
+#endif
+
+#if 0
+                        // 2021-10-07
+                        // if we are the cluster leadder, then we need to initialize the partition's highwater_mark.seq_num (see topic_partition::hwmark() impl.)
+                        // from partition_log(p)->lastAssignedSeqNum;
+                        // if the partition exists already on disk(this is important for transitioning from single node to cluster-aware)
+			// (actually, we don't need to do it here)
+                        if (cluster_state.leader_self()) {
+                                if (trace) {
+                                        SLog("Will need to update hwmark from disk\n");
+                                }
+
+                                const auto v = partition_log(p.get())->lastAssignedSeqNum;
+
+                                if (trace) {
+                                        SLog("lastAssignedSeqNum = ", v, "\n");
+                                }
+
+                                p->highwater_mark.seq_num = v;
+                        }
+#endif
 
                         collected_lock.lock();
                         collected.emplace_back(topic, std::move(p));
@@ -438,12 +479,11 @@ void Service::reconcile_cluster_topology(std::vector<topology_partition> *const 
                 auto topic = collected[i].first;
 
                 do {
-                        auto p = collected[i].second.release();
+                        auto p = collected[i].second;
 
-                        all_partitions.emplace_back(p);
-                        partitions.emplace_back(p);
-                        cluster_state.updates.get_partition(p);
-                } while (++i < collected.size() && collected[i].first == topic);
+                        cluster_state.updates.get_partition(p.get());
+                        partitions.emplace_back(std::move(p));
+                } while (++i < collected.size() and collected[i].first == topic);
 
                 if constexpr (trace) {
                         SLog("NEW: For topic ", topic->name_, " ", partitions.size(), " new partitions\n");
@@ -461,7 +501,7 @@ void Service::reconcile_cluster_topology(std::vector<topology_partition> *const 
                 }
 
                 retained_topics.insert(it.get());
-                register_topic(it.release());
+                register_topic(std::move(it));
                 any = true;
         }
 
@@ -470,7 +510,8 @@ void Service::reconcile_cluster_topology(std::vector<topology_partition> *const 
         for (auto &it : topics) {
                 const auto topic = it.second.get();
 
-                if ((topic->enabled || topic->total_enabled_partitions) && !retained_topics.count(topic)) {
+                if ((topic->enabled or topic->total_enabled_partitions) and
+                    not retained_topics.count(topic)) {
                         // topic was previously defined, but is no longer in the topology tree
                         // first make sure total enabled partitions of that topic is reset to 0 so that we can capture whatever in updates
                         auto _t = cluster_state.updates.get_topic(topic);
@@ -492,13 +533,17 @@ void Service::reconcile_cluster_topology(std::vector<topology_partition> *const 
                 const auto tn    = p->topic;
                 auto       topic = topic_by_name(tn);
 
-                if (!topic) {
+                if (not topic) {
                         // likely is_valid_topic_name() failed for that topic name earlier
                         do {
                                 //
-                        } while (++p < e && p->topic == tn);
+                        } while (++p < e and p->topic == tn);
                         continue;
                 }
+
+		if (trace) {
+			SLog("Considering topology update for '", tn, "' for replicas updates\n");
+		}
 
                 do {
                         const auto p_id     = p->partition;
@@ -519,16 +564,28 @@ void Service::reconcile_cluster_topology(std::vector<topology_partition> *const 
                                                 }
                                         }
 
+#ifdef HAVE_SWITCH
+                                        if (trace) {
+                                                SLog("Updated replicas set to [", values_repr_with_lambda(nodes.data(), nodes.size(), [](const auto it) noexcept { return it->id; }), "]\n");
+                                        }
+#endif
+
                                         part->set_replicas(nodes.data(), nodes.size());
                                         p->cluster.replicas.last_update_gen = gen;
                                         any                                 = true;
                                 } else if constexpr (trace) {
                                         // SLog("Ignoring, gen didn't change for ", tn, "/", p_id, "\n");
                                 }
-                        }
+                        } else if (trace) {
+				SLog("Unable to lookup partition ", p_id, " of topic ", tn, "\n");
+			}
 
-                } while (++p < e && p->topic == tn);
+                } while (++p < e and p->topic == tn);
         }
+
+	if (trace) {
+		SLog("any updates:", any, "\n");
+	}
 
         if (any) {
                 schedule_cluster_updates_apply(__FUNCTION__);

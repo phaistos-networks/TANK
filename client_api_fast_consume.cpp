@@ -290,8 +290,7 @@ bool TankClient::process_consume_content_impl(connection *const c) {
                                         auto req_part = containerof(request_partition_ctx, partitions_list_ll, resp.br_req_partctx_it);
                                         auto next     = resp.br_req_partctx_it->next;
 
-                                        clear_request_partition_ctx(api_req, req_part);
-                                        put_request_partition_ctx(req_part);
+					discard_request_partition_ctx(api_req, req_part);
 
                                         resp.br_req_partctx_it = next;
                                 } while (resp.br_req_partctx_it != &br_req->partitions_list &&
@@ -349,8 +348,7 @@ bool TankClient::process_consume_content_impl(connection *const c) {
                                 TANK_EXPECT(resp.br_req_partctx_it != &br_req->partitions_list);
                                 auto req_part = containerof(request_partition_ctx, partitions_list_ll, resp.br_req_partctx_it);
 
-                                clear_request_partition_ctx(api_req, req_part);
-                                put_request_partition_ctx(req_part);
+				discard_request_partition_ctx(api_req, req_part);
 
                                 resp.br_req_partctx_it = next;
                                 resp.any_faults        = true;
@@ -366,8 +364,7 @@ bool TankClient::process_consume_content_impl(connection *const c) {
                                 req_part->_next  = resp.no_leader_l;
                                 resp.no_leader_l = req_part;
 
-                                clear_request_partition_ctx(api_req, req_part);
-                                put_request_partition_ctx(req_part);
+				discard_request_partition_ctx(api_req, req_part);
 
                                 resp.br_req_partctx_it = next;
                                 goto parse_partition;
@@ -385,8 +382,7 @@ bool TankClient::process_consume_content_impl(connection *const c) {
                                 req_part->_next = resp.retry_l;
                                 resp.retry_l    = req_part;
 
-                                clear_request_partition_ctx(api_req, req_part);
-                                put_request_partition_ctx(req_part);
+				discard_request_partition_ctx(api_req, req_part);
 
                                 resp.br_req_partctx_it = next;
                                 goto parse_partition;
@@ -427,8 +423,7 @@ bool TankClient::process_consume_content_impl(connection *const c) {
                                 TANK_EXPECT(resp.br_req_partctx_it != &br_req->partitions_list);
                                 auto req_part = containerof(request_partition_ctx, partitions_list_ll, resp.br_req_partctx_it);
 
-                                clear_request_partition_ctx(api_req, req_part);
-                                put_request_partition_ctx(req_part);
+				discard_request_partition_ctx(api_req, req_part);
 
                                 resp.br_req_partctx_it = next;
                                 resp.any_faults        = true;

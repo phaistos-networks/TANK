@@ -236,6 +236,8 @@ int main(int argc, char *argv[]) {
                                 Print(Buffer{}.append(align_to(5), "mirror"_s32, align_to(32), "Mirror partitions across TANK nodes"_s32), "\n");
                                 Print(Buffer{}.append(align_to(5), "reload_config"_s32, align_to(32), "Reload per-topic configuration"_s32), "\n");
                                 Print(Buffer{}.append(align_to(5), "status"_s32, align_to(32), "Displays service status"_s32), "\n");
+                                Print(Buffer{}.append(align_to(5), "discover_topics"_s32, align_to(32), "Enumerares created topics "_s32), "\n");
+                                Print(Buffer{}.append(align_to(5), "topology"_s32, align_to(32), "Displys cluster nodes topology "_s32), "\n");
                                 return 0;
 
                         default:
@@ -248,9 +250,9 @@ int main(int argc, char *argv[]) {
         argv += optind;
 
         try {
-                if (endpoint.size())
+		if (not endpoint.empty()) {
                         tank_client.set_default_leader(endpoint.AsS32());
-                else {
+                } else {
                         // By default, access local instance
                         tank_client.set_default_leader(":11011"_s32);
                 }
@@ -264,7 +266,7 @@ int main(int argc, char *argv[]) {
                 return 1;
         }
 
-        if (!argc) {
+        if (0 == argc) {
                 Print("Command was not specified. Please run ", app, " for a list of all available commands.\n");
                 return 1;
         }
@@ -272,7 +274,9 @@ int main(int argc, char *argv[]) {
 	const auto cmd = str_view32::make_with_cstr(argv[0]);
 
         if (topic.empty()) {
-                if (!cmd.Eq(_S("status"))) {
+                if (not cmd.Eq(_S("status")) and
+                    not cmd.Eq(_S("discover_topics")) and
+                    not cmd.Eq(_S("topology"))) {
                         Print("Topic was not specified. Use ", ansifmt::bold, "-t", ansifmt::reset, " to specify the topic name\n");
                         return 1;
                 }
@@ -871,6 +875,105 @@ int main(int argc, char *argv[]) {
                         Print(dotnotation_repr(totalMsgs), " messages consumed in ", duration_repr(Timings::Microseconds::Since(b)), ", ", size_repr(sumBytes), " consumed\n");
                 }
 
+        } else if (cmd.Eq(_S("topology"))) {
+                optind = 0;
+
+                for (int r; (r = getopt(argc, argv, "h")) != -1;) {
+                        switch (r) {
+                                case 'h':
+                                        Print("Usage ", app, " topology\n");
+                                        Print(Buffer{}.append(left_aligned(5, "Display cluster topology"_s32), "\n"));
+                                        return 0;
+
+                                default:
+                                        return 1;
+                        }
+                }
+
+                argc -= optind;
+                argv += optind;
+
+                const auto req_id = tank_client.discover_topology();
+
+                if (0 == req_id) {
+                        Print("Unable to schedule request\n");
+                        return 0;
+                }
+
+                while (tank_client.should_poll()) {
+                        tank_client.poll();
+
+                        for (const auto &it : tank_client.faults()) {
+                                consider_fault(it);
+                        }
+
+                        if (tank_client.discovered_topologies().empty()) {
+                                continue;
+                        }
+
+                        const auto &res = tank_client.discovered_topologies().front();
+
+                        if (0 == res.nodes.size) {
+                                Print("Node is operating in stand-alone mode\n");
+                                return 0;
+                        }
+
+                        Print(Buffer{}.append("ID"_s32, align_to(8), "Available"_s32, align_to(20), "Blocked"_s32, align_to(32), "Endpoint"_s32, "\n"));
+
+                        for (std::size_t i = 0; i < res.nodes.size; ++i) {
+                                const auto &it = res.nodes.data[i];
+
+                                Print(Buffer{}.append(it.id, align_to(8), it.available ? 'Y' : 'N', align_to(20), it.blocked ? 'Y' : 'N', align_to(32), it.ep, '\n'));
+                        }
+                }
+
+                return 0;
+        } else if (cmd.Eq(_S("discover_topics"))) {
+                optind = 0;
+
+                for (int r; (r = getopt(argc, argv, "h")) != -1;) {
+                        switch (r) {
+                                case 'h':
+                                        Print("Usage ", app, " discover_topics\n");
+                                        Print(Buffer{}.append(left_aligned(5, "Enumerates cluster topics"_s32), "\n"));
+                                        return 0;
+
+                                default:
+                                        return 1;
+                        }
+                }
+
+                argc -= optind;
+                argv += optind;
+
+		const auto req_id = tank_client.discover_topics();
+
+		if (0 == req_id) {
+			Print("Unable to schedule request\n");
+			return 1;
+		}
+
+                while (tank_client.should_poll()) {
+                        tank_client.poll();
+
+                        for (const auto &it : tank_client.faults()) {
+                                consider_fault(it);
+                        }
+
+                        if (tank_client.discovered_topics().empty()) {
+                                continue;
+                        }
+
+                        const auto &resp = tank_client.discovered_topics().front();
+
+                        for (uint32_t i = 0; i < resp.topics.size; ++i) {
+                                const auto &it = resp.topics.data[i];
+
+                                Print(it.name, " ", it.partitions, " partitions\n");
+                        }
+                }
+
+                return 0;
         } else if (cmd.Eq(_S("status"))) {
                 optind = 0;
                 while ((r = getopt(argc, argv, "h")) != -1) {
@@ -895,7 +998,7 @@ int main(int argc, char *argv[]) {
                 }
 
                 while (tank_client.should_poll()) {
-                        tank_client.poll(1000);
+                        tank_client.poll();
 
                         for (const auto &it : tank_client.faults()) {
                                 consider_fault(it);
@@ -1104,7 +1207,7 @@ int main(int argc, char *argv[]) {
                                 return 1;
                         }
 
-                        if (!tank_client.discovered_partitions().empty()) {
+                        if (not tank_client.discovered_partitions().empty()) {
                                 const auto &v = tank_client.discovered_partitions().front();
 
                                 TANK_EXPECT(v.clientReqId == reqId1);
@@ -1132,7 +1235,7 @@ int main(int argc, char *argv[]) {
                                 return 1;
                         }
 
-                        if (!dest.discovered_partitions().empty()) {
+                        if (not dest.discovered_partitions().empty()) {
                                 const auto &v = dest.discovered_partitions().front();
                                 const auto  n = v.watermarks.size();
 

@@ -4,10 +4,12 @@
 // We will either generate an RS update OR a leader update for the same partition. It is not allowed to
 // generate both an RS and a leader update event for the same partition. See semantics
 void Service::gen_partition_nodes_updates(topic_partition **list, const size_t n,
-                                          std::vector<NodesPartitionsUpdates::reduced_rs> *          reduced,
-                                          std::vector<NodesPartitionsUpdates::expanded_rs> *         expanded,
+                                          std::vector<NodesPartitionsUpdates::reduced_rs>           *reduced,
+                                          std::vector<NodesPartitionsUpdates::expanded_rs>          *expanded,
                                           std::vector<NodesPartitionsUpdates::leadership_promotion> *promotions) {
-        static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(list || 0 == n);
         TANK_EXPECT(reduced);
         TANK_EXPECT(expanded);
@@ -18,7 +20,7 @@ void Service::gen_partition_nodes_updates(topic_partition **list, const size_t n
         expanded->clear();
         promotions->clear();
 
-        if (0 == n || !cluster_aware()) {
+        if (0 == n or not cluster_aware()) {
                 return;
         }
 
@@ -46,17 +48,17 @@ void Service::gen_partition_nodes_updates(topic_partition **list, const size_t n
                 }
         };
 
-	// TODO: reuse
+        // TODO: reuse
         simple_allocator                                                                                      a;
         std::priority_queue<tracked_node *, std::vector<tracked_node *>, decltype(tracked_node_replicas_cmp)> pq_for_replicas{tracked_node_replicas_cmp};
         static constexpr size_t                                                                               leadership_threshold = std::numeric_limits<size_t>::max();
         static constexpr size_t                                                                               replica_threshold    = std::numeric_limits<size_t>::max();
-        robin_hood::unordered_map<cluster_node *, uint16_t>                                                          map;
-        robin_hood::unordered_map<topic_partition *, uint16_t>                                                       map2, map3;
+        robin_hood::unordered_map<cluster_node *, uint16_t>                                                   map;
+        robin_hood::unordered_map<topic_partition *, uint16_t>                                                map2, map3;
         std::vector<tracked_node *>                                                                           deferred_push;
         std::vector<topic_partition *>                                                                        choose_leader;
         std::unordered_set<nodeid_t>                                                                          set;
-        robin_hood::unordered_map<nodeid_t, tracked_node *>                                                          nodes_map;
+        robin_hood::unordered_map<nodeid_t, tracked_node *>                                                   nodes_map;
 
         // we need to _first_ release replicas
         // and _then try to bind replicas because we may haven't been able to do that before
@@ -68,17 +70,17 @@ void Service::gen_partition_nodes_updates(topic_partition **list, const size_t n
                 auto topic = p->owner;
                 TANK_EXPECT(topic);
 
-                if (!p->defined()) {
-			// XXX: 
-			// This is important.
-			// We cannot update a disabled partition's replicas, because doing so would inadvertedely create it even if it was deleted
-			// i.e if we DELETE the topic or the topic/partition, the cluster leader will reset its RS and then try to persist that
-			// but this would result in topic/partition to be created again where the value would be the empty RS
-			// 
-			// Maybe this would make sense in some situations?
-			// For now, we are explicitly ignoring it here for RS updates
-			//
-			// !! Notice that we are using topic_partition::defined(), not topic_partition::enabled() !!
+                if (not p->defined()) {
+                        // XXX:
+                        // This is important.
+                        // We cannot update a disabled partition's replicas, because doing so would inadvertedely create it even if it was deleted
+                        // i.e if we DELETE the topic or the topic/partition, the cluster leader will reset its RS and then try to persist that
+                        // but this would result in topic/partition to be created again where the value would be the empty RS
+                        //
+                        // Maybe this would make sense in some situations?
+                        // For now, we are explicitly ignoring it here for RS updates
+                        //
+                        // !! Notice that we are using topic_partition::defined(), not topic_partition::enabled() !!
                         if (trace) {
                                 SLog("Will ", ansifmt::bold, "*ignore*", ansifmt::reset, " partition ", p->owner->name(), "/", p->idx, " because it is disabled. We do not update diabled partition's RS\n");
                         }
@@ -89,7 +91,7 @@ void Service::gen_partition_nodes_updates(topic_partition **list, const size_t n
                 const auto effective_rf = p->required_replicas();
                 const auto replicas_cnt = p->cluster.replicas.nodes.size();
 
-		// IMPORTANT: reset it here
+                // IMPORTANT: reset it here
                 p->cluster.flags &= ~unsigned(topic_partition::Cluster::Flags::GeneratedUpdate);
 
                 if (replicas_cnt <= effective_rf) {
@@ -100,9 +102,9 @@ void Service::gen_partition_nodes_updates(topic_partition **list, const size_t n
                         SLog("Release replicas for ", p->owner->name(), "/", p->idx, ", replicas_cnt = ", replicas_cnt, " => effective_rf = ", effective_rf, "\n");
                 }
 
-		// TODO: maybe prefer most overloaded replicas over other when deciding which replicas to 'release'?
-		// i.e sort the [0, replicas_cnt) nodes in p->cluster.replicas.nodes
-		// by load factor and then iterate but will need re-sort by id again later
+                // TODO: maybe prefer most overloaded replicas over other when deciding which replicas to 'release'?
+                // i.e sort the [0, replicas_cnt) nodes in p->cluster.replicas.nodes
+                // by load factor and then iterate but will need re-sort by id again later
                 for (size_t i{effective_rf}; i < replicas_cnt; ++i) {
                         auto n = p->cluster.replicas.nodes[i];
 
@@ -166,8 +168,8 @@ void Service::gen_partition_nodes_updates(topic_partition **list, const size_t n
                 auto p = list[i];
 
                 if (p->cluster.flags & unsigned(topic_partition::Cluster::Flags::GeneratedUpdate)) {
-			// we already have an update(i.e RS reduction).
-			// See SEMANTICS
+                        // we already have an update(i.e RS reduction).
+                        // See SEMANTICS
                         continue;
                 }
 
@@ -197,16 +199,16 @@ void Service::gen_partition_nodes_updates(topic_partition **list, const size_t n
                         }
                 }
 
-		// We are only considering a replicas update if the partition is enabled
-		// See above for rationale ^^
-                if (p->enabled() && replicas_cnt < effective_rf) {
+                // We are only considering a replicas update if the partition is enabled
+                // See above for rationale ^^
+                if (p->enabled() and replicas_cnt < effective_rf) {
                         const auto n = effective_rf - replicas_cnt;
 
                         if (trace) {
                                 SLog("Need ", n, " more replicas: ", replicas_cnt, " => ", effective_rf, "\n");
                         }
 
-                        for (size_t collected{0}; false == pq_for_replicas.empty() && collected < n;) {
+                        for (size_t collected{0}; not pq_for_replicas.empty() and collected < n;) {
                                 auto it = pq_for_replicas.top();
                                 auto n  = it->n;
 
@@ -237,7 +239,7 @@ void Service::gen_partition_nodes_updates(topic_partition **list, const size_t n
                                 }
                         }
 
-                        while (!deferred_push.empty()) {
+                        while (not deferred_push.empty()) {
                                 pq_for_replicas.push(deferred_push.back());
                                 deferred_push.pop_back();
                         }
@@ -250,7 +252,8 @@ void Service::gen_partition_nodes_updates(topic_partition **list, const size_t n
 
                                 expanded->emplace_back(NodesPartitionsUpdates::expanded_rs{
                                     .p             = p,
-                                    .original_size = static_cast<uint16_t>(replicas_cnt)});
+                                    .original_size = static_cast<uint16_t>(replicas_cnt),
+                                });
 
                                 p->cluster.flags |= unsigned(topic_partition::Cluster::Flags::GeneratedUpdate);
                                 map3.emplace(p, static_cast<uint16_t>(replicas_cnt));
@@ -258,20 +261,22 @@ void Service::gen_partition_nodes_updates(topic_partition **list, const size_t n
                 }
 
                 // Schedule for leader update by placing into choose_leader()
-		// we need to choose_leader() after we have updated RS for every partition involved here
-                if (!req_leader && leader) {
-			// if we no longer need a leader(why?) and we have an assigned leader, let it go
+                // we need to choose_leader() after we have updated RS for every partition involved here
+                if (not req_leader and leader) {
+                        // if we no longer need a leader(why?) and we have an assigned leader, let it go
                         if (trace) {
                                 SLog("Partition ", p->owner->name(), "/", p->idx, " has a leader; does not need a leader\n");
                         }
 
-                        promotions->emplace_back(NodesPartitionsUpdates::leadership_promotion{.p = p,
-                                                                                              .n = nullptr});
+                        promotions->emplace_back(NodesPartitionsUpdates::leadership_promotion{
+                            .p = p,
+                            .n = nullptr,
+                        });
                         continue;
                 }
 
-                if (req_leader && !leader_av) {
-			// partition requires a leader, but we have no *available* leader
+                if (req_leader and not leader_av) {
+                        // partition requires a leader, but we have no *available* leader
                         if (trace) {
                                 SLog("Partition ", p->owner->name(), "/", p->idx, " need leader; has no leader\n");
                         }
@@ -280,14 +285,14 @@ void Service::gen_partition_nodes_updates(topic_partition **list, const size_t n
                         continue;
                 }
 
-                if (req_leader && leader && !p->cluster.replicas.count(leader->id, replicas_cnt)) {
-			// require a leader, but leader is not in the replicas list
-			// we will need to try to select another leader
-			//
-			// This is not expensive; count() will perform a binary search among a few nodes anyway
+                if (req_leader and leader and not p->cluster.replicas.count(leader->id, replicas_cnt)) {
+                        // require a leader, but leader is not in the replicas list
+                        // we will need to try to select another leader
+                        //
+                        // This is not expensive; count() will perform a binary search among a few nodes anyway
                         if (trace) {
-                                SLog("Partition ", p->owner->name(), "/", p->idx, 
-					"'s leader is ", leader->id, "@", leader->ep, ", but is missing from the RS. Will choose another\n");
+                                SLog("Partition ", p->owner->name(), "/", p->idx,
+                                     "'s leader is ", leader->id, "@", leader->ep, ", but is missing from the RS. Will choose another\n");
                         }
 
                         choose_leader.emplace_back(p);
@@ -301,12 +306,12 @@ void Service::gen_partition_nodes_updates(topic_partition **list, const size_t n
         for (auto p : choose_leader) {
                 tracked_node *best{nullptr};
 
-		if (p->cluster.flags & unsigned(topic_partition::Cluster::Flags::GeneratedUpdate)) {
-			// we already generated an RS update
-			// We cannot generate both an RS and a Leaders update in the same session
-			// see SEMANTICS
-			continue;
-		}
+                if (p->cluster.flags & unsigned(topic_partition::Cluster::Flags::GeneratedUpdate)) {
+                        // we already generated an RS update
+                        // We cannot generate both an RS and a Leaders update in the same session
+                        // see SEMANTICS
+                        continue;
+                }
 
                 auto   leader = p->cluster.leader.node;
                 bool   leader_from_replicas{false};
@@ -325,7 +330,7 @@ void Service::gen_partition_nodes_updates(topic_partition **list, const size_t n
                              " leadership election. leader:", leader ? leader->id : 0, ", leader avail:", leader ? leader->available() : false,
                              ", isr.size = ", p->cluster.isr.size(), ", RS.size = ", p->cluster.replicas.nodes.size(), "\n");
 
-                        if (leader && !p->cluster.replicas.count(leader->id, span)) {
+                        if (leader and not p->cluster.replicas.count(leader->id, span)) {
                                 SLog("Cluster is not in the RS\n");
                         }
 
@@ -349,22 +354,22 @@ void Service::gen_partition_nodes_updates(topic_partition **list, const size_t n
                 // select a leader among the RS, so we will wind up selecting N2. But N2 doesn't have
                 // the data N1 had.
                 //		-- :We shouldn't be allowed to promote N2 as a leader --
-		//
+                //
                 // - We should ONLY be able to select a leader from the ISR.
-		// - We should be able to select from the RS only if
-		//	- no leader (regardless if available()) is assigned to the partition
-		// 	- leader is NOT in the partition RS
-                if (!leader) {
-			// we have no leader
-			// choose among the replicas
+                // - We should be able to select from the RS only if
+                //	- no leader (regardless if available()) is assigned to the partition
+                // 	- leader is NOT in the partition RS
+                if (not leader) {
+                        // we have no leader
+                        // choose among the replicas
                         if (trace) {
                                 SLog("Leader is not available. Will select one from the RS\n");
                         }
 
                         leader_from_replicas = true;
-                } else if (!p->cluster.replicas.count(leader->id, span)) {
-			// we have a leader, but for some odd reason it is missing from the replicas
-			// choose among the replicas
+                } else if (not p->cluster.replicas.count(leader->id, span)) {
+                        // we have a leader, but for some odd reason it is missing from the replicas
+                        // choose among the replicas
                         if (trace) {
                                 SLog("Have leader ", leader->id, "@", leader->ep, ", but leader is missing from ", p->owner->name(), "/", p->idx, " RS. Will select another from RS\n");
                         }
@@ -396,13 +401,14 @@ void Service::gen_partition_nodes_updates(topic_partition **list, const size_t n
 
                                 if (!best) {
                                         best = ctx;
-                                } else if (ctx->counts.leader_for < best->counts.leader_for || (ctx->counts.leader_for == best->counts.leader_for && ctx->counts.replica_for < best->counts.replica_for)) {
+                                } else if (ctx->counts.leader_for < best->counts.leader_for or
+                                           (ctx->counts.leader_for == best->counts.leader_for and ctx->counts.replica_for < best->counts.replica_for)) {
                                         best = ctx;
                                 }
                         }
                 } else {
-			// we have a leader, but the leader is not available, and is part of the replicas
-			// choose among the ISRs
+                        // we have a leader, but the leader is not available, and is part of the replicas
+                        // choose among the ISRs
                         for (auto it : p->cluster.isr.list) {
                                 auto       n   = switch_list_entry(isr_entry, partition_ll, it)->node();
                                 const auto nit = nodes_map.find(n->id);
@@ -431,7 +437,8 @@ void Service::gen_partition_nodes_updates(topic_partition **list, const size_t n
 
                                 if (!best) {
                                         best = ctx;
-                                } else if (ctx->counts.leader_for < best->counts.leader_for || (ctx->counts.leader_for == best->counts.leader_for && ctx->counts.replica_for < best->counts.replica_for)) {
+                                } else if (ctx->counts.leader_for < best->counts.leader_for or
+                                           (ctx->counts.leader_for == best->counts.leader_for and ctx->counts.replica_for < best->counts.replica_for)) {
                                         best = ctx;
                                 }
                         }
@@ -457,8 +464,10 @@ void Service::gen_partition_nodes_updates(topic_partition **list, const size_t n
                              " as leader of ", p->owner->name(), "/", p->idx, " (replicas:", p->cluster.replicas.nodes.size(), ")", ansifmt::reset, "\n");
                 }
 
-                promotions->emplace_back(NodesPartitionsUpdates::leadership_promotion{.p = p,
-                                                                                      .n = node});
+                promotions->emplace_back(NodesPartitionsUpdates::leadership_promotion{
+                    .p = p,
+                    .n = node,
+                });
         }
 
         if (trace) {

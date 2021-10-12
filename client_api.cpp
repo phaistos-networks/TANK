@@ -1,7 +1,9 @@
 #include "client_common.h"
 
 bool TankClient::process_msg(connection *const c, const uint8_t msg, const uint8_t *const content, const size_t len) {
-        static constexpr bool trace{false};
+	enum {
+		trace = false,
+	};
 
         if (trace) {
                 SLog("About to process message of type ", msg, ", len = ", len, "\n");
@@ -21,6 +23,12 @@ bool TankClient::process_msg(connection *const c, const uint8_t msg, const uint8
 #else
                         return process_consume(c, content, len);
 #endif
+
+		case TankAPIMsgType::DiscoverTopics:
+			return process_discover_topics(c, content, len);
+
+		case TankAPIMsgType::DiscoverTopology:
+			return process_discover_topology(c, content, len);
 
                 case TankAPIMsgType::DiscoverPartitions:
                         return process_discover_partitions(c, content, len);

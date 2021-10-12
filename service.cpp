@@ -87,7 +87,7 @@ void topic_partition_log::consider_ro_segments() {
 
                         basePath.resize(basePathLen);
 
-                        segment->fdh.reset(nullptr);
+                        segment->fdh.reset();
 
                         sum -= segment->fileSize;
                         delete segment;
@@ -460,9 +460,9 @@ void Service::parse_partition_config(const char *const path, partition_config *c
         }
 }
 
-Switch::shared_refptr<topic_partition> Service::define_partition(const uint16_t idx, topic *t) {
+std::shared_ptr<topic_partition> Service::define_partition(const uint16_t idx, topic *t) {
         TANK_EXPECT(t);
-        auto partition = Switch::make_sharedref<topic_partition>(t);
+        auto partition = std::make_shared<topic_partition>(t);
 
         // it is important that we serialize access to partitions_v here
         // for if (false == cluster_aware()), we use std::async() to initialise partitions in parallel
@@ -477,11 +477,9 @@ Switch::shared_refptr<topic_partition> Service::define_partition(const uint16_t 
         return partition;
 }
 
-Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint16_t idx, topic *topic, const partition_config &partitionConf, const bool is_new) {
+std::shared_ptr<topic_partition> Service::init_local_partition(const uint16_t idx, topic *topic, const partition_config &partitionConf, const bool is_new) {
         TANK_EXPECT(topic);
         auto partition = define_partition(idx, topic);
-
-        TANK_EXPECT(partition.use_count() >= 1);
 
 #ifndef TANK_SRV_LAZY_PARTITION_INIT
         // rely on lazy initialization
@@ -509,7 +507,7 @@ Switch::shared_refptr<topic_partition> Service::init_local_partition(const uint1
                 }
 
 #else
-                if (!SwitchFS::BuildPath(basePath)) {
+                if (not SwitchFS::BuildPath(basePath)) {
 #ifdef TANK_THROW_SWITCH_EXCEPTIONS
                         throw Switch::system_error("Failed to mkdir(", basePath, "): ", strerror(errno));
 #else
@@ -534,7 +532,7 @@ void Service::disable_tank_srv() {
                 auto prev = it->prev;
 
                 if (c->type == connection::Type::TankClient) {
-                        shutdown(c, __LINE__);
+                        shutdown(c);
                 }
 
                 it = prev;

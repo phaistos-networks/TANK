@@ -179,7 +179,9 @@ constexpr uint32_t throttle_span() {
 #endif
 
 bool TankClient::tx_tank(connection *const c) {
-        static constexpr bool trace{false};
+	enum {
+		trace = false,
+	};
         auto                  fd = c->fd;
         auto                  br = c->as.tank.br; // associated broker
 
@@ -563,12 +565,14 @@ bool TankClient::process_srv_in(connection *const c) {
 }
 
 bool TankClient::rcv(connection *const c) {
-	TANK_EXPECT(c);
-        static constexpr bool trace{false};
-        int                   fd = c->fd, n;
-        managed_buf *         b;
+        enum {
+                trace = false,
+        };
+        TANK_EXPECT(c);
+        int          fd = c->fd, n;
+        managed_buf *b;
 
-	TANK_EXPECT(fd != -1);
+        TANK_EXPECT(fd != -1);
 
         if (unlikely(-1 == ioctl(fd, FIONREAD, &n))) {
 		Print("ioctl() failed:", strerror(errno), " for ", fd, " c ", ptr_repr(c), "\n");
@@ -611,7 +615,7 @@ bool TankClient::rcv(connection *const c) {
         b->reserve(b->size() + actual);
 
         if (const auto r = read(fd, b->data() + b->size(), actual); - 1 == r) {
-                if (EINTR == errno || EAGAIN == errno) {
+                if (EINTR == errno or EAGAIN == errno) {
                         return true;
                 } else {
                         return shutdown(c, __LINE__);
@@ -648,11 +652,13 @@ void TankClient::begin_reactor_loop_iteration() {
 
         all_captured_faults.clear();
         all_discovered_partitions.clear();
-	reload_conf_results_v.clear();
+        _discovered_topologies.clear();
+        all_discovered_topics.clear();
+        reload_conf_results_v.clear();
         consumed_content.clear();
         produce_acks_v.clear();
         created_topics_v.clear();
-	collected_cluster_status_v.clear();
+        collected_cluster_status_v.clear();
 }
 
 void TankClient::drain_pipe(int fd) {
@@ -843,7 +849,7 @@ void TankClient::check_unreachable_brokers() {
 
 uint64_t TankClient::reactor_next_wakeup() const noexcept {
 	enum {
-		trace = true,
+		trace = false,
 	};
 
         uint64_t until = TANKUtil::minimum(
@@ -1021,7 +1027,7 @@ void TankClient::check_pending_api_responses() {
 }
 
 bool TankClient::should_poll() const noexcept {
-        return !(pending_responses.empty() && conns_pend_est_list.empty());
+        return not (pending_responses.empty() and conns_pend_est_list.empty());
 }
 
 void TankClient::make_unreachable(broker *br) {
@@ -1055,46 +1061,47 @@ void TankClient::make_unreachable(broker *br) {
 }
 
 void TankClient::abort_broker_connection(connection *c, broker *br) {
-        static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(c);
         TANK_EXPECT(c->type == connection::Type::Tank);
         TANK_EXPECT(br);
         TANK_EXPECT(c->as.tank.br == br);
-	bool consider_fault;
+        bool consider_fault;
 
         if (trace) {
-                SLog("abort_broker_connection(), ", 
-			ptr_repr(br), " ", br->ep, 
-			" br->pending_responses_list.size = ", br->pending_responses_list.size(), "\n");
+                SLog("abort_broker_connection(), ",
+                     ptr_repr(br), " ", br->ep,
+                     " br->pending_responses_list.size = ", br->pending_responses_list.size(), "\n");
         }
 
         if (c->state.flags & (1u << unsigned(connection::State::Flags::ConnectionAttempt))) {
                 if (trace) {
-                        SLog(ansifmt::inverse, "Connection to ", br->ep, 
-				" shut down while attempting to connect", ansifmt::reset, 
-				", consequtive_connection_failures = ", br->consequtive_connection_failures, "\n");
+                        SLog(ansifmt::inverse, "Connection to ", br->ep,
+                             " shut down while attempting to connect", ansifmt::reset,
+                             ", consequtive_connection_failures = ", br->consequtive_connection_failures, "\n");
                 }
 
-		consider_fault = true;
-	} else if (!br->outgoing_content.empty() && br->outgoing_content.first_payload_partially_transferred) {
-		if (trace) {
-			SLog("Failed to transfer payload\n");
-		}
+                consider_fault = true;
+        } else if (not br->outgoing_content.empty() and br->outgoing_content.first_payload_partially_transferred) {
+                if (trace) {
+                        SLog("Failed to transfer payload\n");
+                }
 
-		consider_fault = true;
-	} else if (c->in.b) {
-		if (trace) {
-			SLog("Failed: in.b != nullptr\n");
-		}
+                consider_fault = true;
+        } else if (c->in.b) {
+                if (trace) {
+                        SLog("Failed: in.b != nullptr\n");
+                }
 
-		consider_fault = true;
-	} else {
-		consider_fault = false;
-	}
-
+                consider_fault = true;
+        } else {
+                consider_fault = false;
+        }
 
         if (consider_fault) {
-		shift_failed_broker(br);
+                shift_failed_broker(br);
 
                 if (++(br->consequtive_connection_failures) >= broker::max_consequtive_connection_failures) {
                         if (trace) {
@@ -1114,7 +1121,9 @@ void TankClient::abort_broker_connection(connection *c, broker *br) {
 }
 
 bool TankClient::shutdown(connection *const c, const uint32_t ref, const bool fault) {
-        static constexpr bool trace{false};
+	enum {
+		trace = false,
+	};
         TANK_EXPECT(c);
         TANK_EXPECT(c->fd != -1);
 

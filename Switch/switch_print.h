@@ -236,7 +236,9 @@ struct left_aligned final {
         const size_t     line_len;
 
         left_aligned(const size_t _alignment, const str_view32 _content, const size_t ll = std::numeric_limits<size_t>::max())
-            : A{_alignment}, content{_content}, line_len{ll} {
+            : A{_alignment}
+            , content{_content}
+            , line_len{ll} {
         }
 };
 

@@ -28,15 +28,15 @@ bool cluster_node::is_replica_for(const topic_partition *p) const TANK_NOEXCEPT_
 bool topic_partition::require_leader() const noexcept {
         const auto topic = owner;
 
-        if (!topic->enabled) {
+        if (not topic->enabled) {
                 return false;
         }
 
-        if (!enabled()) {
+        if (not enabled()) {
                 return false;
         }
 
-        if (!topic->cluster.rf_) {
+        if (0 == topic->cluster.rf_) {
                 return false;
         }
 
@@ -45,14 +45,16 @@ bool topic_partition::require_leader() const noexcept {
 
 // Recall that this is the number of _copies_ required
 // not the number of replicas other than the leader that need to replicate from that node
+//
+// i.e this is the replication factor
 uint16_t topic_partition::required_replicas() const noexcept {
         const auto topic = owner;
 
-        if (!topic->enabled) {
+        if (not topic->enabled) {
                 return 0;
         }
 
-        if (!enabled()) {
+        if (not enabled()) {
                 return 0;
         }
 

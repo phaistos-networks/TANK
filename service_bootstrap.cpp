@@ -363,13 +363,11 @@ int Service::start(int argc, char **argv) {
                                                                         throw Switch::system_error("Unexpected partitions list; expected [0, ", partitionsCnt - 1, "]");
                                                                 }
 
-                                                                auto t = Switch::make_sharedref<topic>(name, partitionConfig);
-
-                                                                TANK_EXPECT(t->use_count() == 1);
+                                                                auto t = std::make_shared<topic>(name, partitionConfig);
 
                                                                 collectLock.lock();
                                                                 pendingPartitions.emplace_back(t.get(), partitionsCnt);
-                                                                register_topic(t.get());
+                                                                register_topic(std::move(t));
                                                                 collectLock.unlock();
                                                         } else {
                                                                 path[len] = '\0'; // this is important
@@ -406,7 +404,7 @@ int Service::start(int argc, char **argv) {
                         before = Timings::Microseconds::Tick();
                         if (!pendingPartitions.empty()) {
                                 static constexpr bool                                                   trace{false};
-                                std::vector<std::pair<topic *, Switch::shared_refptr<topic_partition>>> list;
+                                std::vector<std::pair<topic *, std::shared_ptr<topic_partition>>> list;
 
                                 if (trace) {
                                         SLog("pendingPartitions.size() = ", pendingPartitions.size(), "\n");
@@ -444,7 +442,7 @@ int Service::start(int argc, char **argv) {
                                 });
 
                                 const auto                     n = list.size();
-                                std::vector<topic_partition *> partitions;
+                                std::vector<std::shared_ptr<topic_partition>> partitions;
 
                                 if (trace) {
                                         before = Timings::Microseconds::Tick();
@@ -454,8 +452,8 @@ int Service::start(int argc, char **argv) {
                                         auto t = list[i].first;
 
                                         do {
-                                                partitions.push_back(list[i].second.release());
-                                        } while (++i < n && list[i].first == t);
+                                                partitions.emplace_back(std::move(list[i].second));
+                                        } while (++i < n and list[i].first == t);
 
                                         t->register_partitions(partitions.data(), partitions.size());
                                         totalPartitions += partitions.size();
@@ -469,7 +467,7 @@ int Service::start(int argc, char **argv) {
 
                                         if (auto t = topic_by_name(topic)) {
                                                 if (partition < t->partitions_->size()) {
-                                                        auto log = partition_log(t->partitions_->at(partition));
+                                                        auto log = partition_log(t->partitions_->at(partition).get());
 
                                                         if (seqNum < log->firstAvailableSeqNum) {
                                                                 seqNum = log->firstAvailableSeqNum - 1;
@@ -491,9 +489,14 @@ int Service::start(int argc, char **argv) {
                 }
         }
 
-        Print(ansifmt::bold, "<=TANK=>", ansifmt::reset, " v", TANK_VERSION / 100, ".", TANK_VERSION % 100,
-              " | ", dotnotation_repr(topics.size()), " topics registered, ",
-              dotnotation_repr(totalPartitions), " partitions; will listen for new connections at ", tank_listen_ep, "\n");
+        if (not cluster_aware()) {
+                Print(ansifmt::bold, "<=TANK=>", ansifmt::reset, " v", TANK_VERSION / 100, ".", TANK_VERSION % 100,
+                      " | ", dotnotation_repr(topics.size()), " topics registered, ",
+                      dotnotation_repr(totalPartitions), " partitions; will listen for new connections at ", tank_listen_ep, "\n");
+        } else {
+                Print(ansifmt::bold, "<=TANK=>", ansifmt::reset, " v", TANK_VERSION / 100, ".", TANK_VERSION % 100,
+                      " | will listen for new connections at ", tank_listen_ep, "\n");
+        }
 
         if (prom_endpoint) {
                 Print("> Prometheus Exporter enabled, will respond to http://", prom_endpoint, "/metrics\n");
@@ -505,16 +508,14 @@ int Service::start(int argc, char **argv) {
 
         Print("(C) Phaistos Networks, S.A. - ", ansifmt::color_green, "http://phaistosnetworks.gr/", ansifmt::reset, ". Licensed under the Apache License\n\n");
 
-        if (topics.empty()) {
-                if (!cluster_aware()) {
-                        Print("No topics found in ", basePath_, ". You may want to create a few, like so:\n");
-                        Print("mkdir -p ", basePath_, "/events/0 ", basePath_, "/orders/0 \n");
-                        Print("This will create topics events and orders and define one partition with id 0 for each of them.\nRestart TANK after you have created a few topics/partitions\n");
-                        Print(R"EOF(Or, you can use tank-cli's "create topic" command to create new topics instead)EOF", "\n");
-                }
+        if (topics.empty() and not cluster_aware()) {
+                Print("No topics found in ", basePath_, ". You may want to create a few, like so:\n");
+                Print("mkdir -p ", basePath_, "/events/0 ", basePath_, "/orders/0 \n");
+                Print("This will create topics events and orders and define one partition with id 0 for each of them.\nRestart TANK after you have created a few topics/partitions\n");
+                Print(R"EOF(Or, you can use tank-cli's "create topic" command to create new topics instead)EOF", "\n");
         }
 
-        if (false == cluster_aware() && !enable_listener()) {
+        if (not cluster_aware() and not enable_listener()) {
                 // we are going to until we have bootstrapped
                 return 1;
         }

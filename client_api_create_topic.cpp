@@ -86,23 +86,23 @@ bool TankClient::process_create_topic(connection *const c, const uint8_t *const 
         if (err == 4) {
                 // invalid configuration
                 capture_invalid_req_fault(api_req, req_part->topic, req_part->partition);
-                clear_request_partition_ctx(api_req, req_part);
-                put_request_partition_ctx(req_part);
+
+		discard_request_partition_ctx(api_req, req_part);
         } else if (err == 2) {
                 // system error
                 capture_system_fault(api_req, req_part->topic, req_part->partition);
-                clear_request_partition_ctx(api_req, req_part);
-                put_request_partition_ctx(req_part);
+
+		discard_request_partition_ctx(api_req, req_part);
         } else if (err == 1) {
                 // already exists
                 capture_topic_already_exists(api_req, req_part->topic);
-                clear_request_partition_ctx(api_req, req_part);
-                put_request_partition_ctx(req_part);
+
+		discard_request_partition_ctx(api_req, req_part);
         } else if (err == 10) {
                 // invalid request. too many partitions? too few? invalid topic name?
                 capture_invalid_req_fault(api_req, req_part->topic, req_part->partition);
-                clear_request_partition_ctx(api_req, req_part);
-                put_request_partition_ctx(req_part);
+
+		discard_request_partition_ctx(api_req, req_part);
         } else if (err == 11) {
                 // not supported
                 if (trace) {
@@ -110,13 +110,13 @@ bool TankClient::process_create_topic(connection *const c, const uint8_t *const 
                 }
 
                 capture_unsupported_request(api_req);
-                clear_request_partition_ctx(api_req, req_part);
-                put_request_partition_ctx(req_part);
+
+		discard_request_partition_ctx(api_req, req_part);
         } else if (err == 5) {
                 // read only, or optherwise not possible right now
                 capture_readonly_fault(api_req);
-                clear_request_partition_ctx(api_req, req_part);
-                put_request_partition_ctx(req_part);
+
+		discard_request_partition_ctx(api_req, req_part);
         } else {
                 api_req->ready_partitions_list.push_back(&req_part->partitions_list_ll);
         }

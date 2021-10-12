@@ -30,9 +30,12 @@ void TankClient::abort_api_request(api_request *api_req) {
 // Whenever a broker fails or otherwise any associated payloads can't be delivered
 // this is invoked to deal with them
 void TankClient::flush_broker(broker *const br) {
-        static constexpr bool             trace{false};
+        enum {
+                trace = false,
+        };
         std::vector<broker_api_request *> reqs, failed_reqs;
-        TANK_EXPECT(!br->ch.get()); // should have shut down this connection
+
+        assert(not br->ch.get()); // should have shut down this connection
 
         if (trace) {
                 SLog(ansifmt::color_red, ansifmt::bgcolor_brown, "BEGIN:flush_broker()  ", ptr_repr(br), " ",
@@ -54,7 +57,7 @@ void TankClient::flush_broker(broker *const br) {
                 it = next;
         }
         br->outgoing_content.clear();
-        TANK_EXPECT(br->outgoing_content.first_payload_partially_transferred == false);
+        TANK_EXPECT(not br->outgoing_content.first_payload_partially_transferred);
 
         // Once we have successfully scheduled a paylaod for transmission,
         // we track the request in pending_responses_list.
@@ -68,13 +71,19 @@ void TankClient::flush_broker(broker *const br) {
         // to play it safe, so we will only retry the request if we know
         // it is idempotent, otherwise we will fail it (network error).
         for (auto it : br->pending_responses_list) {
-                auto breq = switch_list_entry(broker_api_request, pending_responses_list_ll, it);
-                TANK_EXPECT(!breq->have_payload);
+                auto breq = containerof(broker_api_request, pending_responses_list_ll, it);
+                assert(not breq->have_payload);
+
                 auto api_req = breq->api_req;
-                TANK_EXPECT(api_req);
+                assert(api_req);
+
                 const bool is_idempotent =
-                    (api_req->type == api_request::Type::Consume || api_req->type == api_request::Type::DiscoverPartitions || api_req->type == api_request::Type::ReloadConfig);
-                //const bool is_idempotent = false;
+                    (api_req->type == api_request::Type::Consume or
+                     api_req->type == api_request::Type::DiscoverPartitions or
+                     api_req->type == api_request::Type::ReloadConfig or
+                     api_req->type == api_request::Type::DiscoverTopics or
+                     api_req->type == api_request::Type::DiscoverTopology or
+                     api_req->type == api_request::Type::SrvStatus);
 
                 if (trace) {
                         SLog("pending broker request resp, is_idempotent = ", is_idempotent, "\n");
@@ -108,15 +117,15 @@ void TankClient::flush_broker(broker *const br) {
                         SLog("Considering FAILED request\n");
                 }
 
-                while (!br_req->partitions_list.empty()) {
-                        auto req_part = switch_list_entry(request_partition_ctx,
-                                                          partitions_list_ll, br_req->partitions_list.next);
+                while (not br_req->partitions_list.empty()) {
+                        auto req_part = containerof(request_partition_ctx,
+                                                    partitions_list_ll, br_req->partitions_list.next);
 
                         capture_network_fault(api_req, req_part->topic, req_part->partition);
 
                         req_part->partitions_list_ll.detach();
-                        clear_request_partition_ctx(api_req, req_part);
-                        put_request_partition_ctx(req_part);
+
+                        discard_request_partition_ctx(api_req, req_part);
                 }
                 br_req->partitions_list.reset();
 
@@ -134,12 +143,25 @@ void TankClient::flush_broker(broker *const br) {
 //
 // each request_partition_ctx encapsulates both request and response specific state
 // for e.g produce requests, that could be the actual content
+//
+// note that response specific state may have been migrated/merged into an api_request specific state
+// we don't want to destroy/release resources twice
 void TankClient::clear_request_partition_ctx(api_request *const api_req, request_partition_ctx *const par) {
-        TANK_EXPECT(api_req);
-        TANK_EXPECT(par);
+        enum {
+                trace = false,
+        };
+        assert(api_req);
+        assert(par);
+
+        const auto resp_valid = std::exchange(par->as_op.response_valid, false);
+
+        if (trace) {
+                SLog("Will clear_request_partition_ctx() for type ", unsigned(api_req->type), ", resp_valid = ", resp_valid, "\n");
+        }
 
         switch (api_req->type) {
                 case api_request::Type::Produce:
+                        [[fallthrough]];
                 case api_request::Type::ProduceWithSeqnum:
                         if (auto v = std::exchange(par->as_op.produce.payload.data, nullptr)) {
                                 std::free(v);
@@ -147,17 +169,52 @@ void TankClient::clear_request_partition_ctx(api_request *const api_req, request
                         break;
 
                 case api_request::Type::Consume:
+                        if (resp_valid) {
+                                auto &resp = par->as_op.consume.response;
+
+                                if (resp.msgs.cnt <= sizeof_array(resp.msgs.list.small)) {
+                                        // SBO
+                                } else {
+                                        std::free(resp.msgs.list.large);
+                                }
+
+                                if (const auto n = resp.used_buffers.size) {
+                                        for (size_t i{0}; i < n; ++i) {
+                                                put_buffer(resp.used_buffers.data[i]);
+                                        }
+
+                                        std::free(resp.used_buffers.data);
+                                }
+                        }
                         break;
 
                 case api_request::Type::DiscoverPartitions:
+                        if (resp_valid) {
+                                auto &resp = par->as_op.discover_partitions.response;
+
+                                delete resp.all;
+                        }
+                        break;
+
+                case api_request::Type::DiscoverTopics:
+                        if (resp_valid) {
+                                auto &resp = par->as_op.discover_topics.response;
+
+                                delete resp.all;
+                        }
+                        break;
+
+                case api_request::Type::DiscoverTopology:
+                        if (resp_valid) {
+                                auto &resp = par->as_op.discover_topology.response;
+
+                                delete resp.all;
+                                resp.cluster_name.try_free();
+                        }
                         break;
 
                 case api_request::Type::CreateTopic:
-                        break;
-
                 case api_request::Type::ReloadConfig:
-                        break;
-
                 case api_request::Type::SrvStatus:
                         break;
 
@@ -167,8 +224,10 @@ void TankClient::clear_request_partition_ctx(api_request *const api_req, request
 }
 
 void TankClient::abort_api_request_retry_bundles(api_request *api_req, std::vector<request_partition_ctx *> *contexts) {
-        [[maybe_unused]] static constexpr bool trace{false};
-        TANK_EXPECT(api_req);
+        enum {
+                trace = false,
+        };
+        assert(api_req);
 
         if (trace) {
                 if (!api_req->retry_bundles_list.empty()) {
@@ -176,7 +235,7 @@ void TankClient::abort_api_request_retry_bundles(api_request *api_req, std::vect
                 }
         }
 
-        while (!api_req->retry_bundles_list.empty()) {
+        while (not api_req->retry_bundles_list.empty()) {
                 auto rb = containerof(retry_bundle, retry_bundles_ll, api_req->retry_bundles_list.next);
 
                 contexts->insert(contexts->end(), rb->data, rb->data + rb->size);
@@ -203,14 +262,14 @@ void TankClient::abort_api_request_brokers_reqs(api_request *api_req, std::vecto
         }
 
         while (!api_req->broker_requests_list.empty()) {
-                auto br_req = switch_list_entry(broker_api_request, broker_requests_list_ll, api_req->broker_requests_list.next);
+                auto br_req = containerof(broker_api_request, broker_requests_list_ll, api_req->broker_requests_list.next);
 
                 if (trace) {
                         SLog("Aborting broker ", br_req->br->ep, " partitions\n");
                 }
 
                 while (!br_req->partitions_list.empty()) {
-                        auto part = switch_list_entry(request_partition_ctx, partitions_list_ll, br_req->partitions_list.next);
+                        auto part = containerof(request_partition_ctx, partitions_list_ll, br_req->partitions_list.next);
 
                         part->partitions_list_ll.detach();
                         contexts->emplace_back(part);
@@ -226,10 +285,13 @@ void TankClient::abort_api_request_brokers_reqs(api_request *api_req, std::vecto
 // gets the chance to use the collected responses. We don't want to reclaim/destroy resources
 // associated with those ready responses before that happens.
 void TankClient::gc_api_request(std::unique_ptr<api_request> api_req) {
-        static constexpr bool trace{false};
-        TANK_EXPECT(api_req);
-        TANK_EXPECT(api_req->api_reqs_expirations_tree_node.node.leaf_p == nullptr);
-        std::vector<request_partition_ctx *> contexts;
+        assert(api_req);
+        assert(api_req->api_reqs_expirations_tree_node.node.leaf_p == nullptr);
+
+        enum {
+                trace = false,
+        };
+        std::vector<request_partition_ctx *> contexts; // TODO: maybe reuse?
         auto                                 api_req_ptr = api_req.get();
 
         if (trace) {
@@ -240,90 +302,54 @@ void TankClient::gc_api_request(std::unique_ptr<api_request> api_req) {
         abort_api_request_retry_bundles(api_req.get(), &contexts);
         abort_api_request_brokers_reqs(api_req.get(), &contexts, __LINE__);
 
-        // reclai,-release resources associated with request_partition_ctx responses
+        // reclaim-release resources associated with request_partition_ctx responses
+        for (auto it = api_req->ready_partitions_list.next; it != &api_req->ready_partitions_list;) {
+                auto next = it->next;
+                auto p    = containerof(request_partition_ctx, partitions_list_ll, it);
+
+                discard_request_partition_ctx(api_req.get(), p);
+                it = next;
+        }
+
+        api_req->ready_partitions_list.reset();
+
         switch (api_req->type) {
-                case api_request::Type::Consume:
-                        for (auto it = api_req->ready_partitions_list.next; it != &api_req->ready_partitions_list;) {
-                                auto  next = it->next;
-                                auto  p    = switch_list_entry(request_partition_ctx, partitions_list_ll, it);
-                                auto &resp = p->as_op.consume.response;
+                case api_request::Type::DiscoverTopology:
+                        delete api_req->materialized_resp.discover_topology.v;
 
-                                if (resp.msgs.cnt <= sizeof_array(resp.msgs.list.small)) {
-                                        // SBO
-                                } else {
-                                        std::free(resp.msgs.list.large);
-                                }
-
-                                if (const auto n = resp.used_buffers.size) {
-                                        for (size_t i{0}; i < n; ++i) {
-                                                put_buffer(resp.used_buffers.data[i]);
-                                        }
-
-                                        std::free(resp.used_buffers.data);
-                                }
-
-                                clear_request_partition_ctx(api_req_ptr, p);
-
-                                put_request_partition_ctx(p);
-                                it = next;
+                        if (auto ptr = api_req->materialized_resp.discover_topology._cluster_name_ptr) {
+                                std::free(ptr);
                         }
                         break;
 
+                case api_request::Type::DiscoverTopics:
+                        delete api_req->materialized_resp.discover_topics.v;
+                        break;
+
                 case api_request::Type::DiscoverPartitions:
-                        for (auto it = api_req->ready_partitions_list.next; it != &api_req->ready_partitions_list;) {
-                                auto next = it->next;
-                                auto p    = switch_list_entry(request_partition_ctx, partitions_list_ll, it);
-
-                                delete p->as_op.discover_partitions.response.all;
-
-                                clear_request_partition_ctx(api_req_ptr, p);
-                                put_request_partition_ctx(p);
-                                it = next;
-                        }
-
                         if (auto p = api_req_ptr->materialized_resp.discover_partitions.v) {
                                 std::free(p);
                         }
                         break;
 
                 case api_request::Type::CreateTopic:
-                        for (auto it = api_req->ready_partitions_list.next; it != &api_req->ready_partitions_list;) {
-                                auto next = it->next;
-                                auto p    = switch_list_entry(request_partition_ctx, partitions_list_ll, it);
-
-                                clear_request_partition_ctx(api_req_ptr, p);
-                                put_request_partition_ctx(p);
-                                it = next;
-                        }
-
-                        if (auto ptr = const_cast<char *>(api_req_ptr->as.create_topic.config.data())) {
-                                std::free(ptr);
-                        }
+                        api_req_ptr->as.create_topic.config.try_free();
                         break;
 
                 case api_request::Type::Produce:
                 case api_request::Type::ProduceWithSeqnum:
                 case api_request::Type::ReloadConfig:
                 case api_request::Type::SrvStatus:
-                        for (auto it = api_req->ready_partitions_list.next; it != &api_req->ready_partitions_list;) {
-                                auto next = it->next;
-                                auto p    = switch_list_entry(request_partition_ctx, partitions_list_ll, it);
-
-                                clear_request_partition_ctx(api_req_ptr, p);
-                                put_request_partition_ctx(p);
-                                it = next;
-                        }
+                case api_request::Type::Consume:
                         break;
 
                 default:
                         IMPLEMENT_ME();
         }
-        api_req->ready_partitions_list.reset();
 
         // release collected contexts
         for (auto part : contexts) {
-                clear_request_partition_ctx(api_req_ptr, part);
-                put_request_partition_ctx(part);
+                discard_request_partition_ctx(api_req_ptr, part);
         }
 
         // release any retained memory buffers
@@ -341,220 +367,10 @@ void TankClient::gc_api_request(std::unique_ptr<api_request> api_req) {
         }
 }
 
-bool TankClient::materialize_consume_api_request(api_request *api_req) {
-        static constexpr bool trace{false};
-        const auto            req_id = api_req->request_id;
-
-        if (trace) {
-                SLog("Materializing consume request, ", api_req->ready_partitions_list.size(), " partitions\n");
-        }
-
-        for (auto it : api_req->ready_partitions_list) {
-                auto                                       req_part = switch_list_entry(request_partition_ctx, partitions_list_ll, it);
-                const auto &                               resp_ctx = req_part->as_op.consume.response;
-                const range_base<consumed_msg *, uint32_t> msgs(
-                    const_cast<consumed_msg *>(resp_ctx.msgs.cnt <= sizeof_array(resp_ctx.msgs.list.small)
-                                                   ? resp_ctx.msgs.list.small
-                                                   : resp_ctx.msgs.list.large),
-                    resp_ctx.msgs.cnt);
-
-                if (trace) {
-                        SLog("Got ", resp_ctx.msgs.cnt, " for ", req_part->topic, "/", req_part->partition, "\n");
-                }
-
-                consumed_content.emplace_back(partition_content{
-                    .clientReqId       = req_id,
-                    .topic             = req_part->topic,
-                    .partition         = req_part->partition,
-                    .msgs              = msgs,
-                    .respComplete      = true,
-                    .drained           = resp_ctx.drained,
-                    .next.seqNum       = resp_ctx.next.seq_num,
-                    .next.minFetchSize = static_cast<uint32_t>(resp_ctx.next.min_size),
-                });
-        }
-
-        return true;
-}
-
-bool TankClient::materialize_reload_config_request(api_request *api_req) {
-        if (!api_req->ready_partitions_list.empty()) {
-                const auto req_part = switch_list_entry(request_partition_ctx, partitions_list_ll, api_req->ready_partitions_list.next);
-
-                reload_conf_results_v.emplace_back(reload_conf_result{
-                    .clientReqId = api_req->request_id,
-                    .topic       = req_part->topic,
-                    .partition   = req_part->partition,
-                });
-        }
-
-        return false;
-}
-
-bool TankClient::materialize_create_topic_requet(api_request *api_req) {
-        if (!api_req->ready_partitions_list.empty()) {
-                const auto req_part = switch_list_entry(request_partition_ctx, partitions_list_ll, api_req->ready_partitions_list.next);
-
-                created_topics_v.emplace_back(created_topic{
-                    .clientReqId = api_req->request_id,
-                    .topic       = req_part->topic});
-        }
-
-        return false;
-}
-
-bool TankClient::materialize_srv_request(api_request *api_req) {
-        if (api_req->ready_partitions_list.empty()) {
-                return false;
-        }
-
-        const auto req_part = switch_list_entry(request_partition_ctx,
-                                                partitions_list_ll,
-                                                api_req->ready_partitions_list.next);
-        srv_status s;
-
-        s.counts     = req_part->as_op.srv_status.counts;
-        s.metrics    = req_part->as_op.srv_status.metrics;
-        s.startup_ts = req_part->as_op.srv_status.startup_ts;
-        s.version    = req_part->as_op.srv_status.version;
-        TANK_EXPECT(req_part->as_op.srv_status.cluster_name.len <= sizeof(s.cluster_name.data));
-        s.cluster_name.len = req_part->as_op.srv_status.cluster_name.len;
-        memcpy(s.cluster_name.data,
-               req_part->as_op.srv_status.cluster_name.data,
-               req_part->as_op.srv_status.cluster_name.len);
-
-        collected_cluster_status_v.emplace_back(s);
-        return false;
-}
-
-bool TankClient::materialize_produce_request(api_request *api_req) {
-        static constexpr bool trace{false};
-
-        if (trace) {
-                SLog("To materialize:", api_req->ready_partitions_list.size(), "\n");
-        }
-
-        for (const auto it : api_req->ready_partitions_list) {
-                const auto req_part = switch_list_entry(request_partition_ctx, partitions_list_ll, it);
-
-                produce_acks_v.emplace_back(produce_ack{
-                    .clientReqId = api_req->request_id,
-                    .topic       = req_part->topic,
-                    .partition   = req_part->partition});
-        }
-
-        return false;
-}
-
-bool TankClient::materialize_discover_partitions_requests(api_request *api_req) {
-        static constexpr bool trace{false};
-        const auto            req_id = api_req->request_id;
-
-        if (trace) {
-                SLog("Materializing discover_partitions request, ", api_req->ready_partitions_list.size(), " partitions\n");
-        }
-
-        // we can have multiple because multiple brokers may have been involved
-        std::unique_ptr<std::vector<std::pair<uint16_t, std::pair<uint64_t, uint64_t>>>> all;
-        str_view8                                                                        topic;
-
-        while (!api_req->ready_partitions_list.empty()) {
-                auto it       = api_req->ready_partitions_list.next;
-                auto req_part = switch_list_entry(request_partition_ctx, partitions_list_ll, it);
-
-                if (auto a = req_part->as_op.discover_partitions.response.all) {
-                        topic = req_part->topic;
-
-                        if (!all) {
-                                all.reset(a);
-                        } else {
-                                all->insert(all->end(), a->begin(), a->end());
-
-                                // no need to keep this around
-                                delete a;
-                                req_part->as_op.discover_partitions.response.all = nullptr;
-                        }
-                }
-
-                clear_request_partition_ctx(api_req, req_part);
-                put_request_partition_ctx(req_part);
-
-                it->detach_and_reset();
-        }
-
-        if (const size_t n = all ? all->size() : 0) {
-                // we need to sort here because they may have arrived out of order
-                std::sort(all->begin(), all->end(), [](const auto &a, const auto &b) noexcept {
-                        return a.first < b.first;
-                });
-
-                if (trace) {
-                        for (const auto &[partition, ctx] : *all) {
-                                SLog(partition, " ", ctx, "\n");
-                        }
-                }
-
-                const auto max = all->back().first;
-                auto       v   = static_cast<std::pair<uint64_t, uint64_t> *>(malloc(sizeof(std::pair<uint64_t, uint64_t>) * (max + 1)));
-                uint16_t   partition{0}, i{0};
-
-                while (partition <= max) {
-                        if (all->at(i).first == partition) {
-                                v[partition] = all->at(i++).second;
-                        } else {
-                                v[partition] = {0, 0};
-                        }
-
-                        ++partition;
-                }
-
-                all_discovered_partitions.emplace_back(discovered_topic_partitions{
-                    .clientReqId = req_id,
-                    .topic       = topic,
-                    .watermarks  = {v, static_cast<uint16_t>(max + 1)},
-                });
-
-                api_req->materialized_resp.discover_partitions.v = v;
-                return true;
-        }
-
-        return false;
-}
-
-// Whenever an api_request becomes ready, it is processed to generate
-// a response or whatever is appropriate based on the type of request
-bool TankClient::materialize_api_response(api_request *api_req) {
-        TANK_EXPECT(api_req);
-
-        switch (api_req->type) {
-                case api_request::Type::Consume:
-                        return materialize_consume_api_request(api_req);
-
-                case api_request::Type::DiscoverPartitions:
-                        return materialize_discover_partitions_requests(api_req);
-
-                case api_request::Type::Produce:
-                case api_request::Type::ProduceWithSeqnum:
-                        return materialize_produce_request(api_req);
-
-                case api_request::Type::CreateTopic:
-                        return materialize_create_topic_requet(api_req);
-
-                case api_request::Type::ReloadConfig:
-                        return materialize_reload_config_request(api_req);
-
-                case api_request::Type::SrvStatus:
-                        return materialize_srv_request(api_req);
-
-                default:
-                        IMPLEMENT_ME();
-        }
-}
-
 void TankClient::try_make_api_req_ready(api_request *api_req, const uint32_t ref) {
-        TANK_EXPECT(api_req);
+        assert(api_req);
 
-        if (likely(api_req->request_id) && api_req->ready()) {
+        if (likely(api_req->request_id) and api_req->ready()) {
                 make_api_req_ready(api_req, ref);
         }
 }
@@ -562,13 +378,15 @@ void TankClient::try_make_api_req_ready(api_request *api_req, const uint32_t ref
 // All broker_api_request' associated with an api_request
 // have been processed or failed, thereby making the api request ready
 void TankClient::make_api_req_ready(api_request *api_req, const uint32_t ref) {
-        static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(api_req);
         const auto                           id     = api_req->request_id;
         const bool                           failed = api_req->failed();
         std::vector<request_partition_ctx *> contexts;
 
-        if (!id) {
+        if (0 == id) [[unlikely]] {
                 // was already made ready
                 // this shouldn't happen, but we may as well just do nothing here
                 return;
@@ -597,6 +415,7 @@ void TankClient::make_api_req_ready(api_request *api_req, const uint32_t ref) {
         const auto it = pending_responses.find(id);
 
         TANK_EXPECT(it != pending_responses.end());
+
         if (trace) {
                 SLog(ansifmt::bold, ansifmt::color_green, "API request response is READY for ", id, ansifmt::reset, " (ref = ", ref, ")\n");
         }
@@ -607,8 +426,10 @@ void TankClient::make_api_req_ready(api_request *api_req, const uint32_t ref) {
         abort_api_request_brokers_reqs(api_req, &contexts, ref);
 
         for (const auto part : contexts) {
-                if (!failed) {
-                        static constexpr bool trace{false};
+                if (not failed) {
+                        enum {
+                                trace = false,
+                        };
 
                         if (trace) {
                                 SLog("Capturing timeout from make_api_req_ready() invoked at ", ref, "\n");
@@ -617,8 +438,7 @@ void TankClient::make_api_req_ready(api_request *api_req, const uint32_t ref) {
                         capture_timeout(api_req, part->topic, part->partition, __LINE__);
                 }
 
-                clear_request_partition_ctx(api_req, part);
-                put_request_partition_ctx(part);
+                discard_request_partition_ctx(api_req, part);
         }
 
         // materialize whatever we have for this request
@@ -673,14 +493,18 @@ void TankClient::retain_conn_inbuf(connection *const c, api_request *api_req) {
 
 // build a payload for a specific broker_api_request
 // this is the representation of that broker api request to be transmitted to the broker
-TankClient::broker_outgoing_payload *TankClient::build_broker_req_payload(broker_api_request *req) {
-        static constexpr const bool trace{false};
+TankClient::broker_outgoing_payload *TankClient::build_broker_req_payload(broker_api_request *const req) {
+        enum {
+                trace = false,
+        };
 
-        TANK_EXPECT(req);
-        TANK_EXPECT(!req->have_payload);
-        const auto api_req = req->api_req;
-        TANK_EXPECT(api_req);
+        assert(req);
+        assert(not req->have_payload);
+
+        const auto               api_req = req->api_req;
         broker_outgoing_payload *payload;
+
+        assert(api_req);
 
         if (trace) {
                 SLog("Building request payload for ", unsigned(api_req->type), "\n");
@@ -689,6 +513,14 @@ TankClient::broker_outgoing_payload *TankClient::build_broker_req_payload(broker
         switch (api_req->type) {
                 case api_request::Type::Consume:
                         payload = build_consume_broker_req_payload(req);
+                        break;
+
+                case api_request::Type::DiscoverTopics:
+                        payload = build_discover_topics_broker_req_payload(req);
+                        break;
+
+                case api_request::Type::DiscoverTopology:
+                        payload = build_discover_topology_req_payload(req);
                         break;
 
                 case api_request::Type::DiscoverPartitions:
@@ -730,9 +562,13 @@ TankClient::broker_outgoing_payload *TankClient::build_broker_req_payload(broker
 // and associated with a broker who may be the current leader of the (topic, partition)
 // this method's responsible for generating broker_api_request's for each of the brokers involved, and
 // pairing all request_partition_ctx's with it
-switch_dlist *TankClient::assign_req_partitions_to_api_req(api_request *api_req, std::vector<std::pair<broker *, request_partition_ctx *>> *contexts, const uint32_t limit) {
-        static constexpr bool trace{false};
-        switch_dlist *        next{&api_req->broker_requests_list};
+switch_dlist *TankClient::assign_req_partitions_to_api_req(api_request *const                                         api_req, // will pair with this api_request,
+                                                           std::vector<std::pair<broker *, request_partition_ctx *>> *contexts,
+                                                           const uint32_t                                             limit) {
+        enum {
+                trace = false,
+        };
+        auto *next = &api_req->broker_requests_list;
 
         // sort by (ptr(broker) asc, topic asc, partition asc)
         std::sort(contexts->begin(), contexts->end(), [](const auto &a, const auto &b) noexcept {
@@ -760,6 +596,8 @@ switch_dlist *TankClient::assign_req_partitions_to_api_req(api_request *api_req,
                 auto br         = p->first;
                 auto broker_req = get_broker_api_request();
 
+                // a new broker request for this api request
+                // will be tracked individually via pending_brokers_requests
                 broker_req->br      = br;
                 broker_req->api_req = api_req;
                 broker_req->id      = next_broker_request_id++;
@@ -768,10 +606,11 @@ switch_dlist *TankClient::assign_req_partitions_to_api_req(api_request *api_req,
                         next = &broker_req->broker_requests_list_ll;
                 }
 
-                // some requires may require too many iovecs from
+                // some requests may need too many iovecs
                 // so a single broker_outgoing_payload may not be able to hold in its iovecs::data
                 // everything, so limit can be set to something sane so that
                 // multiple broker requests to the same endpoint may be potentially generated to accomodate that need
+                //
                 // currently, only produce() overrides the default limit value
                 // XXX: verify this
                 const auto upto = std::min(e, p + limit);
@@ -779,6 +618,7 @@ switch_dlist *TankClient::assign_req_partitions_to_api_req(api_request *api_req,
                 do {
                         auto req_part = p->second;
 
+                        // track this request partition of this broker
                         req_part->partitions_list_ll.reset();
                         broker_req->partitions_list.push_back(&req_part->partitions_list_ll);
 
@@ -786,7 +626,7 @@ switch_dlist *TankClient::assign_req_partitions_to_api_req(api_request *api_req,
                                 SLog("For broker ", br->ep, " (", req_part->topic, "/", req_part->partition, ")\n");
                         }
 
-                } while (++p < upto && p->first == br);
+                } while (++p < upto and p->first == br);
 
                 if (unlikely(broker_req->partitions_list.size() > 250)) {
                         // we do not currently allow more than 250 partitions per topic
@@ -817,23 +657,20 @@ switch_dlist *TankClient::assign_req_partitions_to_api_req(api_request *api_req,
         return next;
 }
 
-// we will be tracking all known brokers
-// whenever a node fails, it will be moved to the tail, and we will always use the broker at the head
+// We will be tracking all known brokers
+//
+// Whenever a node fails, it will be moved to the tail, and we will always use the broker at the head
 // this is so that we will always attempt to use a broker that hasn't failed.
 //
-// we need this functionality for when we haven't had the chance to associate a (topic, partition) to a leader
+// We need this functionality for when we haven't had the chance to associate a (topic, partition) to a leader
 // and for when we need to issue a request that's not particular to a topic or a partition(e.g discover_partitions)
 TankClient::broker *TankClient::any_broker() {
-        if (all_brokers.empty()) {
-#ifdef TANK_THROW_SWITCH_EXCEPTIONS
-                throw Switch::runtime_error("No brokers");
-#else
+        if (all_brokers.empty()) [[unlikely]] {
                 throw std::runtime_error("No brokers");
-#endif
         }
 
         // always use head
-        return switch_list_entry(broker, all_brokers_ll, all_brokers.next);
+        return containerof(broker, all_brokers_ll, all_brokers.next);
 }
 
 TankClient::broker *TankClient::broker_by_endpoint(const Switch::endpoint e) {
@@ -893,7 +730,7 @@ TankClient::broker_outgoing_payload *TankClient::new_req_payload(broker_api_requ
         return payload;
 }
 
-bool TankClient::schedule_broker_req(broker_api_request *breq) {
+bool TankClient::schedule_broker_req(broker_api_request *const breq) {
         auto payload = build_broker_req_payload(breq);
 
         return schedule_broker_payload(breq, payload);
@@ -901,18 +738,24 @@ bool TankClient::schedule_broker_req(broker_api_request *breq) {
 
 // Enqueues payload with a broker's outgoing payloads queue
 bool TankClient::schedule_broker_payload([[maybe_unused]] broker_api_request *br_req,
-                                         broker_outgoing_payload *            payload) {
-        TANK_EXPECT(payload);
-        TANK_EXPECT(payload->iovecs.size);
-        static constexpr bool trace{false};
-        auto                  br = payload->broker_req->br;
+                                         broker_outgoing_payload             *payload) {
+        enum {
+                trace = false,
+        };
+        assert(payload);
+        assert(payload->iovecs.size);
+        assert(payload->broker_req);
+        assert(payload->broker_req->br);
+        auto br = payload->broker_req->br;
 
         if (trace) {
                 SLog("Scheduling payload for broker ", ptr_repr(br), " ", br->ep, " br->outgoing_content.size = ", br->outgoing_content.size(), ", payload->iovecs.size = ", payload->iovecs.size, "\n");
         }
 
         if (br->reachability == broker::Reachability::Blocked) {
-                static constexpr const bool trace{false};
+                enum {
+                        trace = false,
+                };
 
                 if (now_ms > br->blocked_until) {
                         if (trace) {
@@ -993,8 +836,7 @@ void TankClient::fail_api_request(std::unique_ptr<api_request> ar) {
 
         for (auto part : contexts) {
                 // XXX: timeout?
-                clear_request_partition_ctx(ar.get(), part);
-                put_request_partition_ctx(part);
+                discard_request_partition_ctx(ar.get(), part);
         }
 
         for (auto b : ar->managed_bufs) {
@@ -1039,22 +881,28 @@ uint32_t TankClient::schedule_new_api_req(std::unique_ptr<api_request> api_req) 
 }
 
 void TankClient::unlink_broker_req(broker_api_request *br_req, const size_t ref) {
-        static constexpr bool trace{false};
-        TANK_EXPECT(br_req);
+        enum {
+                trace = false,
+        };
+        assert(br_req);
+
         connection *c{nullptr};
         auto        br = br_req->br;
 
         if (trace) {
-                SLog("Unlinking broker_api_request(ID:", br_req->id, "), have_payload = ", br_req->have_payload, ", pending:", br_req->pending_responses_list_ll.empty() == false, ", ref = ", ref, "\n");
+                SLog("Unlinking broker_api_request(Boker ID:", br_req->id,
+                     "), have_payload = ", br_req->have_payload,
+                     ", pending:", not br_req->pending_responses_list_ll.empty(), ", ref = ", ref, "\n");
         }
 
         if (br_req->have_payload) {
                 // this gets complicated fast
                 // we have generated a payload for this request, and that payload may not have been scheduled
                 // for transmission to the peer yet
-                TANK_EXPECT(br);
+                assert(br);
 
                 c = br->ch.get();
+
                 if (br->can_safely_abort_broker_request_payload(br_req)) {
                         if (trace) {
                                 SLog("can_safely_abort_broker_request_payload()\n");
@@ -1091,15 +939,8 @@ void TankClient::unlink_broker_req(broker_api_request *br_req, const size_t ref)
                 br_req->have_payload = false;
         }
 
-        if (!br_req->broker_requests_list_ll.empty()) {
-                // from api_req
-                br_req->broker_requests_list_ll.detach_and_reset();
-        }
-
-        if (!br_req->pending_responses_list_ll.empty()) {
-                // from broker
-                br_req->pending_responses_list_ll.detach_and_reset();
-        }
+        br_req->broker_requests_list_ll.try_detach_and_reset();   // from api_req
+        br_req->pending_responses_list_ll.try_detach_and_reset(); // from broker
 
         // this may have been erased from pending_brokers_requests
         // see process_consume_content_impl()
@@ -1115,9 +956,9 @@ void TankClient::unlink_broker_req(broker_api_request *br_req, const size_t ref)
                 shutdown(c, __LINE__, false);
 
                 if (br) {
-                        TANK_EXPECT(br->ch.get() == nullptr);
+                        assert(br->ch.get() == nullptr);
 
-                        if (false == br->outgoing_content.empty()) {
+                        if (not br->outgoing_content.empty()) {
                                 if (trace) {
                                         SLog("There's outstanding outgoing content for that broker\n");
                                 }
@@ -1155,13 +996,13 @@ void TankClient::process_undeliverable_broker_req(broker_api_request *br_req, co
                 }
 
                 while (!br_req->partitions_list.empty()) {
-                        auto part = switch_list_entry(request_partition_ctx, partitions_list_ll, br_req->partitions_list.next);
+                        auto part = containerof(request_partition_ctx, partitions_list_ll, br_req->partitions_list.next);
 
                         capture_timeout(api_req, part->topic, part->partition, __LINE__);
 
                         part->partitions_list_ll.detach();
-                        clear_request_partition_ctx(api_req, part);
-                        put_request_partition_ctx(part);
+
+                        discard_request_partition_ctx(api_req, part);
                 }
         } else {
                 // this payload is associated with a broker_api_request
@@ -1170,13 +1011,13 @@ void TankClient::process_undeliverable_broker_req(broker_api_request *br_req, co
 
                 if (reason_timeout) {
                         while (!br_req->partitions_list.empty()) {
-                                auto req_part = switch_list_entry(request_partition_ctx, partitions_list_ll, br_req->partitions_list.next);
+                                auto req_part = containerof(request_partition_ctx, partitions_list_ll, br_req->partitions_list.next);
 
                                 capture_timeout(api_req, req_part->topic, req_part->partition, __LINE__);
 
                                 req_part->partitions_list_ll.detach();
-                                clear_request_partition_ctx(api_req, req_part);
-                                put_request_partition_ctx(req_part);
+
+                                discard_request_partition_ctx(api_req, req_part);
                         }
                         br_req->partitions_list.reset();
 
@@ -1189,7 +1030,7 @@ void TankClient::process_undeliverable_broker_req(broker_api_request *br_req, co
                         bool                              any_failed{false};
 
                         for (auto it : br_req->partitions_list) {
-                                auto req_part = switch_list_entry(request_partition_ctx, partitions_list_ll, it);
+                                auto req_part = containerof(request_partition_ctx, partitions_list_ll, it);
                                 auto broker   = partition_leader(req_part->topic, req_part->partition) ?: any_broker();
 
                                 contexts.emplace_back(std::make_pair(broker, req_part));
@@ -1204,7 +1045,7 @@ void TankClient::process_undeliverable_broker_req(broker_api_request *br_req, co
                         // and dispatch new payload
                         for (auto it                                  = assign_req_partitions_to_api_req(api_req, &contexts);
                              it != &api_req->broker_requests_list; it = it->next) {
-                                auto broker_req = switch_list_entry(broker_api_request, broker_requests_list_ll, it);
+                                auto broker_req = containerof(broker_api_request, broker_requests_list_ll, it);
 
                                 reqs.emplace_back(broker_req);
                         }
@@ -1212,13 +1053,13 @@ void TankClient::process_undeliverable_broker_req(broker_api_request *br_req, co
                         for (auto br_req : reqs) {
                                 if (!schedule_broker_req(br_req)) {
                                         while (!br_req->partitions_list.empty()) {
-                                                auto part = switch_list_entry(request_partition_ctx, partitions_list_ll, br_req->partitions_list.next);
+                                                auto part = containerof(request_partition_ctx, partitions_list_ll, br_req->partitions_list.next);
 
                                                 capture_network_fault(api_req, part->topic, part->partition);
 
                                                 part->partitions_list_ll.detach();
-                                                clear_request_partition_ctx(api_req, part);
-                                                put_request_partition_ctx(part);
+
+                                                discard_request_partition_ctx(api_req, part);
                                         }
 
                                         unlink_broker_req(br_req, __LINE__);
@@ -1272,7 +1113,7 @@ void TankClient::try_stop_track_unreachable(broker *br) {
 // for each newly assigned broker request, generate a matching payload and try to schedule it for transmission
 bool TankClient::schedule_req_partitions(api_request *api_req, std::vector<std::pair<broker *, request_partition_ctx *>> *contexts) {
         for (auto it = assign_req_partitions_to_api_req(api_req, contexts); it != &api_req->broker_requests_list; it = it->next) {
-                auto broker_req = switch_list_entry(broker_api_request, broker_requests_list_ll, it);
+                auto broker_req = containerof(broker_api_request, broker_requests_list_ll, it);
 
                 if (!schedule_broker_req(broker_req)) {
                         return false;
@@ -1382,7 +1223,9 @@ bool TankClient::init_broker_connection(broker *br) {
 
 // tries to transmit any scheduled payloads
 bool TankClient::try_transmit(broker *const br) {
-        static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
 
         if (trace) {
                 SLog("Attempting to transmit to ", br->ep, "\n");
@@ -1390,8 +1233,16 @@ bool TankClient::try_transmit(broker *const br) {
 
         auto c = br->ch.get();
 
-        if (!c) {
-                if (!init_broker_connection(br)) {
+        if (not c) {
+                if (trace) {
+                        SLog("Need a new connection\n");
+                }
+
+                if (not init_broker_connection(br)) {
+                        if (trace) {
+                                SLog("Failed to initialize broker connection\n");
+                        }
+
                         flush_broker(br);
                         return false;
                 }
@@ -1402,7 +1253,12 @@ bool TankClient::try_transmit(broker *const br) {
         }
 
         TANK_EXPECT(c);
+
         if (0 == (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail)))) {
+                if (trace) {
+                        SLog("Can tx() now\n");
+                }
+
                 return tx(c);
         }
 
@@ -1411,9 +1267,9 @@ bool TankClient::try_transmit(broker *const br) {
 
 static constexpr bool trace_captured_faults{true};
 
-void TankClient::capture_unsupported_request(api_request *api_req) {
+void TankClient::capture_unsupported_request(api_request *api_req, const uint32_t ref) {
         if (trace_captured_faults) {
-                SLog("Captured FAULT\n");
+                SLog("Captured FAULT: unsupported request, at ", ref, "\n");
         }
 
         api_req->set_failed();
@@ -1428,7 +1284,7 @@ void TankClient::capture_unsupported_request(api_request *api_req) {
 
 void TankClient::capture_topic_already_exists(api_request *api_req, const str_view8 topic_name) {
         if (trace_captured_faults) {
-                SLog("Captured FAULT\n");
+                SLog("Captured FAULT: topic already exists\n");
         }
 
         api_req->set_failed();
@@ -1440,9 +1296,9 @@ void TankClient::capture_topic_already_exists(api_request *api_req, const str_vi
         });
 }
 
-void TankClient::capture_network_fault(api_request *api_req, const str_view8 topic_name, const uint16_t partition) {
+void TankClient::capture_network_fault(api_request *api_req, const str_view8 topic_name, const uint16_t partition, const uint32_t ref) {
         if (trace_captured_faults) {
-                SLog("Captured FAULT\n");
+                SLog("Captured FAULT at ", ref, "\n");
         }
 
         api_req->set_failed();
@@ -1665,23 +1521,34 @@ TankClient::broker_outgoing_payload *TankClient::broker::abort_broker_request_pa
         return nullptr;
 }
 
-void TankClient::update_api_req(api_request *api_req, const bool any_faults, std::vector<request_partition_ctx *> *no_leader, std::vector<request_partition_ctx *> *retry) {
-        [[maybe_unused]] static constexpr bool trace{false};
+void TankClient::update_api_req(api_request                                *api_req,
+                                const bool                                  any_faults,
+                                std::vector<request_partition_ctx *> *const no_leader,
+                                std::vector<request_partition_ctx *> *const retry) {
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(api_req);
         const auto expiration = api_req->expiration();
 
-        if (any_faults || expiration < now_ms) {
+        if (trace) {
+                SLog("In update_api_req() any_faults = ", any_faults, ", expiration = ", expiration, ", now_ms = ", now_ms, "\n");
+        }
+
+        // UPDATE: 2021-10-06
+        // now (expiration and expiration < now_ms)
+        if (any_faults or (expiration and expiration < now_ms)) {
                 if (no_leader) {
+                        // no leader available for some partitions
                         for (auto part : *no_leader) {
-                                clear_request_partition_ctx(api_req, part);
-                                put_request_partition_ctx(part);
+                                discard_request_partition_ctx(api_req, part);
                         }
                 }
 
                 if (retry) {
+                        // we need to retry (different leader ?) some partitions requests
                         for (auto part : *retry) {
-                                clear_request_partition_ctx(api_req, part);
-                                put_request_partition_ctx(part);
+                                discard_request_partition_ctx(api_req, part);
                         }
                 }
 
@@ -1690,26 +1557,28 @@ void TankClient::update_api_req(api_request *api_req, const bool any_faults, std
 
         auto exp = now_ms + 2000; // XXX: arbitrary
 
-        if (expiration && expiration < exp) {
+        if (expiration and expiration < exp) {
                 exp = expiration;
         }
 
-        if (exp > now_ms && exp - now_ms > 100) {
-                if (no_leader && !no_leader->empty()) {
+        if (exp > now_ms and exp - now_ms > 100) {
+                if (no_leader and not no_leader->empty()) {
                         schedule_retry(api_req, no_leader->data(), no_leader->size(), exp);
                 }
         } else if (no_leader) {
                 for (auto part : *no_leader) {
-                        clear_request_partition_ctx(api_req, part);
-                        put_request_partition_ctx(part);
+                        discard_request_partition_ctx(api_req, part);
                 }
         }
 
-        if (retry && !retry->empty()) {
-                if (!schedule_req_partitions(api_req, retry)) {
+        if (retry and not retry->empty()) {
+                if (trace) {
+                        SLog("Need to retry ", retry->size(), "\n");
+                }
+
+                if (not schedule_req_partitions(api_req, retry)) {
                         for (auto part : *retry) {
-                                clear_request_partition_ctx(api_req, part);
-                                put_request_partition_ctx(part);
+                                discard_request_partition_ctx(api_req, part);
                         }
 
                         IMPLEMENT_ME();
@@ -1718,7 +1587,7 @@ void TankClient::update_api_req(api_request *api_req, const bool any_faults, std
 }
 
 void TankClient::gc_ready_responses() {
-        while (!ready_responses.empty()) {
+        while (not ready_responses.empty()) {
                 std::unique_ptr<api_request> api_req(std::move(ready_responses.back()));
 
                 ready_responses.pop_back();

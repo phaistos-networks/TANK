@@ -167,18 +167,18 @@ auto get_buf() {
 	return res;
 }
 
-
 repl_stream *get_repl_stream() {
-	repl_stream *s;
+        repl_stream *s;
 
-	if (!reusable_replication_streams.empty())  {
-		s = reusable_replication_streams.back();
-		reusable_replication_streams.pop_back();
-	} else {
-		s = static_cast<repl_stream *>(repl_streams_allocator.Alloc(sizeof(repl_stream)));
-	}
-	s->reset();
-	return s;
+        if (not reusable_replication_streams.empty()) {
+                s = reusable_replication_streams.back();
+                reusable_replication_streams.pop_back();
+        } else {
+                s = static_cast<repl_stream *>(repl_streams_allocator.Alloc(sizeof(repl_stream)));
+        }
+
+        s->reset();
+        return s;
 }
 
 void put_repl_stream(repl_stream *s) {
@@ -199,12 +199,13 @@ void put_buf(IOBuffer *b) {
 file_contents_payload *get_file_contents_payload() {
         file_contents_payload *p;
 
-        if (!reusable_file_contents_payloads.empty()) {
+        if (not reusable_file_contents_payloads.empty()) {
                 p = reusable_file_contents_payloads.back();
                 reusable_file_contents_payloads.pop_back();
         } else {
                 p      = static_cast<file_contents_payload *>(payloads_allocator.Alloc(sizeof(file_contents_payload)));
                 p->src = payload::Source::FileContents;
+                new (&p->file_range) content_file_range();
         }
 
         p->reset();
@@ -219,7 +220,7 @@ void put_file_contents_payload(file_contents_payload *p) {
 data_vector_payload *get_data_vector_payload() {
         data_vector_payload *p;
 
-        if (!reusable_data_vector_payloads.empty()) {
+        if (not reusable_data_vector_payloads.empty()) {
                 p = reusable_data_vector_payloads.back();
                 reusable_data_vector_payloads.pop_back();
         } else {
@@ -239,13 +240,13 @@ connection *get_connection();
 
 void put_connection(connection *const c);
 
-void register_topic(topic *const t) {
-        if (false == topics.insert({t->name(), t}).second) {
+void register_topic(std::shared_ptr<topic> t) {
+	if (not topics.emplace(t->name(), t).second) {
                 throw Switch::exception("Topic ", t->name(), " already registered");
         }
 }
 
-Switch::shared_refptr<topic_partition> init_local_partition(const uint16_t idx, topic *, const partition_config &, const bool);
+std::shared_ptr<topic_partition> init_local_partition(const uint16_t idx, topic *, const partition_config &, const bool);
 
 uint32_t partitionLeader(const topic_partition *const p) {
         return 1;
@@ -307,6 +308,10 @@ bool process_consume(const TankAPIMsgType, connection *const c, const uint8_t *p
 
 bool process_discover_partitions(connection *const c, const uint8_t *p, const size_t len);
 
+bool process_discover_topics(connection *const c, const uint8_t *p, const size_t len);
+
+bool process_discover_topology(connection *const c, const uint8_t *p, const size_t len);
+
 bool process_create_topic(connection *const c, const uint8_t *p, const size_t len);
 
 bool process_status(connection *const c, const uint8_t *p, const size_t len);
@@ -321,7 +326,13 @@ wait_ctx *get_waitctx(const uint32_t totalPartitions) {
                 v.pop_back();
                 return res;
         } else {
-                return reinterpret_cast<wait_ctx *>(malloc(sizeof(wait_ctx) + totalPartitions * sizeof(wait_ctx_partition)));
+                auto ptr =  reinterpret_cast<wait_ctx *>(malloc(sizeof(wait_ctx) + totalPartitions * sizeof(wait_ctx_partition)));
+
+		for (std::size_t i = 0; i < totalPartitions; ++i) {
+			new (&ptr->partitions[i]) wait_ctx_partition();
+		}
+
+		return ptr;
         }
 }
 
@@ -359,7 +370,7 @@ void destroy_wait_ctx(wait_ctx *const wctx);
 
 void cleanup_connection(connection *, const uint32_t);
 
-bool shutdown(connection *const c, const uint32_t ref);
+bool shutdown(connection *const c, const unsigned ref = __builtin_LINE());
 
 enum class flushop_res : uint8_t {
         NeedOutAvail,
@@ -491,6 +502,8 @@ void abort_peer_connection_local(cluster_node *, connection *);
 
 void replicate_from(cluster_node *, topic_partition *const*, const std::size_t);
 
+std::size_t determine_min_fetch_size_for_new_stream();
+
 void try_replicate_from(const std::unordered_set<cluster_node *> &);
 
 void did_abort_repl_stream(cluster_node *);
@@ -507,7 +520,7 @@ bool close_partition_log(topic_partition *);
 
 int reset_partition_log(topic_partition *);
 
-Switch::shared_refptr<topic_partition>  define_partition(const uint16_t, topic *);
+std::shared_ptr<topic_partition>  define_partition(const uint16_t, topic *);
 
 void persist_peer_partitions_content(topic_partition *, const std::vector<topic_partition::msg> &, const bool);
 

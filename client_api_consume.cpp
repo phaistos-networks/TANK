@@ -232,9 +232,9 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                 trace        = false,
                 trace_faults = false,
         };
-        TANK_EXPECT(c);
-        TANK_EXPECT(c->type == connection::Type::Tank);
-        TANK_EXPECT(c->fd > 2);
+        assert(c);
+        assert(c->type == connection::Type::Tank);
+        assert(c->fd > 2);
         const auto *p   = content;
         const auto  end = p + len;
         // the response header length is encoded in the response so that we can quickly jump to
@@ -348,8 +348,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         SLog("Ignoring partition ", req_part->partition, "\n");
                                 }
 
-                                clear_request_partition_ctx(api_req, req_part);
-                                put_request_partition_ctx(req_part);
+				discard_request_partition_ctx(api_req, req_part);
 
                                 br_req_partctx_it = next;
                         } while (br_req_partctx_it != &br_req->partitions_list &&
@@ -389,8 +388,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 TANK_EXPECT(br_req_partctx_it != &br_req->partitions_list);
                                 auto req_part = switch_list_entry(request_partition_ctx, partitions_list_ll, br_req_partctx_it);
 
-                                clear_request_partition_ctx(api_req, req_part);
-                                put_request_partition_ctx(req_part);
+				discard_request_partition_ctx(api_req, req_part);
 
                                 br_req_partctx_it = next;
                                 continue;
@@ -407,8 +405,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 TANK_EXPECT(br_req_partctx_it != &br_req->partitions_list);
                                 auto req_part = switch_list_entry(request_partition_ctx, partitions_list_ll, br_req_partctx_it);
 
-                                clear_request_partition_ctx(api_req, req_part);
-                                put_request_partition_ctx(req_part);
+				discard_request_partition_ctx(api_req, req_part);
 
                                 br_req_partctx_it = next;
                                 continue;
@@ -536,8 +533,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 TANK_EXPECT(br_req_partctx_it != &br_req->partitions_list);
                                 auto req_part = switch_list_entry(request_partition_ctx, partitions_list_ll, br_req_partctx_it);
 
-                                clear_request_partition_ctx(api_req, req_part);
-                                put_request_partition_ctx(req_part);
+				discard_request_partition_ctx(api_req, req_part);
 
                                 br_req_partctx_it = next;
                                 continue;
@@ -915,6 +911,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                         }
 
                         TANK_EXPECT(next_min_span < 256 * 1024 * 1024); // sanity check
+
+                        req_part->as_op.response_valid = true;
 
                         req_part_resp.next.seq_num  = next_seqnum;
                         req_part_resp.next.min_size = next_min_span;

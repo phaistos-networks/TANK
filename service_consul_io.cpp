@@ -87,7 +87,7 @@ bool Service::recv_consul_resp_headers(connection *const c) {
 		}
 
 		if (!s.StripPrefix(_S("HTTP/"))) {
-			return shutdown(c, __LINE__);
+			return shutdown(c);
 		}
 
 		// process the first line
@@ -101,7 +101,7 @@ bool Service::recv_consul_resp_headers(connection *const c) {
 			}
 
 			if (*p != '.' || major == 0) {
-				return shutdown(c, __LINE__);
+				return shutdown(c);
 			}
 
 			for (++p; *p >= '0' && *p <= '9'; ++p) {
@@ -246,7 +246,7 @@ void Service::consider_long_running_active_consul_requests() {
                 }
 
                 c->state.flags |= 1u << unsigned(connection::State::Flags::ShutdownReasonTimeout);
-                shutdown(c, __LINE__);
+                shutdown(c);
         }
 }
 
@@ -360,7 +360,7 @@ bool Service::recv_consul_resp_content_chunks(connection *const c) {
                                 // what's this?
                                 // Unexpected input
                                 std::abort();
-                                return shutdown(c, __LINE__);
+                                return shutdown(c);
                         }
                 }
 
@@ -481,6 +481,8 @@ const uint8_t *Service::parse_compressed_http_resp_content(connection *const c, 
                 }
 
                 // we will decompress into cc.b
+		assert(not cc.b);
+
                 cc.b     = get_buf();
                 cc.state = CompressionContext::State::Content;
         } else if (cc.state == CompressionContext::State::Footer) {
@@ -604,7 +606,7 @@ bool Service::recv_consul_resp_content_gzip_chunks(connection *const c) {
                                 break;
                         } else {
                                 std::abort();
-                                return shutdown(c, __LINE__);
+                                return shutdown(c);
                         }
                 }
 
@@ -639,12 +641,12 @@ bool Service::recv_consul_resp_content_gzip_chunks(connection *const c) {
 
                         if (consume_it != upto) {
                                 // we expected to have consumed the _whole_ chunk here
-                                return shutdown(c, __LINE__);
+                                return shutdown(c);
                         } else if (cc.state != CompressionContext::State::Fin) {
                                 // This makes no sense
                                 // we consumed the whole gzip chunk but didn't get to the end?
                                 // likely corrupt
-                                return shutdown(c, __LINE__);
+                                return shutdown(c);
                         } else {
                                 TANK_EXPECT(cc.b);
 
@@ -670,14 +672,29 @@ bool Service::recv_consul_resp_content_gzip_chunks(connection *const c) {
 }
 
 void Service::tear_down_consul_resp(connection *const c) {
+	enum {
+		trace  = false,
+	};
         TANK_EXPECT(c);
         TANK_EXPECT(c->is_consul());
 
-        if (c->as.consul.state == connection::As::Consul::State::ReadContent || c->as.consul.state == connection::As::Consul::State::ReadCompressedContent) {
+	if (trace) {
+		SLog("tearing down consul response\n");
+	}
+
+        if (c->as.consul.state == connection::As::Consul::State::ReadContent or c->as.consul.state == connection::As::Consul::State::ReadCompressedContent) {
                 auto &resp = c->as.consul.cur.resp;
+
+                if (trace) {
+                        SLog("ReadContent or ReadCompressedContent\n");
+                }
 
                 if (resp.flags & unsigned(connection::As::Consul::Cur::Response::Flags::GZIP_Encoding)) {
                         auto &ctx = resp.comp_ctx;
+
+                        if (trace) {
+                                SLog("GZIP_Encoding:", ptr_repr(ctx.b), "\n");
+                        }
 
                         switch (ctx.state) {
                                 case CompressionContext::State::Headers:
@@ -685,14 +702,14 @@ void Service::tear_down_consul_resp(connection *const c) {
                                         break;
 
                                 default:
-                                        if (auto b = std::exchange(ctx.b, nullptr)) {
-                                                put_buf(b);
-                                        }
-
                                         inflateEnd(&ctx.stream);
                                         ctx.state = CompressionContext::State::Headers;
                                         break;
                         }
+                }
+
+                if (auto b = std::exchange(resp.comp_ctx.b, nullptr)) {
+                        put_buf(b);
                 }
         }
 
@@ -728,7 +745,7 @@ bool Service::recv_consul_resp_content_gzip(connection *const c) {
 			SLog("Got more data than expected\n");
 		}
 
-                return shutdown(c, __LINE__);
+                return shutdown(c);
         }
 
         const auto  b_data = reinterpret_cast<const uint8_t *>(b->data());
@@ -744,7 +761,7 @@ bool Service::recv_consul_resp_content_gzip(connection *const c) {
                 }
 
                 if (available_content_bytes > resp.remaining_content_bytes) {
-                        return shutdown(c, __LINE__);
+                        return shutdown(c);
                 }
 
                 // we don't care about the response so we 'll just silently consume and ignore it
@@ -763,7 +780,7 @@ bool Service::recv_consul_resp_content_gzip(connection *const c) {
 				SLog("Need to shut down the con\n");
 			}
 
-                        return shutdown(c, __LINE__);
+                        return shutdown(c);
                 } else if (consume_it == p) {
 			if (trace) {
 				SLog("Need more content\n");
@@ -847,7 +864,7 @@ bool Service::recv_consul_resp_content(connection *const c) {
 
         if (available_content_bytes > resp.remaining_content_bytes) {
                 // Got more than we expected to get
-                return shutdown(c, __LINE__);
+                return shutdown(c);
         }
 
         // expecting more data
@@ -868,7 +885,7 @@ bool Service::consider_http_headers_size(connection *const c) {
                 // We can't allow clients to send a request with too many headers
                 // nor a peer to provide a response with a large heade otherwise
                 // they could easily force inB to allocate too much memory
-                return shutdown(c, __LINE__);
+                return shutdown(c);
         }
 
         return true;

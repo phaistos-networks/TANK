@@ -251,8 +251,6 @@ void topic_partition_log::roll(const uint64_t absSeqNum, const uint64_t saved_la
         partition->flags &= ~unsigned(topic_partition::Flags::NoDataFiles);
 
         cur.fdh.reset(new fd_handle(fd));
-        TANK_EXPECT(cur.fdh->use_count() == 2);
-        cur.fdh->Release();
 
         basePath.resize(basePathLen);
         basePath.append(cur.baseSeqNum, ".index");
@@ -404,7 +402,7 @@ append_res topic_partition_log::append_bundle(const time_t   now,
         const auto                       entryLen = iov[0].iov_len + iov[1].iov_len;
         const range32_t                  fileRange(cur.fileSize, entryLen);
         const auto                       before = cur.fdh.use_count();
-        Switch::shared_refptr<fd_handle> fdh(cur.fdh);
+        std::shared_ptr<fd_handle> fdh(cur.fdh);
         const auto                       b = trace ? Timings::Microseconds::Tick() : uint64_t(0);
 
         TANK_EXPECT(cur.fdh.use_count() == before + 1);

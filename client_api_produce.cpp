@@ -200,9 +200,8 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                                         SLog("Skipping partition ", req_part->partition, "\n");
                                 }
 
-                                clear_request_partition_ctx(api_req, req_part);
-                                put_request_partition_ctx(req_part);
-                        } while ((part_it = next) != &br_req->partitions_list &&
+				discard_request_partition_ctx(api_req, req_part);
+                        } while ((part_it = next) != &br_req->partitions_list and
                                  (req_part = switch_list_entry(request_partition_ctx, partitions_list_ll, part_it))->topic == topic);
 
                         any_faults = true;
@@ -246,8 +245,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                                 any_faults = true;
                                 capture_invalid_req_fault(api_req, req_part->topic, req_part->partition);
 
-                                clear_request_partition_ctx(api_req, req_part);
-                                put_request_partition_ctx(req_part);
+				discard_request_partition_ctx(api_req, req_part);
 
                                 if (trace) {
                                         SLog("Attempted to publish to an explicit sequence number not allowed\n");
@@ -257,8 +255,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                                 any_faults = true;
                                 capture_readonly_fault(api_req);
 
-                                clear_request_partition_ctx(api_req, req_part);
-                                put_request_partition_ctx(req_part);
+				discard_request_partition_ctx(api_req, req_part);
 
                                 if (trace) {
                                         SLog("Read-Only system\n");
@@ -268,8 +265,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                                 any_faults = true;
                                 capture_unknown_partition_fault(api_req, req_part->topic, req_part->partition);
 
-                                clear_request_partition_ctx(api_req, req_part);
-                                put_request_partition_ctx(req_part);
+				discard_request_partition_ctx(api_req, req_part);
 
                                 if (trace) {
                                         SLog("Unkown partition ", req_part->topic, "/", req_part->partition, "\n");
@@ -288,8 +284,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                                 // I/O
                                 capture_system_fault(api_req, req_part->topic, req_part->partition);
 
-                                clear_request_partition_ctx(api_req, req_part);
-                                put_request_partition_ctx(req_part);
+				discard_request_partition_ctx(api_req, req_part);
 
                                 any_faults = true;
                         } else if (err == 0x3) {
@@ -300,8 +295,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                                 // insufficient replicas - cannot service the produce request
                                 capture_insuficient_replicas(api_req, req_part->topic, req_part->partition);
 
-                                clear_request_partition_ctx(api_req, req_part);
-                                put_request_partition_ctx(req_part);
+				discard_request_partition_ctx(api_req, req_part);
 
                                 any_faults = true;
                         } else {

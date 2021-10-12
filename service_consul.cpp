@@ -29,7 +29,7 @@
 |               |                                     | for that partition.                                                             |
 +---------------+-------------------------------------+---------------------------------------------------------------------------------+
 | conf-updates/ | .cluster OR <topic_name>            | Whenever a topic or cluster's configuration is updated, we use                  |
-|               |                                     | a transaction to update two keys. We "touch" a conf/updates                     |
+|               |                                     | a transaction to update two keys. We "touch" a conf-updates                     |
 |               |                                     | key, and we update the contents in configs/                                     |
 |               |                                     |                                                                                 |
 |               |                                     | We care for ModifyIndex of whatever keys in conf-updates. Whenever              |
@@ -67,6 +67,9 @@ Important Consul Semantics:
 //	there is a cluster leader and if not, attempt to become leaders outselves.
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 bool Service::register_with_cluster() {
+	enum {
+		trace = false,
+	};
         TANK_EXPECT(cluster_aware());
         TANK_EXPECT(consul_state.srv.state != ConsulState::Srv::State::Available);
 
@@ -103,7 +106,9 @@ bool Service::register_with_cluster() {
         // important: need to be in all_available_nodes
         cluster_state.all_available_nodes.emplace_back(n);
 
+	if (trace) {
         SLog(ansifmt::bold, ansifmt::inverse, ansifmt::color_red, "CLUSTER: registration", ansifmt::reset, "\n");
+	}
 
         // we don't know yet
         consul_state.srv.state = ConsulState::Srv::State::Unknown;
@@ -390,7 +395,9 @@ void Service::request_cluster_config() {
 }
 
 void Service::request_topic_config(topic *t) {
-        static constexpr bool trace{false};
+        enum {
+	trace = false,
+};
         auto                  req = consul_state.get_req(consul_request::Type::RetrieveTopicConfig);
 
         if (trace) {
@@ -404,7 +411,13 @@ void Service::request_topic_config(topic *t) {
 void Service::consul_ns_retrieval_complete() {
         // now fetch _all_ configurations before we can
         // renew or create a session
-        SLog(ansifmt::bold, ansifmt::color_red, ansifmt::bgcolor_green, "CLUSTER: NS retrieval complete", ansifmt::reset, "\n");
+        enum {
+                trace = false,
+        };
+
+        if (trace) {
+                SLog(ansifmt::bold, ansifmt::color_red, ansifmt::bgcolor_green, "CLUSTER: NS retrieval complete", ansifmt::reset, "\n");
+        }
 
         consul_state.flags |= unsigned(ConsulState::Flags::StateRetrieved);
 
@@ -1193,14 +1206,19 @@ bool Service::consider_consul_resp_headers(connection *const c) {
 
 // Generates 0+ more consul requests in order to apply replicas set and partitions leaders updates
 // order is imortant
-consul_request *Service::schedule_topology_update_tx(const std::vector<NodesPartitionsUpdates::reduced_rs> &          reduced,
-                                                     const std::vector<NodesPartitionsUpdates::expanded_rs> &         expanded,
+consul_request *Service::schedule_topology_update_tx(const std::vector<NodesPartitionsUpdates::reduced_rs>           &reduced,
+                                                     const std::vector<NodesPartitionsUpdates::expanded_rs>          &expanded,
                                                      const std::vector<NodesPartitionsUpdates::leadership_promotion> &promotions,
                                                      topic_partition **dirty_isr_list, const size_t dirty_isr_list_size) {
-        [[maybe_unused]] static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(cluster_aware());
 
-        if (reduced.empty() && expanded.empty() && promotions.empty() && 0 == dirty_isr_list) {
+        if (reduced.empty() and
+            expanded.empty() and
+            promotions.empty() and
+            0 == dirty_isr_list_size) {
                 return nullptr;
         }
 
@@ -1229,8 +1247,10 @@ consul_request *Service::schedule_topology_update_tx(const std::vector<NodesPart
         // https://www.consul.io/api/txn.html
         // no more than 64 ops can be included in a single transaction
         // we may need multiple transactions
+        enum : std::size_t {
+                tx_max_ops = 64u,
+        };
         std::vector<std::unique_ptr<IOBuffer>> reprs;
-        static constexpr const size_t          tx_max_ops{64};
         size_t                                 n{tx_max_ops};
         char                                   node_repr[64];
 
@@ -1253,9 +1273,17 @@ consul_request *Service::schedule_topology_update_tx(const std::vector<NodesPart
                 for (const auto n : p->cluster.replicas.nodes) {
                         base64_dec_buffer.append(n->id, ',');
                 }
-                if (!base64_dec_buffer.empty()) {
+
+                if (not base64_dec_buffer.empty()) {
                         base64_dec_buffer.pop_back();
                 }
+
+#ifdef HAVE_SWITCH
+                if (trace) {
+                        SLog("To set RS of ", p->owner->name(), "/", p->idx,
+                             " to [", values_repr_with_lambda(p->cluster.replicas.nodes.data(), p->cluster.replicas.nodes.size(), [](const auto it) noexcept { return it->id; }), "]\n");
+                }
+#endif
 
                 b->append(R"json({"KV": {"Verb": "set", "Key": ")json"_s32);
                 b->append(cluster_state.tank_ns, "/clusters/"_s32, cluster_state.name(), "/topology/"_s32, p->owner->name(), '/', p->idx);
@@ -1289,7 +1317,8 @@ consul_request *Service::schedule_topology_update_tx(const std::vector<NodesPart
 
                         base64_dec_buffer.append(n->id, ',');
                 }
-                if (!base64_dec_buffer.empty()) {
+
+                if (not base64_dec_buffer.empty()) {
                         base64_dec_buffer.pop_back();
                 }
 
@@ -1353,7 +1382,8 @@ consul_request *Service::schedule_topology_update_tx(const std::vector<NodesPart
 
                         base64_dec_buffer.append(node->id, ',');
                 }
-                if (!base64_dec_buffer.empty()) {
+
+                if (not base64_dec_buffer.empty()) {
                         base64_dec_buffer.pop_back();
                 }
 

@@ -87,13 +87,15 @@ struct strwithlen {
                         return {{this->p, this->len}, {}};
         }
 
+#if 0
         // warning: with copy assignment operator not allowed in union
         // UODATE: Well, we don't care now, C++11 allows for non PODs in unions as long as you initialize them
-        strwithlen &operator=(const strwithlen &o) {
+        strwithlen &operator=(const strwithlen &o) noexcept {
                 p   = o.p;
                 len = o.len;
                 return *this;
         }
+#endif
 
         strwithlen &operator=(const CT *const s) {
                 p   = s;
@@ -160,6 +162,21 @@ struct strwithlen {
                 if (IsConstant() == false)
                         free(const_cast<char *>(p));
                 p = nullptr;
+        }
+
+        auto make_copy() const {
+                return len ? strwithlen(Copy(), len) : strwithlen{};
+        }
+
+        // you better know what you are doing
+        void try_free() {
+                if (p) {
+                        if (not IsConstant()) {
+                                std::free(const_cast<char *>(p));
+                        }
+
+                        p = nullptr;
+                }
         }
 
         void Print() const {

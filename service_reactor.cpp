@@ -495,7 +495,7 @@ int Service::process_io(const int r, const uint64_t max_conn_gen) {
                 const auto events = it->events;
 
                 if (events & (EPOLLHUP | EPOLLERR)) {
-                        shutdown(c, __LINE__);
+                        shutdown(c);
                         continue;
                 }
 
@@ -594,7 +594,7 @@ void Service::consider_idle_conns() {
                         break;
                 }
 
-                shutdown(c, __LINE__);
+                shutdown(c);
         }
 }
 
@@ -836,7 +836,7 @@ size_t Service::try_shutdown_idle(size_t n) {
                 auto c = switch_list_entry(connection, classification.ll, idle_connections.prev);
 
                 TANK_EXPECT(c->state.classification() == connection::ClassificationTracker::Type::Idle);
-                shutdown(c, __LINE__);
+                shutdown(c);
                 --n;
         }
 
@@ -971,7 +971,7 @@ void Service::fire_timer(timer_node *const ctx) {
                         c->verify();
 
                         SLog("Shutting down consumer connection\n");
-                        shutdown(c, __LINE__);
+                        shutdown(c);
                 } break;
 
                 case timer_node::ContainerType::ForceSetReactorStateIdle: {
@@ -1013,7 +1013,7 @@ void Service::fire_timer(timer_node *const ctx) {
                         TANK_EXPECT(c->type == connection::Type::Consumer);
                         c->verify();
 
-                        shutdown(c, __LINE__);
+                        shutdown(c);
                 } break;
 
                 case timer_node::ContainerType::ConnEstTimeout: {
@@ -1027,7 +1027,7 @@ void Service::fire_timer(timer_node *const ctx) {
                                 SLog("Too long to connect to consul ", ptr_repr(c), "\n");
                         }
 
-                        shutdown(c, __LINE__);
+                        shutdown(c);
                 } break;
 
                 case timer_node::ContainerType::WaitCtx: {
@@ -1139,7 +1139,9 @@ void Service::schedule_retry_consume_from(cluster_node *n) {
 }
 
 void Service::cleanup_connection(connection *const c, [[maybe_unused]] const uint32_t ref) {
-        static constexpr bool trace{false};
+	enum {
+		trace = true,
+	};
         TANK_EXPECT(c);
         TANK_EXPECT(c->fd != -1);
 
@@ -1223,7 +1225,6 @@ void Service::cleanup_connection(connection *const c, [[maybe_unused]] const uin
                                 }
                         } else {
                                 switch (c->as.consul.state) {
-
                                         case connection::As::Consul::State::Idle:
                                                 if (trace) {
                                                         SLog("Shut down an idle consul client\n");
@@ -1242,7 +1243,7 @@ void Service::cleanup_connection(connection *const c, [[maybe_unused]] const uin
 
                                                 enqueue_consul_req(req);
 
-                                                if (c->as.consul.state == connection::As::Consul::State::WaitRespFirstBytes && req->will_long_poll()) {
+                                                if (c->as.consul.state == connection::As::Consul::State::WaitRespFirstBytes and req->will_long_poll()) {
                                                         // this is fine, likely timed out by consul because polling for far too long
                                                         // enqueing it for retry as soon as possible is sufficient
                                                         if (trace) {
@@ -1313,7 +1314,7 @@ void Service::cleanup_connection(connection *const c, [[maybe_unused]] const uin
                                 expiredCtxList.push_back(switch_list_entry(wait_ctx, list, it));
                         }
 
-                        while (!expiredCtxList.empty()) {
+                        while (not expiredCtxList.empty()) {
                                 auto ctx = expiredCtxList.back();
 
                                 expiredCtxList.pop_back();
@@ -1361,7 +1362,9 @@ void Service::cleanup_connection(connection *const c, [[maybe_unused]] const uin
 }
 
 bool Service::shutdown(connection *const c, const uint32_t ref) {
-        static constexpr bool trace{false};
+	enum {
+		trace = false,
+	};
 
         if (-1 == c->fd) {
                 // already earlier
@@ -1422,9 +1425,7 @@ void Service::release_payload(payload *const p) {
                 case payload::Source::FileContents: {
                         auto fh_p = static_cast<file_contents_payload *>(p);
 
-                        if (auto fdh = std::exchange(fh_p->file_range.fdhandle, nullptr)) {
-                                fdh->Release();
-                        }
+			fh_p->file_range.fdhandle.reset();
 
                         put_file_contents_payload(fh_p);
                 } break;
@@ -1458,8 +1459,9 @@ Service::flushop_res Service::flush_file_contents(connection *const c,
         // any chance this is not the front?
         TANK_EXPECT(q->front() == payload);
 
-        TANK_EXPECT(it.file_range.fdhandle);
-        TANK_EXPECT(it.file_range.range.size());
+        assert(it.file_range.fdhandle);
+	assert(it.file_range.fdhandle->fd > 2);
+        assert(it.file_range.range.size());
 
         if (trace) {
                 SLog("About to transfer ", it.file_range.range, "\n");
@@ -1505,7 +1507,7 @@ Service::flushop_res Service::flush_file_contents(connection *const c,
                                 return flushop_res::NeedOutAvail;
                         } else {
                                 track_shutdown(c, __LINE__, "sendfile() failed: ", strerror(errno), " for ", outLen, "\n");
-                                shutdown(c, __LINE__);
+                                shutdown(c);
                                 return flushop_res::Shutdown;
                         }
                 } else {
@@ -1520,7 +1522,7 @@ Service::flushop_res Service::flush_file_contents(connection *const c,
                                 // done streaming the file chunk
                                 if (trace) {
                                         SLog("SENT-releasing ", ansifmt::bold, ansifmt::color_blue,
-                                             ptr_repr(it.file_range.fdhandle), " ", it.file_range.fdhandle->use_count(), ansifmt::reset, "\n");
+                                             ptr_repr(it.file_range.fdhandle.get()), " ", it.file_range.fdhandle.use_count(), ansifmt::reset, "\n");
                                 }
 
                                 if (const auto since = it.tracker.since) {
@@ -1535,7 +1537,8 @@ Service::flushop_res Service::flush_file_contents(connection *const c,
                                         topic->metrics.latency.reg_sample(delta);
                                 }
 
-                                std::exchange(it.file_range.fdhandle, nullptr)->Release();
+				it.file_range.fdhandle.reset();
+				assert(not it.file_range.fdhandle);
 
                                 q->pop_front_expected(payload);
                                 release_payload(payload);
@@ -1647,7 +1650,7 @@ Service::flushop_res Service::flush_iov_impl(connection *const   c,
                                                "writev() failed for ", iovCnt,
                                                ": ", strerror(errno), "\n");
 
-                                shutdown(c, __LINE__);
+                                shutdown(c);
 
                                 if (trace) {
                                         SLog("Return Shutdown\n");
@@ -1697,7 +1700,7 @@ Service::flushop_res Service::flush_iov_impl(connection *const   c,
                                                                 Switch::SetTCPCork(fd, 0);
                                                         }
 
-                                                        shutdown(c, __LINE__);
+                                                        shutdown(c);
 
                                                         if (trace) {
                                                                 SLog("Return Shutdown\n");
@@ -2046,7 +2049,7 @@ void Service::did_abort_repl_stream(cluster_node *peer) {
                         SLog("Replication stream to ", peer->ep, " aborted, and we no longer need to replicate for any partition from that node. Will severe conection\n");
                 }
 
-                shutdown(c, __LINE__);
+                shutdown(c);
         } else if (trace) {
                 SLog("Replication stream to ", peer->ep, " aborted, but there are other streams for other partitons with that node; will retain connection\n");
         }
@@ -2421,7 +2424,7 @@ bool Service::try_recv_consumer(connection *const c) {
 
                         if (unlikely(msg_len > 256 * 1024 * 1024)) {
                                 Print("** TOO large incoming packet of length ", size_repr(msg_len), "\n");
-                                return shutdown(c, __LINE__);
+                                return shutdown(c);
                         }
 
                         if (0 == (c->as.tank.flags & unsigned(connection::As::Tank::Flags::ConsideredReqHeader))) {
@@ -2490,7 +2493,7 @@ bool Service::try_recv_tank(connection *const c) {
                                 Print("** TOO large incoming packet of length ", size_repr(msg_length), "\n");
                                 track_shutdown(c, __LINE__, "Too large incoming packet of length ", msg_length, "\n");
 
-                                return shutdown(c, __LINE__);
+                                return shutdown(c);
                         }
 
                         if (0 == (c->as.tank.flags & unsigned(connection::As::Tank::Flags::ConsideredReqHeader))) {
@@ -2571,10 +2574,10 @@ bool Service::try_recv(connection *const c) {
                                 SLog("Failed:", strerror(errno), "\n");
                         }
 
-                        return shutdown(c, __LINE__);
+                        return shutdown(c);
                 }
         } else if (0 == r) {
-                return shutdown(c, __LINE__);
+                return shutdown(c);
         } else {
                 b->advance_size(r);
         }

@@ -29,11 +29,19 @@ void fail_api_request(std::unique_ptr<api_request>);
 
 void abort_api_request(api_request *);
 
+bool materialize_consume_api_request(api_request *);
+
+bool materialize_discover_partitions_request(api_request *);
+
+bool materialize_discover_topology_request(api_request *);
+
+bool materialize_discover_topics_request(api_request *);
+
 bool materialize_srv_request(api_request *);
 
 bool materialize_reload_config_request(api_request *);
 
-bool materialize_create_topic_requet(api_request *);
+bool materialize_create_topic_request(api_request *);
 
 bool materialize_produce_request(api_request *);
 
@@ -52,6 +60,11 @@ void check_unreachable_brokers();
 void try_make_api_req_ready(api_request *, const uint32_t);
 
 void clear_request_partition_ctx(api_request *, request_partition_ctx *);
+
+void discard_request_partition_ctx(api_request *const api_req, request_partition_ctx *const req_part) {
+        clear_request_partition_ctx(api_req, req_part);
+        put_request_partition_ctx(req_part);
+}
 
 void abort_api_request_brokers_reqs(api_request *, std::vector<request_partition_ctx *> *, const uint32_t);
 
@@ -75,7 +88,7 @@ void set_leader(const str_view8, const uint16_t, const str_view32);
 
 broker *partition_leader(const str_view8, const uint16_t);
 
-void capture_unsupported_request(api_request *);
+void capture_unsupported_request(api_request *, const uint32_t ref = __builtin_LINE());
 
 void capture_topic_already_exists(api_request *, const str_view8);
 
@@ -87,7 +100,7 @@ void capture_boundary_access_fault(api_request *, const str_view8, const uint16_
 
 void capture_timeout(api_request *, const str_view8, const uint16_t, const uint32_t);
 
-void capture_network_fault(api_request *, const str_view8, const uint16_t);
+void capture_network_fault(api_request *, const str_view8, const uint16_t, const uint32_t ref = __builtin_LINE());
 
 void capture_system_fault(api_request *, const str_view8, const uint16_t);
 
@@ -100,10 +113,6 @@ void capture_readonly_fault(api_request *);
 void fail_api_req(api_request *);
 
 void gc_api_request(std::unique_ptr<api_request>);
-
-bool materialize_consume_api_request(api_request *);
-
-bool materialize_discover_partitions_requests(api_request *);
 
 bool materialize_api_response(api_request *);
 
@@ -148,6 +157,11 @@ void check_pending_api_responses();
 
 void unlink_broker_req(broker_api_request *, const size_t);
 
+void release_broker_req(broker_api_request *const br_req, const unsigned ref = __builtin_LINE()) {
+	unlink_broker_req(br_req, ref);
+	put_broker_api_request(br_req);
+}
+
 void check_conns_pending_est();
 
 broker_outgoing_payload *build_broker_req_payload(broker_api_request *);
@@ -169,6 +183,10 @@ broker_outgoing_payload *build_create_topic_broker_req_payload(const broker_api_
 broker_outgoing_payload *build_produce_broker_req_payload(const broker_api_request *);
 
 broker_outgoing_payload *build_consume_broker_req_payload(const broker_api_request *);
+
+broker_outgoing_payload *build_discover_topics_broker_req_payload(const broker_api_request *);
+
+broker_outgoing_payload *build_discover_topology_req_payload(const broker_api_request *);
 
 broker_outgoing_payload *build_discover_partitions_broker_req_payload(const broker_api_request *);
 
@@ -216,7 +234,11 @@ bool process_produce(connection *const c, const uint8_t *const content, const si
 
 bool process_consume(connection *const c, const uint8_t *const content, const size_t len);
 
+bool process_discover_topics(connection *const c, const uint8_t *const content, const size_t len);
+
 bool process_discover_partitions(connection *const c, const uint8_t *const content, const size_t len);
+
+bool process_discover_topology(connection *const c, const uint8_t *const content, const size_t len);
 
 bool process_reload_partition_conf(connection *, const uint8_t *, const size_t);
 
@@ -328,6 +350,14 @@ const auto &produce_acks() const noexcept {
         return produce_acks_v;
 }
 
+const auto &discovered_topics() const noexcept {
+	return all_discovered_topics;
+}
+
+const auto &discovered_topologies() const noexcept {
+	return _discovered_topologies;
+}
+
 const auto &discovered_partitions() const noexcept {
         return all_discovered_partitions;
 }
@@ -352,16 +382,17 @@ inline void poll() {
 	reactor_step(std::numeric_limits<uint32_t>::max());
 }
 
-// Maybe you want to use it after poll() has returned
-// TODO: check if (!vector.empty()) instead; should be faster for std::vector<>
 bool any_responses() const noexcept {
-        return consumed().size() ||
-               faults().size() ||
-               produce_acks().size() ||
-               discovered_partitions().size() ||
-               reloaded_partition_configs().size() ||
-               created_topics().size() ||
-               statuses().size();
+        return not(
+            consumed().empty() and
+            faults().empty() and
+            produce_acks().empty() and
+            discovered_partitions().empty() and
+            reloaded_partition_configs().empty() and
+            created_topics().empty() and
+            discovered_topics().empty() and
+            discovered_topologies().empty() and
+            statuses().empty());
 }
 
 [[gnu::warn_unused_result, nodiscard]] uint32_t produce(const std::pair<topic_partition, std::vector<msg>> *, const size_t);
@@ -405,6 +436,10 @@ bool any_responses() const noexcept {
                                                              const uint32_t         minFetchSize,
                                                              const uint64_t         maxWait,
                                                              const uint32_t         minSize);
+
+[[gnu::warn_unused_result, nodiscard]] uint32_t discover_topology();
+
+[[gnu::warn_unused_result, nodiscard]] uint32_t discover_topics();
 
 [[gnu::warn_unused_result, nodiscard]] uint32_t discover_partitions(const strwlen8_t topic);
 

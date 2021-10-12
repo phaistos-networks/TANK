@@ -7,7 +7,8 @@ else
   ORIGIN=1
  endif
 endif
-		
+
+
 ifeq ($(ORIGIN), 1)
 # When building on our dev.system
 	include /home/system/Development/Switch/Makefile.dfl
@@ -22,14 +23,14 @@ else
 # Lean switch bundled in this repo
 	CXX:=clang++
 	LIBTREE_PATH:=$(shell pwd)/Switch/ext/ebtree/libtree.a
-	CXXFLAGS:=-std=c++1z  -Wstrict-aliasing=2 -Wsequence-point -Warray-bounds -Wextra -Winit-self -Wformat=2 -Wno-format-nonliteral -Wformat-security \
+	CXXFLAGS:=-stdlib=libc++ -std=c++2a -Wstrict-aliasing=2 -Wsequence-point -Warray-bounds -Wextra -Winit-self -Wformat=2 -Wno-format-nonliteral -Wformat-security \
 		-Wno-c++1z-extensions \
 		-I ./Switch/ext/ \
-		-Wunused-variable -Wunused-value -Wreturn-type -Wparentheses -Wmissing-braces -Wno-invalid-source-encoding -Wno-invalid-offsetof \
+		-Wunused-variable -Wunused-value -Wreturn-type -Wparentheses -Wmissing-braces -Wno-invalid-source-encoding -Wno-invalid-offsetof  -Wno-c99-designator \
 		-Wno-unknown-pragmas -Wno-missing-field-initializers -Wno-unused-parameter -Wno-sign-compare -Wno-invalid-offsetof   \
 		-fno-rtti -ffast-math  -D_REENTRANT -DREENTRANT  -g3 -ggdb -fno-omit-frame-pointer   \
 		-fno-strict-aliasing    -DLEAN_SWITCH  -ISwitch/ -I./ -Wno-uninitialized -Wno-unused-function -Wno-uninitialized -funroll-loops  -Ofast
-	LDFLAGS:=-ldl -ffunction-sections -pthread -ldl -lz -LSwitch/ext_snappy/ -lsnappy $(LIBTREE_PATH)
+	LDFLAGS:=-stdlib=libc++ -ldl -ffunction-sections -pthread -ldl -lz -LSwitch/ext_snappy/ -lsnappy $(LIBTREE_PATH)
 	SWITCH_LIB:=Switch/libswitch.a
 	SWITCH_DEP:=switch
 	EXT_DEP:=ext

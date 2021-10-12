@@ -81,13 +81,18 @@ void Service::conclude_bootstrap_updates() {
 // - Cluster leader must be available()
 // - A partition leader can only be missing or be NA if the partition is no longer active
 void Service::apply_cluster_state_updates() {
-        static constexpr bool trace{false};
+	enum {
+		trace = false,
+	};
         TANK_EXPECT(cluster_state.local_node.ref);
         TANK_EXPECT(cluster_state.local_node.id);
-	TANK_EXPECT(consul_state.reg_completed());
+        TANK_EXPECT(consul_state.reg_completed());
 
         cluster_partitions_dirty.clear();
-        if (cluster_state.updates.nodes.empty() && cluster_state.updates.pm.empty() && cluster_state.updates.tm.empty() && !cluster_state.updates.cluster_leader.defined) {
+        if (cluster_state.updates.nodes.empty() and
+            cluster_state.updates.pm.empty() and
+            cluster_state.updates.tm.empty() and
+            not cluster_state.updates.cluster_leader.defined) {
                 conclude_bootstrap_updates();
                 return;
         }
@@ -133,8 +138,9 @@ void Service::apply_cluster_state_updates() {
                 if (node == cluster_state.local_node.ref) {
                         // This is us, so explicitly do this
 
-                        if ((!ep || !avail) && (consul_state.flags & unsigned(ConsulState::Flags::BootstrapStateUpdatesProcessed))) {
-				// This is odd; someone deleted this from /nodes?
+                        if ((!ep || !avail) and
+                            (consul_state.flags & unsigned(ConsulState::Flags::BootstrapStateUpdatesProcessed))) {
+                                // This is odd; someone deleted this from /nodes?
 				if (trace) {
 					SLog(ansifmt::bgcolor_magenta, "This node is not available according to consul. Updating State", ansifmt::reset, "\n");
 				}
@@ -165,7 +171,7 @@ void Service::apply_cluster_state_updates() {
 
 			invalidate_replicated_partitions_from_peer_cache(node);
 
-                        if (!becoming_avail) {
+                        if (not becoming_avail) {
                                 // so that we will check for a new leader if possible
                                 for (auto p : node->replica_for) {
                                         dirty_partitions.insert(p);
@@ -178,8 +184,9 @@ void Service::apply_cluster_state_updates() {
                                         auto next  = it->next;
 
                                         if (part->cluster.leader.node == self) {
-						// REPAIR: only the partition leader can repair its ISR
+                                                // REPAIR: only the partition leader can repair its ISR
                                                 TANK_EXPECT(isr_e->node() == node);
+
                                                 if (trace) {
                                                         SLog(ansifmt::bgcolor_magenta, "Removed node(N/A) from ISR of ", part->owner->name(), "/", part->idx, ansifmt::reset, "\n");
                                                 }
@@ -288,8 +295,8 @@ void Service::apply_cluster_state_updates() {
                                 continue;
                         }
 
-                        for (auto p : *l) {
-                                dirty_partitions.insert(p);
+                        for (auto &it : *l) {
+                                dirty_partitions.insert(it.get());
                         }
                 }
         }
@@ -318,7 +325,9 @@ void Service::apply_cluster_state_updates() {
                                 dirty_topics.insert(t);
 
                                 if (auto l = t->partitions_) {
-                                        for (auto p : *l) {
+                                        for (auto &it : *l) {
+						auto *const p = it.get();
+
                                                 p->cluster.flags |= unsigned(topic_partition::Cluster::Flags::GC_ISR);
                                                 dirty_partitions.insert(p);
 						invalidate_replicated_partitions_from_peer_cache_by_partition(p);
@@ -335,7 +344,7 @@ void Service::apply_cluster_state_updates() {
 
                                 if (const auto update = state->total_enabled.value; update < cur) {
                                         for (auto i = update; i < cur; ++i) {
-                                                auto p = t->partitions_->at(i);
+                                                auto p = t->partitions_->at(i).get();
 
                                                 TANK_EXPECT(p);
                                                 p->cluster.flags |= unsigned(topic_partition::Cluster::Flags::GC_ISR);
@@ -344,7 +353,7 @@ void Service::apply_cluster_state_updates() {
                                         }
                                 } else if (update > cur) {
                                         for (auto i = cur; i < update; ++i) {
-                                                auto p = t->partitions_->at(i);
+                                                auto *const p = t->partitions_->at(i).get();
 
                                                 TANK_EXPECT(p);
 						p->cluster.flags |= unsigned(topic_partition::Cluster::Flags::GC_ISR);
@@ -366,8 +375,8 @@ void Service::apply_cluster_state_updates() {
                                 t->cluster.rf_ = state->rf.value;
 
                                 if (auto l = t->partitions_) {
-                                        for (auto p : *l) {
-                                                dirty_partitions.insert(p);
+                                        for (auto &it : *l) {
+                                                dirty_partitions.insert(it.get());
                                         }
                                 }
                         }
@@ -404,6 +413,10 @@ void Service::apply_cluster_state_updates() {
                         size_t                      ui = 0, ei = 0;
                         const auto                  usize = updates.size();
                         const auto                  esize = p->cluster.replicas.nodes.size();
+
+			if (trace) {
+				SLog("REPLICAS set was updated\n");
+			}
 
                         while (ui < usize && ei < esize) {
                                 auto un = updates[ui];
@@ -561,7 +574,7 @@ void Service::apply_cluster_state_updates() {
                                         l->leadership.local_replication_list.reset(nullptr);
                                         l->leadership.list.push_back(&p->cluster.leader.leadership_ll);
 
-                                        if (leader_self && p->enabled() && !l->available()) {
+                                        if (leader_self and p->enabled() and not l->available()) {
                                                 // INVARIANT: a partition leader must be available
                                                 // someone is likely messing with us, or this is bogus consul state
 						//
@@ -699,16 +712,17 @@ void Service::apply_cluster_state_updates() {
 
                 do {
                         v.emplace_back(p->second);
-                } while (++p < e && p->first == n);
+                } while (++p < e and p->first == n);
 
-                std::sort(v.begin(), v.end(), [](const auto &a, const auto &b) noexcept { return a.first < b.first; });
+                std::sort(v.begin(), v.end(),
+                          [](const auto &a, const auto &b) noexcept { return a.first < b.first; });
 
                 const auto en = n->replica_for.size();
                 const auto un = v.size();
                 uint32_t   ei = 0, ui = 0;
                 auto &     replica_for = n->replica_for;
 
-                while (ei < en && ui < un) {
+                while (ei < en and ui < un) {
                         auto ep = replica_for[ei];
                         auto up = v[ui].first;
 
@@ -778,7 +792,8 @@ void Service::apply_cluster_state_updates() {
                 const auto req_leader            = p->require_leader();
 
 #pragma mark REPAIR_ISR
-                if (p->enabled() && p->cluster.flags & unsigned(topic_partition::Cluster::Flags::GC_ISR)) {
+                if (p->enabled() and
+                    (p->cluster.flags & unsigned(topic_partition::Cluster::Flags::GC_ISR))) {
                         // REPAIR: self either just became leader of this partition, or the RS of the partition was modified
                         // We are going to make sure that the RS is sane (we are the parttiion's leader)
 			//
@@ -857,17 +872,17 @@ void Service::apply_cluster_state_updates() {
 
                 if (part_leader == self) {
                         // only the partition leader may update+persist ISR
-                        if (!p->enabled()) {
+                        if (not p->enabled()) {
                                 // REPAIR:
                                 // (only partition leader may update ISR on consul)
-                                if (!p->cluster.isr.list.empty()) {
+                                if (not p->cluster.isr.list.empty()) {
                                         if (trace) {
                                                 SLog(ansifmt::bgcolor_red, "REPAIR:Partition ", p->owner->name(), "/", p->idx,
                                                      " is disabled and this node is the partition leader: will reset ISR of size ",
                                                      p->cluster.isr.size(), ansifmt::reset, "\n");
                                         }
 
-                                        while (!p->cluster.isr.list.empty()) {
+                                        while (not p->cluster.isr.list.empty()) {
                                                 auto isr_e = switch_list_entry(isr_entry, partition_ll, p->cluster.isr.list.next);
 
                                                 isr_dispose(isr_e);
@@ -876,7 +891,9 @@ void Service::apply_cluster_state_updates() {
                                         persist_isr(p, __LINE__);
                                 }
                         } else {
-                                if (req_leader && p->cluster.replicas.count(self->id) && !p->cluster.isr.find(self)) {
+                                if (req_leader and
+                                    p->cluster.replicas.count(self->id) and
+                                    not p->cluster.isr.find(self)) {
                                         // REPAIR: partition requires a leader, we are that leader, we are in the RS
                                         // but for some reason we are not in the ISR
                                         // Looks like the cluster leader promoted us to the partition leader
@@ -892,7 +909,11 @@ void Service::apply_cluster_state_updates() {
                 }
 
 #pragma mark STREAMS
-                auto *const peer = p->enabled() && p->cluster.leader.node && !partition_leader_self && p->cluster.leader.node->available() && self->is_replica_for(p)
+                auto *const peer = p->enabled() and
+                                           p->cluster.leader.node and
+                                           not partition_leader_self and
+                                           p->cluster.leader.node->available() and
+                                           self->is_replica_for(p)
                                        ? p->cluster.leader.node
                                        : nullptr;
 
@@ -966,7 +987,7 @@ void Service::apply_cluster_state_updates() {
                      ", promoted_to_cluster_leader: ", promoted_to_cluster_leader, "\n");
         }
 
-        if (!stream_start.empty() || !stream_stop.empty()) {
+        if (not stream_start.empty() or not stream_stop.empty()) {
                 replicate_partitions(&stream_start, &stream_stop);
         }
 
@@ -985,7 +1006,11 @@ void Service::apply_cluster_state_updates() {
 }
 
 void Service::apply_deferred_updates() {
-        if (!cluster_aware()) {
+        enum {
+                trace = false,
+        };
+
+        if (not cluster_aware()) {
                 for (auto p : isr_dirty_list) {
                         p->cluster.flags &= ~unsigned(topic_partition::Cluster::Flags::ISRDirty);
                 }
@@ -994,7 +1019,11 @@ void Service::apply_deferred_updates() {
                 return;
         }
 
-        if (!consul_state.reg_completed()) {
+        if (not consul_state.reg_completed()) {
+                if (trace) {
+                        SLog("Registration not completed\n");
+                }
+
                 return;
         }
 
@@ -1011,14 +1040,40 @@ void Service::apply_deferred_updates() {
         apply_cluster_state_updates();
 
         if (const auto n = cluster_partitions_dirty.size()) {
-                gen_partition_nodes_updates(cluster_partitions_dirty.data(), n, &reduced, &expanded, &promotions);
+                if (trace) {
+                        SLog(n, " cluster partitions dirty\n");
+                }
+
+                gen_partition_nodes_updates(cluster_partitions_dirty.data(), n,
+                                            &reduced,
+                                            &expanded,
+                                            &promotions);
+
                 cluster_partitions_dirty.clear();
         }
 
-        if (!reduced.empty() || !expanded.empty() || !promotions.empty() || !isr_dirty_list.empty()) {
+        if (trace) {
+                SLog("reduced = ", reduced.size(),
+                     ", expanded = ", expanded.size(),
+                     ", promotions = ", promotions.size(),
+                     ", isr_dirty_list = ", isr_dirty_list.size(), "\n");
+        }
+
+        if (not reduced.empty() or
+            not expanded.empty() or
+            not promotions.empty() or
+            not isr_dirty_list.empty()) {
                 // we need to schedule 1 or more transactions for updates
-		// XXX: what happens if the request fails?
-                if (auto req = schedule_topology_update_tx(reduced, expanded, promotions, isr_dirty_list.data(), isr_dirty_list.size())) {
+                // XXX: what happens if the request fails?
+		if (trace) {
+			SLog("Will need a topology update transaction\n");
+                }
+
+                if (auto req = schedule_topology_update_tx(reduced,
+                                                           expanded,
+                                                           promotions,
+                                                           isr_dirty_list.data(),
+                                                           isr_dirty_list.size())) {
                         schedule_consul_req(req, true);
                 }
         }
