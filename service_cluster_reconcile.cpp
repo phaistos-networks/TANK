@@ -244,6 +244,11 @@ void Service::consider_updated_consul_configs(const std::vector<std::pair<str_vi
         }
 }
 
+// UPDATE: 2021-10-14
+// will deal with it in open_partition_log() now; will create directories if necessary
+// see open_partition_log() definition comments
+//#define __MKDIRS 1
+
 // the topology/ of the cluster has changed
 // this is a somewhat convoluted impl. because we need to take care of too much state and transitions
 //
@@ -254,13 +259,16 @@ void Service::reconcile_cluster_topology(std::vector<topology_partition> *const 
 		trace = false,
 	};
         partition_config                                                pc;
-        char                                                            topic_path[PATH_MAX];
         bool                                                            any{false};
         auto &                                                          v                  = reusable.v;
         auto &                                                          updates            = reusable.updates;
         auto &                                                          pending_partitions = reusable.pending_partitions;
         auto &                                                          pending_reg_topics = reusable.pending_reg_topics;
         auto &                                                          retained_topics    = reusable.retained_topics;
+#ifdef __MKDIRS
+        char                                                            topic_path[PATH_MAX];
+#endif
+
 
         v.clear();
 	updates.clear();
@@ -330,6 +338,7 @@ void Service::reconcile_cluster_topology(std::vector<topology_partition> *const 
                 }
         }
 
+
         // now process validated topology
         for (const auto &it : v) {
                 const auto [topic_name, partitions] = it;
@@ -382,6 +391,7 @@ void Service::reconcile_cluster_topology(std::vector<topology_partition> *const 
                         }
                 } else {
                         // we need to create a new topic for those partitions
+#ifdef __MKDIRS
                         [[maybe_unused]] const auto topic_path_len = snprintf(topic_path, sizeof(topic_path), "%.*s/%.*s/",
                                                                               basePath_.size(), basePath_.data(),
                                                                               topic_name.size(), topic_name.data());
@@ -398,6 +408,7 @@ void Service::reconcile_cluster_topology(std::vector<topology_partition> *const 
                                         IMPLEMENT_ME();
                                 }
                         }
+#endif
 
                         auto new_topic = std::make_shared<topic>(topic_name, pc);
 
@@ -412,11 +423,13 @@ void Service::reconcile_cluster_topology(std::vector<topology_partition> *const 
         std::vector<std::shared_ptr<topic_partition>>                     partitions;
 
         for (auto &it : pending_partitions) {
-                auto [topic, range]       = it;
+                auto [topic, range] = it;
+#ifdef __MKDIRS
                 const auto topic_name     = topic->name();
                 const auto topic_path_len = snprintf(topic_path, sizeof(topic_path), "%.*s/%.*s/",
                                                      basePath_.size(), basePath_.data(),
                                                      topic_name.size(), topic_name.data());
+#endif
 
                 if (trace) {
                         SLog("Pending for ", topic->name(), " ", range, "\n");
@@ -436,12 +449,17 @@ void Service::reconcile_cluster_topology(std::vector<topology_partition> *const 
                                 throw;
                         }
 #else
-			// we still need to create the directories so that open_partition_log() won't fail
+
+
+#ifdef __MKDIRS
+                        // we still need to create the directories so that open_partition_log() won't fail
                         sprintf(topic_path + topic_path_len, "%u", partition);
 
-                        if (-1 == mkdir(topic_path,  S_IRWXU | S_IRWXG) and EEXIST != errno) {
+                        if (-1 == mkdir(topic_path, S_IRWXU | S_IRWXG) and EEXIST != errno) {
                                 IMPLEMENT_ME();
                         }
+#endif
+
 #endif
 
 #if 0
@@ -449,7 +467,10 @@ void Service::reconcile_cluster_topology(std::vector<topology_partition> *const 
                         // if we are the cluster leadder, then we need to initialize the partition's highwater_mark.seq_num (see topic_partition::hwmark() impl.)
                         // from partition_log(p)->lastAssignedSeqNum;
                         // if the partition exists already on disk(this is important for transitioning from single node to cluster-aware)
-			// (actually, we don't need to do it here)
+			//
+			// 2021-10-14: we are no longer doing this because its not necessary and its also expensive if we
+			// are not going to really need to access the partition; defer it (XXX: make sure this assumption holds, even
+			// though I verified it does)
                         if (cluster_state.leader_self()) {
                                 if (trace) {
                                         SLog("Will need to update hwmark from disk\n");

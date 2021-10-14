@@ -348,7 +348,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                 if (!ca) {
                         // obviously
 			if (trace) {
-				SLog("Not cluster-aware, comminitting now\n");
+				SLog("Not cluster-aware, committing now\n");
 			}
 
                         set_hwmark(partition, bundle_last_msg_seq_num);

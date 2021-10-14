@@ -74,7 +74,9 @@ uint64_t Service::partition_hwmark(topic_partition *const p) TANK_NOEXCEPT_IF_NO
 }
 
 void Service::update_hwmark(topic_partition *p, const topic_partition::Cluster::pending_ack_bundle_desc bd) {
-        static constexpr bool trace{false};
+	enum{
+	trace = false,
+	};
         TANK_EXPECT(p);
         const auto                  hwmark = bd.last_msg_seqnum;
         [[maybe_unused]] const auto before = p->hwmark();
@@ -100,7 +102,9 @@ void Service::update_hwmark(topic_partition *p, const topic_partition::Cluster::
 }
 
 void Service::update_hwmark(topic_partition *p, const uint64_t hwmark) {
-        static constexpr bool trace{false};
+	enum {
+	trace =false,
+	};
         TANK_EXPECT(p);
         [[maybe_unused]] const auto before = p->hwmark();
         TANK_EXPECT(hwmark);

@@ -14,8 +14,8 @@ bool Service::process_consume(const TankAPIMsgType _msg,
         assert(c);
         assert(c->fd > 2);
         enum {
-                trace        = true,
-                trace_faults = true,
+                trace        = false,
+                trace_faults = false,
         };
         const bool            consume_peer_req = _msg == TankAPIMsgType::ConsumePeer;
         const auto            consume_req      = !consume_peer_req;

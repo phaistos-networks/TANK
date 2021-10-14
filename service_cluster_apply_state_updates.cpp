@@ -599,6 +599,12 @@ void Service::apply_cluster_state_updates() {
                                                 // IMPORTANT:
                                                 // wee need to immediately bump hwmark here to last assigned
                                                 // otherewise consume requests may fail with a boundary check fault
+						//
+						// UPDATE: 2021-10-14 
+						// _do_ we really to do that?  maybe we don't
+						// we 'd like to _defer_ this for as long as possible 
+						// especially considering that open_partition_log() will set_hwmark()
+#if 0
                                                 auto log = partition_log(p);
 
                                                 if (trace) {
@@ -607,6 +613,8 @@ void Service::apply_cluster_state_updates() {
                                                 }
 
                                                 set_hwmark(p, log->lastAssignedSeqNum);
+#endif
+
                                         }
                                 } else if (p->require_leader()) {
                                         if (trace) {

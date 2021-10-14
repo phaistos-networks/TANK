@@ -276,9 +276,9 @@ void Service::try_replicate_from(const std::unordered_set<cluster_node *> &peers
 // `stop`: the partitions to stop replicating from
 void Service::replicate_partitions(std::vector<std::pair<topic_partition *, cluster_node *>> *start,
                                    std::vector<std::pair<topic_partition *, cluster_node *>> *stop) {
-	enum {
-		trace =true,
-	};
+        enum {
+                trace = false,
+        };
         auto                  self      = cluster_state.local_node.ref;
         auto &                peers_set = reusable.peers_set;
 

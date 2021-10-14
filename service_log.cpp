@@ -1,4 +1,9 @@
 #include "service_common.h"
+#ifdef HAVE_SWITCH
+#include <switch_algorithms.h>
+#endif
+#include <sys/types.h>
+#include <dirent.h>
 
 int Rename(const char *oldpath, const char *newpath);
 int Unlink(const char *pathname);
@@ -141,7 +146,7 @@ bool Service::close_partition_log(topic_partition *partition) {
 
         if (!log) {
                 // already closed
-		// we shouldn't ever reach this path, but we may as well account for it
+                // we shouldn't ever reach this path, but we may as well account for it
                 return false;
         }
 
@@ -152,7 +157,6 @@ bool Service::close_partition_log(topic_partition *partition) {
                 // i.e tri-state(open, close, open-compacting)
                 return false;
         }
-
 
         auto topic = partition->owner;
 
@@ -184,7 +188,7 @@ int Service::reset_partition_log(topic_partition *partition) {
                 return 0;
         }
 
-	TANK_EXPECT(false == read_only);
+        TANK_EXPECT(false == read_only);
 
         char       basePath[PATH_MAX];
         const auto basePathLen = snprintf(basePath, sizeof(basePath), "%.*s/%.*s/%u/",
@@ -198,7 +202,7 @@ int Service::reset_partition_log(topic_partition *partition) {
                                 continue;
                         }
 
-			TANK_EXPECT(false == read_only);
+                        TANK_EXPECT(false == read_only);
 
                         name.ToCString(basePath + basePathLen);
                         if (-1 == unlink(basePath)) {
@@ -215,33 +219,45 @@ int Service::reset_partition_log(topic_partition *partition) {
         return 0;
 }
 
-// XXX: if running in cluster-aware mode, we shouldn't open_partition_log() for each discovered partition if TANK_SRV_LAZY_PARTITION_INIT is defined
-// TODO:
 void Service::open_partition_log(topic_partition *partition, const partition_config &conf) {
-	enum {
-		trace = false,
-	};
-        const auto            before = Timings::Microseconds::Tick();
-        char                  basePath[PATH_MAX];
-        auto                  topic       = partition->owner;
-        const auto            basePathLen = snprintf(basePath, sizeof(basePath), "%.*s/%s%.*s/%u/",
-                                          static_cast<int>(::basePath_.size()), ::basePath_.data(),
-                                          (topic->flags & unsigned(topic::Flags::under_construction)) ? "." : "",
-                                          static_cast<int>(topic->name_.size()),
-                                          topic->name_.data(), partition->idx);
+        enum {
+                trace = false,
+        };
+        const auto before = Timings::Microseconds::Tick();
+        char       basePath[PATH_MAX];
+        auto       topic = partition->owner;
+        auto       out   = basePath;
+
+        out    = basePath_.as_s32().CopyTo(out);
+        *out++ = '/';
+        if (topic->flags & unsigned(topic::Flags::under_construction)) {
+                *out++ = '.';
+        }
+        out      = topic->name_.CopyTo(out);
+        *(out++) = '/';
+
+        const auto topic_path_len = std::distance(basePath, out);
+
+#ifdef HAVE_SWITCH
+        out += SwitchAlgorithms::U32ToASCII(partition->idx, out);
+#else
+        out += sprintf(out, "%u", partition->idx);
+#endif
+        *(out++)                 = '/';
+        const auto full_path_len = std::distance(basePath, out);
 
         TANK_EXPECT(not partition->_log); // already initialized?
 
         track_accessed_partition(partition, curTime);
 
         if (trace) {
-		puts("");
+                puts("");
                 SLog(ansifmt::bold, ansifmt::color_green, ansifmt::inverse, "OPENING PARTITION ", topic->name(),
-                     "/", partition->idx, " ", ptr_repr(this), ", basePath:", basePath,  ansifmt::reset, "\n");
-		puts("");
+                     "/", partition->idx, " ", ptr_repr(this), ", basePath:", basePath, ansifmt::reset, "\n");
+                puts("");
         }
 
-	const auto __before = Timings::Milliseconds::Tick();
+        const auto __before = Timings::Milliseconds::Tick();
 
         DEFER({
                 open_partitions_time += Timings::Milliseconds::Since(__before);
@@ -261,7 +277,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                 std::vector<strwlen32_t>     swapped;
                 uint64_t                     curLogSeqNum{0};
                 uint32_t                     curLogCreateTS{0};
-                const strwlen32_t            b(basePath, basePathLen);
+                const strwlen32_t            b(basePath, full_path_len);
                 int                          fd;
                 bool                         processSwapped{true};
                 struct stat                  st;
@@ -283,14 +299,101 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                 *b.CopyTo(_base_path) = '\0';
 
                 // Scan the partitiond directory
-                for (auto &&name : DirectoryEntries(basePath)) {
-			if (name.front() == '.') {
+                // UPDATE: 2021-10-14
+                // the topic and topic/partition directories may not be created yet(because we are
+                // creating them lazily) so we need to create them if they are missing
+                //
+                // This helps a lot with performance/resources (e.g inodes) for even
+                // if we create a million of topics or partitions, and we only ever access a few
+                // only those few partitions directories will be created
+                const auto dtor = [](DIR *const dh) {
+                        if (dh) {
+                                ::closedir(dh);
+                        }
+                };
+                std::unique_ptr<DIR, decltype(dtor)> _dir(nullptr, dtor);
+
+                _dir.reset(::opendir(basePath));
+                if (not _dir) {
+                        // try creating the partition directory and if that fails, try the topic and then the partition again
+                        const auto se = errno;
+
+                        if (trace) {
+                                SLog("Failed to opendir(", basePath, "):", strerror(se), "\n");
+                        }
+
+                        if (ENOENT == se) {
+                                // try to create the partition first
+                                if (-1 == mkdir(basePath, 0775)) {
+                                        const auto se = errno;
+
+                                        if (trace) {
+                                                SLog("Failed to mkdir(", basePath, "):", strerror(se), "\n");
+                                        }
+
+                                        if (ENOENT != errno) {
+                                                goto io_error;
+                                        }
+
+                                        // create the topic and then try the partition again
+                                        basePath[topic_path_len - 1] = '\0';
+
+                                        if (-1 == mkdir(basePath, 0775)) {
+                                                const auto se = errno;
+
+                                                if (trace) {
+                                                        SLog("Failed to mkdir(", basePath, "):", strerror(se), "\n");
+                                                }
+
+                                                if (ENOENT != se) {
+                                                        goto io_error;
+                                                }
+                                        }
+
+                                        basePath[topic_path_len - 1] = '/';
+
+                                        if (-1 == mkdir(basePath, 0775)) {
+                                                const auto se = errno;
+
+                                                if (trace) {
+                                                        SLog("Failed to mkdir(", basePath, "):", strerror(se), "\n");
+                                                }
+
+                                                if (EEXIST != se) {
+                                                        goto io_error;
+                                                }
+                                        }
+                                }
+
+                                _dir.reset(::opendir(basePath));
+
+                                if (not _dir) {
+                                        if (trace) {
+                                                SLog("opendir(", basePath, ") failed:", strerror(errno), "\n");
+                                        }
+
+                                        goto io_error;
+                                }
+
+                                if (trace) {
+                                        SLog("opendir(", basePath, ") successful\n");
+                                }
+                        } else {
+                        io_error:
+                                IMPLEMENT_ME();
+                        }
+                }
+
+                for (auto it = readdir(_dir.get()); it; it = readdir(_dir.get())) {
+                        const auto name = str_view32(it->d_name, strlen(it->d_name));
+
+                        if (name.front() == '.') {
                                 continue;
                         }
 
                         any_files = true;
 
-                        if (not cluster_aware() and  name.Eq(_S("config"))) {
+                        if (not cluster_aware() and name.Eq(_S("config"))) {
                                 // override
                                 parse_partition_config(Buffer::build(basePath, "/", name).data(), &l->config);
                                 continue;
@@ -391,7 +494,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                         if (0 == st.st_size) {
                                                 // This is a stray - whatever the reason this is here, it needs to go
                                                 Print("Found a stray ", _base_path, ", deleting it\n");
-						TANK_EXPECT(false == read_only);
+                                                TANK_EXPECT(false == read_only);
                                                 unlink(_base_path);
                                                 continue;
                                         }
@@ -435,6 +538,8 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                         }
                 }
 
+                _dir.reset();
+
                 if (any_files) {
                         partition->flags &= ~unsigned(topic_partition::Flags::NoDataFiles);
                 }
@@ -448,7 +553,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                         while (!swapped.empty()) {
                                 auto it = swapped.back();
 
-				TANK_EXPECT(false == read_only);
+                                TANK_EXPECT(false == read_only);
                                 if (Unlink(Buffer::build(basePath, "/", it).data()) == -1) {
                                         throw Switch::system_error("Failed to unlink swapped file:", strerror(errno));
                                 }
@@ -512,9 +617,9 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                 }
 
                 if (trace) {
-                        SLog("roLogs.size() = ", roLogs.size(), 
-				", curLogSeqNum = ", curLogSeqNum, 
-				", curLogCreateTS = ", curLogCreateTS, "\n");
+                        SLog("roLogs.size() = ", roLogs.size(),
+                             ", curLogSeqNum = ", curLogSeqNum,
+                             ", curLogCreateTS = ", curLogCreateTS, "\n");
                 }
 
                 // Process read only segments
@@ -539,7 +644,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                                                               it.creationTS,
                                                                               wideEntyRoLogIndices.count(it.firstAvailableSeqNum));
 
-					assert(not s->fdh);
+                                        assert(not s->fdh);
                                         l->roSegments->emplace_back(s.release());
                                 } catch (const std::exception &e) {
                                         if (trace) {
@@ -550,20 +655,20 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                 }
                         }
 
-			if (trace) {
-				SLog("All RO segments\n");
-				for (const auto s : *l->roSegments) {
-					SLog("Segment ", ptr_repr(s), " with baseSeqNum ", s->baseSeqNum, "\n");
-				}
-			}
+                        if (trace) {
+                                SLog("All RO segments\n");
+                                for (const auto s : *l->roSegments) {
+                                        SLog("Segment ", ptr_repr(s), " with baseSeqNum ", s->baseSeqNum, "\n");
+                                }
+                        }
 
                         TANK_EXPECT(std::is_sorted(l->roSegments->begin(), l->roSegments->end(), [](const auto a, const auto b) noexcept {
                                 return a->baseSeqNum < b->baseSeqNum;
                         }));
 
-			for (auto seg : *l->roSegments) {
-				assert(not seg->fdh);
-			}
+                        for (auto seg : *l->roSegments) {
+                                assert(not seg->fdh);
+                        }
                 } else {
                         l->firstAvailableSeqNum = curLogSeqNum;
                         l->roSegments.reset(new std::vector<ro_segment *>());
@@ -608,7 +713,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                         SLog("Got a dummy/empty current segment, will reset\n");
                                 }
 
-				TANK_EXPECT(false == read_only);
+                                TANK_EXPECT(false == read_only);
                                 if (-1 == unlink(basePath)) {
                                         throw Switch::system_error("Failed to unlink(", basePath, "): ", strerror(errno));
                                 }
@@ -664,7 +769,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                         if (l->cur.index.haveWideEntries) {
                                                 IMPLEMENT_ME();
                                         } else {
-                                                for (const auto *      it   = (uint32_t *)l->cur.index.ondisk.data,
+                                                for (const auto       *it   = (uint32_t *)l->cur.index.ondisk.data,
                                                                 *const base = it,
                                                                 *const e    = it + l->cur.index.ondisk.span / sizeof(uint32_t);
                                                      it != e; it += 2) {
@@ -690,9 +795,9 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                 // keeping track of offsets as we go.
                                 if (unlikely(s < o)) {
                                         Print(ansifmt::bold, ansifmt::color_red, "Dataset corruption", ansifmt::reset, ": Unexpected file size ", s, "(", size_repr(s), ") < last checkpoint in index at ", o, ". Did you copy the data while the partition was actively being updated?\n");
-					Print("You can force repair it by deleting ", basePath, " and restarting TANK. This will not salvage whatever data was lost, but will rebuild the index and you should be able to access the partition\n");
-					Print("Aborting\n");
-					exit(1);
+                                        Print("You can force repair it by deleting ", basePath, " and restarting TANK. This will not salvage whatever data was lost, but will rebuild the index and you should be able to access the partition\n");
+                                        Print("Aborting\n");
+                                        exit(1);
                                 }
 
                                 TANK_EXPECT(s >= o);
@@ -718,7 +823,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
 
                                 DEFER({ free(data); });
 
-				assert(fd > 2);
+                                assert(fd > 2);
 
                                 const auto     res = pread(fd, data, span, o);
                                 const uint8_t *lastCheckpoint{data};
@@ -732,7 +837,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                 }
 
                                 for (const auto *p = data, *const e = p + span; p < e;) {
-                                        const auto *      saved{p};
+                                        const auto       *saved{p};
                                         const auto        bundleLen = Compression::decode_varuint32(p);
                                         const auto *const bundleEnd = p + bundleLen;
 
@@ -870,8 +975,8 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                         }
                 }
 
-		partition->open_ok = true;		
-		++total_open_partitions;
+                partition->open_ok = true;
+                ++total_open_partitions;
         } catch (const std::exception &e) {
                 // we need to _close_ the partition explicitly because we couldn't open it
                 // this should reclaim resources, and partition will no longer be considered open, because it is not
@@ -879,7 +984,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                         SLog("Exception:", e.what(), "\n");
                 }
 
-		close_partition_log(partition);
+                close_partition_log(partition);
                 throw;
         }
 
@@ -889,12 +994,12 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
 }
 
 topic_partition_log *Service::partition_log(topic_partition *const p) {
-	enum {
-		trace = false,
-	};
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(p);
 
-	if (not p->_log) {
+        if (not p->_log) {
                 open_partition_log(p, p->owner->partitionConf);
         } else {
                 TANK_EXPECT(p->access.ll.empty() == false);

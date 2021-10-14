@@ -105,7 +105,7 @@ namespace TANKUtil {
 
                 int read_impl([[maybe_unused]] const size_t bytes) {
                         enum {
-                                trace = true,
+                                trace = false,
                         };
                         const auto at       = size();
                         const auto capacity = sizeof(buf) - at;

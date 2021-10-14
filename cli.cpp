@@ -918,6 +918,7 @@ int main(int argc, char *argv[]) {
                                 return 0;
                         }
 
+			Print("Cluster name:", res.cluster_name, "\n");
                         Print(Buffer{}.append("ID"_s32, align_to(8), "Available"_s32, align_to(20), "Blocked"_s32, align_to(32), "Endpoint"_s32, "\n"));
 
                         for (std::size_t i = 0; i < res.nodes.size; ++i) {
