@@ -243,8 +243,10 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
 #else
         out += sprintf(out, "%u", partition->idx);
 #endif
-        *(out++)                 = '/';
+        *(out++) = '/';
         const auto full_path_len = std::distance(basePath, out);
+
+        *out = '\0'; // make sure its null terminated or there be dragons
 
         TANK_EXPECT(not partition->_log); // already initialized?
 
@@ -253,7 +255,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
         if (trace) {
                 puts("");
                 SLog(ansifmt::bold, ansifmt::color_green, ansifmt::inverse, "OPENING PARTITION ", topic->name(),
-                     "/", partition->idx, " ", ptr_repr(this), ", basePath:", basePath, ansifmt::reset, "\n");
+                     "/", partition->idx, " ", ptr_repr(this), ", basePath:[", basePath, ']', ansifmt::reset, "\n");
                 puts("");
         }
 
@@ -682,8 +684,13 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                 Snprint(basePath, sizeof(basePath), b, curLogSeqNum, ".log");
                         }
 
+			if (trace){
+				SLog("Have current segment:", basePath, "\n");
+			}
+
                         fd = open(basePath, read_only ? O_RDONLY : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME), 0775);
-                        if (fd == -1) {
+
+                        if (fd == -1) [[unlikely]] {
                                 throw Switch::system_error("open(", basePath, ") failed:", strerror(errno), ". Cannot open current segment log");
                         }
 
@@ -700,7 +707,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                 SLog("Considering index ", basePath, " cur.fileSize = ", l->cur.fileSize, ", with cur.baseSeqNum = ", l->cur.baseSeqNum, "\n");
                         }
 
-                        if (fd == -1) {
+                        if (fd == -1) [[unlikely]] {
                                 throw Switch::system_error("open(", basePath_, ") failed:", strerror(errno), ". Cannot open current segment index");
                         } else if (lseek64(fd, 0, SEEK_END) == 0 && l->cur.fileSize) {
                                 if (trace) {
@@ -794,8 +801,10 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                 // We just start from the last tracked-recorded (relSeqNum, absPhysical) and skip bundles until EOF
                                 // keeping track of offsets as we go.
                                 if (unlikely(s < o)) {
-                                        Print(ansifmt::bold, ansifmt::color_red, "Dataset corruption", ansifmt::reset, ": Unexpected file size ", s, "(", size_repr(s), ") < last checkpoint in index at ", o, ". Did you copy the data while the partition was actively being updated?\n");
-                                        Print("You can force repair it by deleting ", basePath, " and restarting TANK. This will not salvage whatever data was lost, but will rebuild the index and you should be able to access the partition\n");
+                                        Print(ansifmt::bold, ansifmt::color_red, "Dataset corruption", ansifmt::reset,
+                                              ": Unexpected file size ", s, "(", size_repr(s), ") < last checkpoint in index at ", o, ". Did you copy the data while the partition was actively being updated?\n");
+                                        Print("You can force repair it by deleting ", basePath,
+                                              " and restarting TANK. This will not salvage whatever data was lost, but will rebuild the index and you should be able to access the partition\n");
                                         Print("Aborting\n");
                                         exit(1);
                                 }
@@ -832,7 +841,7 @@ void Service::open_partition_log(topic_partition *partition, const partition_con
                                         SLog("Attempting to read ", span, " bytes at ", o, ": ", res, "\n");
                                 }
 
-                                if (res != span) {
+                                if (res != span) [[unlikely]] {
                                         throw Switch::system_error("pread64() failed:", strerror(errno));
                                 }
 

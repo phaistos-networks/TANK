@@ -4,7 +4,10 @@ int Rename(const char *oldpath, const char *newpath);
 int Unlink(const char *pathname);
 
 bool topic_partition_log::should_roll(const uint32_t now) const {
-        static constexpr const bool trace = false, trace_yes = false;
+        enum {
+                trace     = false,
+                trace_yes = false,
+        };
 
         cur.sanity_checks();
 
@@ -12,15 +15,16 @@ bool topic_partition_log::should_roll(const uint32_t now) const {
                 return true;
         }
 
-        if (!cur.fileSize) {
+        if (0 == cur.fileSize) {
                 return false;
         }
 
-	TANK_EXPECT(this_service);
-	if (now < this_service->no_roll_until) {
-		// if we run out of FDs, we don't want to keep trying in every produce request
-		return false;
-	}
+        TANK_EXPECT(this_service);
+
+        if (now < this_service->no_roll_until) {
+                // if we run out of FDs, we don't want to keep trying in every produce request
+                return false;
+        }
 
         if (trace) {
                 SLog(ansifmt::color_green, " Consider roll:cur.fileSize(", cur.fileSize,
@@ -31,8 +35,14 @@ bool topic_partition_log::should_roll(const uint32_t now) const {
                      " old,  cur.rollJitterSecs = ", cur.rollJitterSecs, ansifmt::reset, "\n");
         }
 
-        if (cur.fileSize > config.maxSegmentSize) {
-                if (trace || trace_yes) {
+#if 1
+        const std::size_t max_seg_size_ceil = config.maxSegmentSize;
+#else
+        const std::size_t max_seg_size_ceil = 10;
+#endif
+
+        if (cur.fileSize > max_seg_size_ceil) {
+                if (trace == true || trace_yes == true) {
                         SLog(ansifmt::bold, "Should roll: cur.fileSize(", cur.fileSize, ") > config.maxSegmentSize(", config.maxSegmentSize, ")", ansifmt::reset, "\n");
                 }
 
@@ -43,7 +53,7 @@ bool topic_partition_log::should_roll(const uint32_t now) const {
 
         if (curIndexSizeBytes > config.maxIndexSize) {
                 // index is full
-                if (trace || trace_yes) {
+                if (trace == true || trace_yes == true) {
                         SLog(ansifmt::bold, "curIndexSizeBytes(", curIndexSizeBytes, ") > config.maxIndexSize(", config.maxIndexSize, ")", ansifmt::reset, "\n");
                 }
 
@@ -56,7 +66,7 @@ bool topic_partition_log::should_roll(const uint32_t now) const {
                 // XXX: it is important to use time32_delta() to guard against the race that stems from _now updates semantics
                 if (const auto since_seconds = TANKUtil::time32_delta(cur.createdTS, now); since_seconds > cur.rollJitterSecs) {
                         // Soft limit
-                        if (trace || trace_yes) {
+                        if (trace == true or trace_yes == true) {
                                 SLog(ansifmt::bold, "now - cur.createdTS(",
                                      since_seconds, "s ago) > (", v - cur.rollJitterSecs,
                                      ") cur.rollJitterSecs = ", cur.rollJitterSecs,
@@ -107,7 +117,6 @@ void topic_partition_log::roll(const uint64_t absSeqNum, const uint64_t saved_la
                 std::abort();
         }
 
-
         if (trace) {
                 SLog("Need to switch to another commit log (cur.fileSize = ", cur.fileSize,
                      "> config.maxSegmentSize = ", config.maxSegmentSize,
@@ -119,22 +128,22 @@ void topic_partition_log::roll(const uint64_t absSeqNum, const uint64_t saved_la
         cur.sanity_checks();
 
         if (cur.fileSize != UINT32_MAX) {
-// See ro_segment::createdTS declaration comments
+                // See ro_segment::createdTS declaration comments
                 struct stat st;
 
                 if (fstat(cur.fdh->fd, &st) == -1) {
-			if (errno == ENFILE || errno == EMFILE || errno == ENOSPC || errno == EDQUOT) {
-				TANK_EXPECT(this_service);
-				this_service->no_roll_until = time(nullptr) + 60;
-			}
+                        if (errno == ENFILE || errno == EMFILE || errno == ENOSPC || errno == EDQUOT) {
+                                TANK_EXPECT(this_service);
+                                this_service->no_roll_until = time(nullptr) + 60;
+                        }
 
                         throw Switch::system_error("fstat() failed:", strerror(errno));
                 }
 
-                const uint64_t freezeTs = st.st_mtime;
-                auto       newROFiles = std::make_unique<std::vector<ro_segment *>>();
-                auto       newROFile  = std::make_unique<ro_segment>(cur.baseSeqNum, saved_last_assigned_seqnum, freezeTs);
-                const auto n          = cur.fdh.use_count();
+                const uint64_t freezeTs   = st.st_mtime;
+                auto           newROFiles = std::make_unique<std::vector<ro_segment *>>();
+                auto           newROFile  = std::make_unique<ro_segment>(cur.baseSeqNum, saved_last_assigned_seqnum, freezeTs);
+                const auto     n          = cur.fdh.use_count();
 
                 TANK_EXPECT(n >= 1);
 
@@ -208,12 +217,12 @@ void topic_partition_log::roll(const uint64_t absSeqNum, const uint64_t saved_la
         cur.index.haveWideEntries = false;
 
         cur.index.skipList.clear();
-	if (cur.index.fd != -1) {
-		fsync(cur.index.fd);
-		TANKUtil::safe_close(cur.index.fd);
-		cur.index.fd = -1;
-	}
-	cur.reset_cache();
+        if (cur.index.fd != -1) {
+                fsync(cur.index.fd);
+                TANKUtil::safe_close(cur.index.fd);
+                cur.index.fd = -1;
+        }
+        cur.reset_cache();
 
         if (cur.index.ondisk.data != nullptr && cur.index.ondisk.data != MAP_FAILED) {
                 auto ptr = reinterpret_cast<void *>(const_cast<uint8_t *>(cur.index.ondisk.data));
@@ -241,7 +250,7 @@ void topic_partition_log::roll(const uint64_t absSeqNum, const uint64_t saved_la
 
         if (-1 == fd) {
                 if (errno == ENFILE || errno == EMFILE || errno == ENOSPC || errno == EDQUOT) {
-			TANK_EXPECT(this_service);
+                        TANK_EXPECT(this_service);
                         this_service->no_roll_until = time(nullptr) + 60;
                 }
 
@@ -258,24 +267,23 @@ void topic_partition_log::roll(const uint64_t absSeqNum, const uint64_t saved_la
         fd = this_service->safe_open(basePath.c_str(), read_only ? O_RDWR : (O_RDWR | O_LARGEFILE | O_CREAT | O_NOATIME | O_APPEND), 0775);
 
         if (-1 == fd) {
-		const auto saved_errno = errno;
+                const auto saved_errno = errno;
 
                 if (errno == ENFILE || errno == EMFILE || errno == ENOSPC || errno == EDQUOT) {
-			TANK_EXPECT(this_service);
+                        TANK_EXPECT(this_service);
                         this_service->no_roll_until = time(nullptr) + 60;
                 }
 
-		unlink(basePath.c_str());
-		basePath.resize(basePathLen);
-        	basePath.append(cur.baseSeqNum, "_", cur.createdTS, ".log");
-		unlink(basePath.c_str());
-
+                unlink(basePath.c_str());
+                basePath.resize(basePathLen);
+                basePath.append(cur.baseSeqNum, "_", cur.createdTS, ".log");
+                unlink(basePath.c_str());
 
                 throw Switch::system_error("open(", basePath, ") failed:", strerror(saved_errno), ". Cannot load segment index");
         }
 
         cur.index.fd = fd;
-	cur.ra_proxy.ra.reset_to(cur.fdh.get()->fd);
+        cur.ra_proxy.ra.reset_to(cur.fdh.get()->fd);
         basePath.resize(basePathLen);
 
         cur.sanity_checks();
@@ -295,8 +303,8 @@ void topic_partition_log::roll(const uint64_t absSeqNum, const uint64_t saved_la
 
         cur.flush_state.pendingFlushMsgs = 0;
         cur.flush_state.nextFlushTS      = config.flushIntervalSecs
-                                          ? time(nullptr) + config.flushIntervalSecs
-                                          : UINT32_MAX;
+                                               ? time(nullptr) + config.flushIntervalSecs
+                                               : UINT32_MAX;
 
         if (trace) {
                 SLog("Switched\n");
@@ -341,7 +349,7 @@ void topic_partition_log::flush_index_skiplist() {
 
 // if (firstMsgSeqNum != 0 && lastMsgSeqNum != 0), we have expicitly specified message sequence numbers for the bundle first/last message
 append_res topic_partition_log::append_bundle(const time_t   now,
-                                              const void *   bundle,
+                                              const void    *bundle,
                                               const size_t   bundleSize,
                                               const uint32_t bundleMsgsCnt,
                                               const uint64_t firstMsgSeqNum,
@@ -399,20 +407,20 @@ append_res topic_partition_log::append_bundle(const time_t   now,
             {
                 {(void *)varint, varintLen},
                 {const_cast<void *>(bundle), bundleSize}};
-        const auto                       entryLen = iov[0].iov_len + iov[1].iov_len;
-        const range32_t                  fileRange(cur.fileSize, entryLen);
-        const auto                       before = cur.fdh.use_count();
+        const auto                 entryLen = iov[0].iov_len + iov[1].iov_len;
+        const range32_t            fileRange(cur.fileSize, entryLen);
+        const auto                 before = cur.fdh.use_count();
         std::shared_ptr<fd_handle> fdh(cur.fdh);
-        const auto                       b = trace ? Timings::Microseconds::Tick() : uint64_t(0);
+        const auto                 b = trace ? Timings::Microseconds::Tick() : uint64_t(0);
 
         TANK_EXPECT(cur.fdh.use_count() == before + 1);
 
         // https://github.com/phaistos-networks/TANK/issues/14
         if (unlikely(writev(fd, iov, sizeof_array(iov)) != entryLen)) {
-		if (EDQUOT == errno || ENOSPC == errno) {
-			TANK_EXPECT(this_service);
-			this_service->no_roll_until = this_service->curTime + 60;
-		}
+                if (EDQUOT == errno || ENOSPC == errno) {
+                        TANK_EXPECT(this_service);
+                        this_service->no_roll_until = this_service->curTime + 60;
+                }
 
                 lastAssignedSeqNum = saved_last_assigned_seqnum;
                 this_service->track_io_fail(partition);
@@ -442,7 +450,7 @@ append_res topic_partition_log::append_bundle(const time_t   now,
                                 // don't restore neither lastAssignedSeqNum from saved_last_assigned_seqnum,  nor fileSize
                                 // because this has been accepted
                                 if (EDQUOT == errno || ENOSPC == errno) {
-					TANK_EXPECT(this_service);
+                                        TANK_EXPECT(this_service);
                                         this_service->no_roll_until = this_service->curTime + 60;
                                 }
 

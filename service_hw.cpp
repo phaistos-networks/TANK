@@ -1,6 +1,6 @@
 #include "service_common.h"
 
-void Service::set_hwmark(topic_partition *p, const uint64_t seqnum) {
+void Service::set_hwmark(topic_partition *const __restrict__ p, const uint64_t seqnum) {
 	enum {
 		trace = false,
 	};
@@ -9,7 +9,7 @@ void Service::set_hwmark(topic_partition *p, const uint64_t seqnum) {
         p->highwater_mark.seq_num = seqnum;
 
         if (trace) {
-                SLog("Updating hwmark for ", p->owner->name(), "/", p->idx, " to ", seqnum, "\n");
+                SLog(ansifmt::bold, ansifmt::color_green, ansifmt::inverse, "Updating hwmark for ", p->owner->name(), "/", p->idx, " to ", seqnum, ansifmt::reset, "\n");
         }
 
         if (cluster_aware()) {

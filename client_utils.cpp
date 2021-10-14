@@ -40,8 +40,10 @@ uint64_t TankClient::sequence_number_by_event_time(const topic_partition &topic_
         }
 
         // First, discover partitions in order to determine the [first, last] sequence numbers reange of the partition
+        enum {
+                trace = false,
+        };
         tl::optional<std::pair<uint64_t, uint64_t>> offsets_space;
-        static constexpr const bool                 trace{false};
 
         if (discover_partitions(topic_partition.first) == 0) {
 #ifdef TANK_THROW_SWITCH_EXCEPTIONS
@@ -57,12 +59,12 @@ uint64_t TankClient::sequence_number_by_event_time(const topic_partition &topic_
 
         while (should_poll()) {
                 try {
-                        poll(1000);
+                        poll();
                 } catch (...) {
                         throw;
                 }
 
-                if (!faults().empty()) {
+                if (not faults().empty()) {
 #ifdef TANK_THROW_SWITCH_EXCEPTIONS
                         throw Switch::runtime_error("Unable to discover partitions - request failed");
 #else
@@ -70,7 +72,7 @@ uint64_t TankClient::sequence_number_by_event_time(const topic_partition &topic_
 #endif
                 }
 
-                if (!discovered_partitions().empty()) {
+                if (not discovered_partitions().empty()) {
                         const auto &it = discovered_partitions().front();
 
                         TANK_EXPECT(discovered_partitions().size() == 1);
@@ -89,7 +91,7 @@ uint64_t TankClient::sequence_number_by_event_time(const topic_partition &topic_
                 }
         }
 
-        if (!offsets_space) {
+        if (not offsets_space) {
 #ifdef TANK_THROW_SWITCH_EXCEPTIONS
                 throw Switch::runtime_error("Unable to determine offsets space for (topic, partition)");
 #else
@@ -169,7 +171,7 @@ uint64_t TankClient::sequence_number_by_event_time(const topic_partition &topic_
                                 SLog("drained = ", part.drained, ", msgs.size() = ", part.msgs.size(), "\n");
                         }
 
-                        if (!part.msgs.empty()) {
+                        if (not part.msgs.empty()) {
                                 msg_ts = part.msgs.offset->ts;
 
                                 if (trace) {
@@ -186,7 +188,7 @@ uint64_t TankClient::sequence_number_by_event_time(const topic_partition &topic_
                         mid        = part.next.seq_num;
                 }
 
-                if (msg_ts < event_time && msg_ts >= cut_off) {
+                if (msg_ts < event_time and msg_ts >= cut_off) {
                         if (trace) {
                                 SLog("Stopping now at ", Date::ts_repr(msg_ts / 1000),
                                      ", event_time = ", Date::ts_repr(event_time / 1000),
@@ -202,6 +204,10 @@ uint64_t TankClient::sequence_number_by_event_time(const topic_partition &topic_
                         low = mid + 1;
                 }
         }
+
+	if (trace) {
+		SLog("Returning low = ", low, "\n");
+	}
 
         return low;
 }
