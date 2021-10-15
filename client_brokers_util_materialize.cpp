@@ -80,20 +80,25 @@ bool TankClient::materialize_discover_topology_request(api_request *api_req) {
         const auto req_part = containerof(request_partition_ctx,
                                           partitions_list_ll,
                                           api_req->ready_partitions_list.next);
-        auto       all      = req_part->as_op.discover_topology.response.all;
 
-        _discovered_topologies.emplace_back(discovered_topology{
-            .client_req_id = api_req->request_id,
-            .cluster_name  = req_part->as_op.discover_topology.response.cluster_name,
-            .nodes.size    = static_cast<uint32_t>(all->size()),
-            .nodes.data    = all->data(),
-        });
+        if (req_part->as_op.response_valid) {
+                auto all = req_part->as_op.discover_topology.response.all;
 
-        api_req->materialized_resp.discover_topology.v                 = all;
-        api_req->materialized_resp.discover_topology._cluster_name_ptr = const_cast<char *>(req_part->as_op.discover_topology.response.cluster_name.p);
+                _discovered_topologies.emplace_back(discovered_topology{
+                    .client_req_id = api_req->request_id,
+                    .cluster_name  = req_part->as_op.discover_topology.response.cluster_name,
+                    .nodes.size    = static_cast<uint32_t>(all->size()),
+                    .nodes.data    = all->data(),
+                });
 
-        req_part->as_op.response_valid = false;
-        return true; // retain
+                api_req->materialized_resp.discover_topology.v                 = all;
+                api_req->materialized_resp.discover_topology._cluster_name_ptr = const_cast<char *>(req_part->as_op.discover_topology.response.cluster_name.p);
+
+                req_part->as_op.response_valid = false;
+                return true; // retain
+        } else {
+                return false;
+        }
 }
 
 bool TankClient::materialize_discover_topics_request(api_request *api_req) {
@@ -107,18 +112,23 @@ bool TankClient::materialize_discover_topics_request(api_request *api_req) {
         const auto req_part = containerof(request_partition_ctx,
                                           partitions_list_ll,
                                           api_req->ready_partitions_list.next);
-        auto       all      = req_part->as_op.discover_topics.response.all;
 
-        all_discovered_topics.emplace_back(discovered_srv_topics{
-            .client_req_id = api_req->request_id,
-            .topics.size   = static_cast<uint32_t>(all->size()),
-            .topics.data   = all->data(),
-        });
+        if (req_part->as_op.response_valid) {
+                auto all = req_part->as_op.discover_topics.response.all;
 
-        api_req->materialized_resp.discover_topics.v = all;
+                all_discovered_topics.emplace_back(discovered_srv_topics{
+                    .client_req_id = api_req->request_id,
+                    .topics.size   = static_cast<uint32_t>(all->size()),
+                    .topics.data   = all->data(),
+                });
 
-        req_part->as_op.response_valid = false;
-        return true; // retain
+                api_req->materialized_resp.discover_topics.v = all;
+
+                req_part->as_op.response_valid = false;
+                return true; // retain
+        } else {
+                return false;
+        }
 }
 
 bool TankClient::materialize_srv_request(api_request *api_req) {
@@ -184,20 +194,22 @@ bool TankClient::materialize_discover_partitions_request(api_request *api_req) {
                 auto it       = api_req->ready_partitions_list.next;
                 auto req_part = containerof(request_partition_ctx, partitions_list_ll, it);
 
-                if (auto a = req_part->as_op.discover_partitions.response.all) {
-                        topic = req_part->topic;
+                if (req_part->as_op.response_valid) {
+                        if (auto a = req_part->as_op.discover_partitions.response.all) {
+                                topic = req_part->topic;
 
-                        if (not all) {
-                                all.reset(a);
-                        } else {
-                                all->insert(all->end(), a->begin(), a->end());
+                                if (not all) {
+                                        all.reset(a);
+                                } else {
+                                        all->insert(all->end(), a->begin(), a->end());
 
-                                // no need to keep this around
-                                delete a;
+                                        // no need to keep this around
+                                        delete a;
+                                }
                         }
-                }
 
-                req_part->as_op.response_valid = false;
+                        req_part->as_op.response_valid = false;
+                }
                 discard_request_partition_ctx(api_req, req_part);
 
                 it->detach_and_reset();

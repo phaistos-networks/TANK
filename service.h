@@ -2310,12 +2310,13 @@ class Service {
                 auto get_req() {
                         consul_request *req;
 
-                        if (!reusable_reqs.empty()) {
+                        if (not reusable_reqs.empty()) {
                                 constexpr auto bm = unsigned(consul_request::Flags::Released);
 
                                 req = reusable_reqs.back();
                                 reusable_reqs.pop_back();
 
+				TANK_EXPECT(req);
                                 TANK_EXPECT(req->flags & bm);
                                 req->flags &= ~bm;
                         } else {
@@ -2360,6 +2361,7 @@ class Service {
                 void put_req(consul_request *r, const size_t ref) {
                         constexpr auto bm = unsigned(consul_request::Flags::Released);
 
+			TANK_EXPECT(r);
                         TANK_EXPECT(r->flags & unsigned(consul_request::Flags::OverHandled));
 
                         if (r->type == consul_request::Type::PartitionsTX) {
