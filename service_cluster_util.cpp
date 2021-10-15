@@ -70,7 +70,7 @@ bool Service::should_manage_topic_partition_replicas(const topic *t) const noexc
 }
 
 bool Service::is_valid_topic_name(const str_view8 n) noexcept {
-        if (!n || n.size() > 64) {
+        if (not n or n.size() > 64) {
                 return false;
         }
 
@@ -84,12 +84,21 @@ bool Service::is_valid_topic_name(const str_view8 n) noexcept {
                                 any = true;
                                 break;
 
+                        case '-':
                         case '_':
                                 break;
 
                         default:
                                 return false;
                 }
+        }
+
+        if (const auto c = n.front(); c == '-' or c == '_') {
+                return false;
+        }
+
+        if (const auto c = n.back(); c == '-' or c == '_') {
+                return false;
         }
 
         return any;

@@ -87,7 +87,7 @@ bool Service::process_create_topic(connection *const c, const uint8_t *p, const 
 
         resp->pack(requestId, topicName);
 
-        if (partitionsCnt == 0 || !is_valid_topic_name(topicName)) {
+        if (partitionsCnt == 0 or not is_valid_topic_name(topicName)) {
                 // invalid request
                 resp->pack(static_cast<uint8_t>(10));
         } else {

@@ -41,7 +41,7 @@ bool topic_partition_log::should_roll(const uint32_t now) const {
         const std::size_t max_seg_size_ceil = 10;
 #endif
 
-        if (cur.fileSize > max_seg_size_ceil) {
+        if (cur.fileSize > max_seg_size_ceil) [[unlikely]] {
                 if (trace == true || trace_yes == true) {
                         SLog(ansifmt::bold, "Should roll: cur.fileSize(", cur.fileSize, ") > config.maxSegmentSize(", config.maxSegmentSize, ")", ansifmt::reset, "\n");
                 }
@@ -51,7 +51,7 @@ bool topic_partition_log::should_roll(const uint32_t now) const {
 
         const size_t curIndexSizeBytes = cur.index.ondisk.span + (cur.index.skipList.size() * (sizeof(uint32_t) + sizeof(uint32_t)));
 
-        if (curIndexSizeBytes > config.maxIndexSize) {
+        if (curIndexSizeBytes > config.maxIndexSize) [[unlikely]] {
                 // index is full
                 if (trace == true || trace_yes == true) {
                         SLog(ansifmt::bold, "curIndexSizeBytes(", curIndexSizeBytes, ") > config.maxIndexSize(", config.maxIndexSize, ")", ansifmt::reset, "\n");
