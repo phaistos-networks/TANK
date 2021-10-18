@@ -127,48 +127,61 @@ namespace Switch {
         inline endpoint ParseSrvEndpoint(strwlen32_t addr, const strwlen8_t proto, const uint16_t srvPort) {
                 endpoint res;
 
-                if (addr.BeginsWithNoCase(proto.p, proto.len) && addr.SuffixFrom(proto.len).BeginsWith(_S("://")))
+                if (addr.BeginsWithNoCase(proto.p, proto.len) && addr.SuffixFrom(proto.len).BeginsWith(_S("://"))) {
                         addr.StripPrefix(proto.len + 3);
+		}
 
                 const auto r = addr.Divided(':');
 
                 res.port = srvPort;
 
-                if (!r.first)
-                        res.addr4 = ntohl(INADDR_ANY);
-                else if (r.first.len > 128)
+                if (not r.first) {
+                        res.addr4 = ntohl(INADDR_ANY); 
+                } else if (r.first.len > 128) {
                         return {0, 0};
-                else {
+                } else {
                         bool succ;
 
                         res.addr4 = ParseHostAddress({r.first.p, r.first.len}, succ);
-                        if (!succ && r.first.len < 250) {
+                        if (not succ and r.first.len < 250) {
                                 char           n[256], buf[512];
                                 struct hostent ret, *he;
                                 int            errno_;
 
                                 r.first.ToCString(n);
-                                if (gethostbyname_r(n, &ret, buf, sizeof(buf), &he, &errno_) == 0 && he && he->h_addrtype == AF_INET && he->h_length)
+                                if (gethostbyname_r(n, &ret, buf, sizeof(buf), &he, &errno_) == 0 && he && he->h_addrtype == AF_INET && he->h_length) {
                                         res.addr4 = *(uint32_t *)he->h_addr_list[0];
-                                else
+				} else {
                                         return {0, 0};
-                        } else if (succ)
+				}
+                        } else if (succ) {
+				if (r.second.IsDigits()) {
+					if (const auto v = r.second.as_uint32(); v < 65536) {
+						res.port = v;
+					}
+				}
+
                                 return res;
-                        else
+                        } else {
                                 return {0, 0};
+			}
                 }
 
                 if (r.second) {
-                        if (!r.second.IsDigits())
+                        if (not r.second.IsDigits()) {
                                 return {0, 0};
+			}
 
-                        const auto port = r.second.AsUint32();
-                        if (port > 65536)
+                        const auto port = r.second.as_uint32();
+
+                        if (port > 65536) {
                                 return {0, 0};
-                        else
+			} else {
                                 res.port = port;
-                } else
+			}
+                } else {
                         res.port = srvPort;
+		}
 
                 return res;
         }

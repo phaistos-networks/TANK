@@ -119,7 +119,7 @@ int Service::start(int argc, char **argv) {
 
                         case 'P':
                                 prom_endpoint = Switch::ParseSrvEndpoint(str_view32::make_with_cstr(optarg), "http"_s8, 9102);
-                                if (!prom_endpoint) {
+                                if (not prom_endpoint) {
                                         Print("Failed to parse endpoint for prometheus metrics from ", optarg, "\n");
                                         return 1;
                                 }
