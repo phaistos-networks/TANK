@@ -3,13 +3,55 @@
 #include <tl/optional.hpp>
 #endif
 
+static void _handle_fault(const TankClient::fault &it) {
+        switch (it.type) {
+                case TankClient::fault::Type::UnknownTopic:
+                        throw Switch::data_error("Fault while waiting responses: Unknown topic '"_s32, it.topic, '\'');
+                case TankClient::fault::Type::UnknownPartition:
+                        throw Switch::data_error("Fault while waiting responses: Unknown topic partition '"_s32, it.topic, "' / "_s32, it.partition);
+
+                case TankClient::fault::Type::Access:
+                        throw Switch::data_error("Fault while waiting responses: Access");
+
+                case TankClient::fault::Type::BoundaryCheck:
+                        throw Switch::data_error("Fault while waiting responses: Boundary Check");
+
+                case TankClient::fault::Type::InvalidReq:
+                        throw Switch::data_error("Fault while waiting responses: Invalid Request");
+
+                case TankClient::fault::Type::SystemFail:
+                        throw Switch::data_error("Fault while waiting responses: System Fault");
+
+                case TankClient::fault::Type::AlreadyExists:
+                        throw Switch::data_error("Fault while waiting responses: Resource already exists");
+                case TankClient::fault::Type::NotAllowed:
+                        throw Switch::data_error("Fault while waiting responses: Operation Not Allowed");
+
+                case TankClient::fault::Type::Timeout:
+                        throw Switch::data_error("Fault while waiting responses: Operation timed out");
+
+                case TankClient::fault::Type::UnsupportedReq:
+                        throw Switch::data_error("Fault while waiting responses: Request Not Supported");
+
+                case TankClient::fault::Type::InsufficientReplicas:
+                        throw Switch::data_error("Fault while waiting responses: Isuffficient Replicas available");
+
+                case TankClient::fault::Type::Network:
+                        throw Switch::data_error("Fault while waiting responses: Network Fault");
+        }
+}
+
 void TankClient::wait_scheduled(const uint32_t req_id) {
         TANK_EXPECT(req_id);
 
         while (should_poll()) {
-                poll(2000);
+                poll();
 
-                if (unlikely(!faults().empty())) {
+                if (not faults().empty()) [[unlikely]] {
+                        if (1 == faults().size()) {
+                                _handle_fault(faults().front());
+                        }
+
                         throw Switch::data_error("Fault while waiting responses");
                 }
 

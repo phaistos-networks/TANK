@@ -190,7 +190,9 @@ bool Service::register_consumer_wait(const TankAPIMsgType _msg, connection *cons
 // requirements were met
 // generate the deferred consume response
 void Service::wakeup_wait_ctx(wait_ctx *const wctx, connection *const produceConnection) {
-        static constexpr bool trace{false};
+	enum {
+	trace =false,
+	};
         auto                  response_hdr = get_buf();
         uint16_t              topicsCnt{0};
         auto                  c = wctx->c;
@@ -314,6 +316,8 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, connection *const produceCon
 
         if (c != produceConnection) {
                 // see process_produce()
+		assert(c);
+
                 try_tx(c);
         }
 }

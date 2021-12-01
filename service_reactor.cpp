@@ -896,7 +896,7 @@ bool Service::enable_listener() {
                 TANKUtil::safe_close(listenFd);
                 listenFd = -1;
                 return false;
-        } else if (listen(listenFd, 128)) {
+        } else if (listen(listenFd, 512)) {
                 Print("listen() failed:", strerror(errno), "\n");
 
                 TANKUtil::safe_close(listenFd);
@@ -1753,6 +1753,8 @@ bool Service::handle_flush(connection *const c) {
 }
 
 bool Service::try_tx(connection *const c) {
+	assert(c);
+
         if (c->state.flags & (1u << uint8_t(connection::State::Flags::NeedOutAvail))) {
                 return true;
         } else {

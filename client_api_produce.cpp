@@ -1,13 +1,15 @@
 #include "client_common.h"
 
 TankClient::broker_outgoing_payload *TankClient::build_produce_broker_req_payload(const broker_api_request *br_req) {
-        static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
         auto                  payload                    = new_req_payload(const_cast<broker_api_request *>(br_req));
         auto                  b                          = payload->b;
         [[maybe_unused]] auto api_req                    = br_req->api_req;
         const auto            req_is_produce_with_seqnum = api_req->type == api_request::Type::ProduceWithSeqnum;
         size_t                iovecs_cnt                 = 1;
-        auto &                iovecs                     = payload->iovecs.data;
+        auto                 &iovecs                     = payload->iovecs.data;
         size_t                sum                        = 0, verified_sum{0};
         TANK_EXPECT(br_req);
         TANK_EXPECT(br_req->id);
@@ -40,7 +42,8 @@ TankClient::broker_outgoing_payload *TankClient::build_produce_broker_req_payloa
 
                 iovecs[iovecs_cnt++] = iovec{
                     .iov_base = reinterpret_cast<void *>(b->size()),
-                    .iov_len  = (sizeof(uint8_t) + sizeof(uint8_t) + topic.size()) | (1u << 30)};
+                    .iov_len  = (sizeof(uint8_t) + sizeof(uint8_t) + topic.size()) | (1u << 30),
+                };
 
                 b->pack(topic.size());
                 b->serialize(topic.data(), topic.size());
@@ -138,10 +141,12 @@ static uint8_t choose_compression_codec(const TankClient::msg *msgs, const size_
 }
 
 bool TankClient::process_produce(connection *const c, const uint8_t *const content, const size_t len) {
-        static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(c);
         TANK_EXPECT(c->type == connection::Type::Tank);
-        const auto *                p      = content;
+        const auto                 *p      = content;
         [[maybe_unused]] const auto end    = p + len;
         const auto                  req_id = decode_pod<uint32_t>(p);
         const auto                  it     = pending_brokers_requests.find(req_id);
@@ -159,7 +164,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
         }
 
         auto                                 br_req  = it->second;
-        switch_dlist *                       part_it = br_req->partitions_list.next, *next;
+        switch_dlist                        *part_it = br_req->partitions_list.next, *next;
         auto                                 api_req = br_req->api_req;
         std::vector<request_partition_ctx *> retry, no_leader;
         bool                                 any_faults{false};
@@ -200,7 +205,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                                         SLog("Skipping partition ", req_part->partition, "\n");
                                 }
 
-				discard_request_partition_ctx(api_req, req_part);
+                                discard_request_partition_ctx(api_req, req_part);
                         } while ((part_it = next) != &br_req->partitions_list and
                                  (req_part = switch_list_entry(request_partition_ctx, partitions_list_ll, part_it))->topic == topic);
 
@@ -245,7 +250,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                                 any_faults = true;
                                 capture_invalid_req_fault(api_req, req_part->topic, req_part->partition);
 
-				discard_request_partition_ctx(api_req, req_part);
+                                discard_request_partition_ctx(api_req, req_part);
 
                                 if (trace) {
                                         SLog("Attempted to publish to an explicit sequence number not allowed\n");
@@ -255,7 +260,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                                 any_faults = true;
                                 capture_readonly_fault(api_req);
 
-				discard_request_partition_ctx(api_req, req_part);
+                                discard_request_partition_ctx(api_req, req_part);
 
                                 if (trace) {
                                         SLog("Read-Only system\n");
@@ -265,7 +270,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                                 any_faults = true;
                                 capture_unknown_partition_fault(api_req, req_part->topic, req_part->partition);
 
-				discard_request_partition_ctx(api_req, req_part);
+                                discard_request_partition_ctx(api_req, req_part);
 
                                 if (trace) {
                                         SLog("Unkown partition ", req_part->topic, "/", req_part->partition, "\n");
@@ -284,7 +289,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                                 // I/O
                                 capture_system_fault(api_req, req_part->topic, req_part->partition);
 
-				discard_request_partition_ctx(api_req, req_part);
+                                discard_request_partition_ctx(api_req, req_part);
 
                                 any_faults = true;
                         } else if (err == 0x3) {
@@ -295,7 +300,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                                 // insufficient replicas - cannot service the produce request
                                 capture_insuficient_replicas(api_req, req_part->topic, req_part->partition);
 
-				discard_request_partition_ctx(api_req, req_part);
+                                discard_request_partition_ctx(api_req, req_part);
 
                                 any_faults = true;
                         } else {
@@ -341,8 +346,10 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
 }
 
 uint32_t TankClient::produce(const std::pair<topic_partition, std::vector<msg>> *const list, const size_t list_size) {
-        static constexpr bool                                     trace{false};
-        auto                                                      api_req = get_api_request(8 * 1000);
+        enum {
+                trace = false,
+        };
+        auto                                                      api_req = get_api_request(32 * 1000); // UPDATE: 2021-10-27 16s timeout now just in case
         std::vector<std::pair<broker *, request_partition_ctx *>> contexts;
         IOBuffer                                                  b, cb;
 
@@ -362,7 +369,7 @@ uint32_t TankClient::produce(const std::pair<topic_partition, std::vector<msg>> 
                 req_part->topic     = topic_name;
                 req_part->partition = partition;
 
-                TANK_EXPECT(!msgs.empty());
+                TANK_EXPECT(not msgs.empty());
 
                 for (const auto &it : msgs) {
                         sum += it.key.size() + it.content.size();
@@ -440,7 +447,7 @@ uint32_t TankClient::produce(const std::pair<topic_partition, std::vector<msg>> 
                                 cb.serialize(m.content.data(), m.content.size());
                         }
 
-                        if (!Compression::Compress(Compression::Algo::SNAPPY, cb.data(), cb.size(), &b)) {
+                        if (not Compression::Compress(Compression::Algo::SNAPPY, cb.data(), cb.size(), &b)) [[unlikely]] {
                                 IMPLEMENT_ME();
                         }
 
@@ -466,8 +473,10 @@ uint32_t TankClient::produce(const std::pair<topic_partition, std::vector<msg>> 
 }
 
 uint32_t TankClient::produce_with_seqnum(const std::pair<topic_partition, std::vector<consumed_msg>> *const list, const size_t list_size) {
-        static constexpr bool                                     trace{false};
-        auto                                                      api_req = get_api_request(8 * 1000);
+        enum {
+                trace = false,
+        };
+        auto                                                      api_req = get_api_request(32 * 1000);
         std::vector<std::pair<broker *, request_partition_ctx *>> contexts;
         IOBuffer                                                  b, cb;
 

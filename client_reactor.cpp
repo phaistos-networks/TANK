@@ -692,7 +692,9 @@ void TankClient::drain_pipe(int fd) {
 }
 
 bool TankClient::process_io(const size_t events_count) {
-        static constexpr bool trace{false};
+	enum {
+		trace = false,
+	};
         bool                  interrupted = false;
 
         if (trace) {
@@ -942,7 +944,7 @@ void TankClient::reactor_step(uint32_t timeout_ms) {
 			break;
 		}
 
-                if (!r) {
+                if (0 == r) {
                         if (now_ms >= step_end) {
                                 // OK, waited too long
                                 break;
@@ -953,7 +955,10 @@ void TankClient::reactor_step(uint32_t timeout_ms) {
                 } else if (any_responses()) {
                         // we got something
                         break;
-                }
+                } else if (-1 == r and errno == EINTR) {
+			// interrupted
+			break;
+		}
         }
 
         end_reactor_loop_iteration();

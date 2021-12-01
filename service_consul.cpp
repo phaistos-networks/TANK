@@ -8,7 +8,7 @@
 +---------------+-------------------------------------+---------------------------------------------------------------------------------+
 | topology/     | <topic_name>/<partition>            | Value holds the list of replicas.                                 		|
 |               |                                     | This represents the current cluster topology.                                   |
-|               |                                     | Whenever a new topic or partition is created, or othrs are deleted, the        |
+|               |                                     | Whenever a new topic or partition is created, or others are deleted, the        |
 |               |                                     | changes are applied in this this namespace                                      |
 +---------------+-------------------------------------+---------------------------------------------------------------------------------+
 | leaders/      | CLUSTER or <topic_name>/<partition> | We care for Session, and Flags                                                  |

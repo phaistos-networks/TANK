@@ -57,7 +57,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
 			SLog("For topic [", topic_name, "], ", cnt, " partitions\n");
 		}
 
-                if (!topic) {
+                if (not topic) {
 			const auto res = intern_map.emplace(topic_name, true);
 
                         if (trace) {
@@ -294,7 +294,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                         log = nullptr;
                 }
 
-                if (!log) {
+                if (not log) {
                         if (trace) {
                                 SLog("partition.log is NA\n");
                         }
@@ -332,7 +332,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                 auto       res                     = log->append_bundle(curTime, bundle.offset, bundle.size(), msg_set_size, first_msg_seq_num, last_msg_seq_num);
                 const auto bundle_last_msg_seq_num = res.msgSeqNumRange.offset + res.msgSeqNumRange.size() - 1;
 
-                if (!res.fdh) {
+                if (not res.fdh) {
                         if (trace) {
                                 SLog("append_bundle() failed\n");
                         }
@@ -345,7 +345,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                         continue;
                 }
 
-                if (!ca) {
+                if (not ca) {
                         // obviously
 			if (trace) {
 				SLog("Not cluster-aware, committing now\n");

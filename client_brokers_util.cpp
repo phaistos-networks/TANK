@@ -972,7 +972,9 @@ void TankClient::unlink_broker_req(broker_api_request *br_req, const size_t ref)
 }
 
 void TankClient::process_undeliverable_broker_req(broker_api_request *br_req, const bool reason_timeout, [[maybe_unused]] const uint32_t ref) {
-        static constexpr bool trace{false};
+	enum {
+		trace = false,
+	};
         TANK_EXPECT(br_req);
         const auto br_req_id = br_req->id;
         TANK_EXPECT(br_req_id);
@@ -995,7 +997,7 @@ void TankClient::process_undeliverable_broker_req(broker_api_request *br_req, co
                         SLog("Already expired (expiration:", expiration, ", now_ms:", now_ms, ") time out ", br_req->partitions_list.size(), " partitions\n");
                 }
 
-                while (!br_req->partitions_list.empty()) {
+                while (not br_req->partitions_list.empty()) {
                         auto part = containerof(request_partition_ctx, partitions_list_ll, br_req->partitions_list.next);
 
                         capture_timeout(api_req, part->topic, part->partition, __LINE__);
@@ -1010,7 +1012,7 @@ void TankClient::process_undeliverable_broker_req(broker_api_request *br_req, co
                 std::vector<std::pair<broker *, request_partition_ctx *>> contexts;
 
                 if (reason_timeout) {
-                        while (!br_req->partitions_list.empty()) {
+                        while (not br_req->partitions_list.empty()) {
                                 auto req_part = containerof(request_partition_ctx, partitions_list_ll, br_req->partitions_list.next);
 
                                 capture_timeout(api_req, req_part->topic, req_part->partition, __LINE__);
@@ -1313,7 +1315,7 @@ void TankClient::capture_network_fault(api_request *api_req, const str_view8 top
 
 void TankClient::capture_insuficient_replicas(api_request *api_req, const str_view8 topic_name, const uint16_t partition) {
         if (trace_captured_faults) {
-                SLog("Captured FAULT\n");
+                SLog("Captured FAULT: insufficient replicas for ", topic_name, "/", partition, "\n");
         }
 
         api_req->set_failed();
@@ -1328,7 +1330,7 @@ void TankClient::capture_insuficient_replicas(api_request *api_req, const str_vi
 
 void TankClient::capture_system_fault(api_request *api_req, const str_view8 topic_name, const uint16_t partition) {
         if (trace_captured_faults) {
-                SLog("Captured FAULT\n");
+                SLog("Captured FAULT: system fault for ", topic_name, "/", partition, "\n");
         }
 
         api_req->set_failed();
@@ -1341,7 +1343,7 @@ void TankClient::capture_system_fault(api_request *api_req, const str_view8 topi
         });
 }
 
-void TankClient::capture_timeout(api_request *api_req, const str_view8 topic_name, const uint16_t partition, const uint32_t ref) {
+void TankClient::capture_timeout(api_request *const api_req, const str_view8 topic_name, const uint16_t partition, const uint32_t ref) {
         TANK_EXPECT(api_req);
 
         if (trace_captured_faults) {
@@ -1360,7 +1362,7 @@ void TankClient::capture_timeout(api_request *api_req, const str_view8 topic_nam
 
 void TankClient::capture_unknown_topic_fault(api_request *api_req, const str_view8 topic_name) {
         if (trace_captured_faults) {
-                SLog("Captured FAULT '", topic_name, "'\n");
+                SLog("Captured FAULT: unknown topic '", topic_name, "'\n");
         }
 
         api_req->set_failed();
@@ -1374,7 +1376,7 @@ void TankClient::capture_unknown_topic_fault(api_request *api_req, const str_vie
 
 void TankClient::capture_unknown_partition_fault(api_request *api_req, const str_view8 topic_name, const uint16_t partition) {
         if (trace_captured_faults) {
-                SLog("Captured FAULT\n");
+                SLog("Captured FAULT: unknown partition ", topic_name, "/", partition, "\n");
         }
 
         api_req->set_failed();
@@ -1389,7 +1391,7 @@ void TankClient::capture_unknown_partition_fault(api_request *api_req, const str
 
 void TankClient::capture_invalid_req_fault(api_request *api_req, const str_view8 topic_name, const uint16_t partition) {
         if (trace_captured_faults) {
-                SLog("Captured FAULT\n");
+                SLog("Captured FAULT: invalid request for ", topic_name, "/", partition, "\n");
         }
 
         api_req->set_failed();
@@ -1404,7 +1406,7 @@ void TankClient::capture_invalid_req_fault(api_request *api_req, const str_view8
 
 void TankClient::capture_readonly_fault(api_request *api_req) {
         if (trace_captured_faults) {
-                SLog("Captured FAULT\n");
+                SLog("Captured FAULT: read only\n");
         }
 
         api_req->set_failed();
@@ -1419,7 +1421,7 @@ void TankClient::capture_readonly_fault(api_request *api_req) {
 
 void TankClient::capture_boundary_access_fault(api_request *api_req, const str_view8 topic_name, const uint16_t partition, const uint64_t first_avail_seqnum, const uint64_t highwater_mark) {
         if (trace_captured_faults) {
-                SLog("Captured FAULT\n");
+                SLog("Captured FAULT: boundary access for ", topic_name, "/", partition, "\n");
         }
 
         api_req->set_failed();

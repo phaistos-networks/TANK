@@ -406,7 +406,8 @@ append_res topic_partition_log::append_bundle(const time_t   now,
         const struct iovec iov[] =
             {
                 {(void *)varint, varintLen},
-                {const_cast<void *>(bundle), bundleSize}};
+                {const_cast<void *>(bundle), bundleSize},
+            };
         const auto                 entryLen = iov[0].iov_len + iov[1].iov_len;
         const range32_t            fileRange(cur.fileSize, entryLen);
         const auto                 before = cur.fdh.use_count();

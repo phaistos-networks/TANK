@@ -237,7 +237,7 @@ int main(int argc, char *argv[]) {
                                 Print(Buffer{}.append(align_to(5), "reload_config"_s32, align_to(32), "Reload per-topic configuration"_s32), "\n");
                                 Print(Buffer{}.append(align_to(5), "status"_s32, align_to(32), "Displays service status"_s32), "\n");
                                 Print(Buffer{}.append(align_to(5), "discover_topics"_s32, align_to(32), "Enumerares created topics "_s32), "\n");
-                                Print(Buffer{}.append(align_to(5), "topology"_s32, align_to(32), "Displys cluster nodes topology "_s32), "\n");
+                                Print(Buffer{}.append(align_to(5), "topology"_s32, align_to(32), "Displays cluster nodes topology "_s32), "\n");
                                 return 0;
 
                         default:
