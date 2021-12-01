@@ -952,7 +952,7 @@ void Service::drain_pubsub_queue() {
 
 void Service::fire_timer(timer_node *const ctx) {
         static constexpr bool trace = trace_timers;
-        //static constexpr bool trace = true;
+        //static constexpr bool trace = false;
 
         if (trace) {
                 SLog(ansifmt::color_brown, "firing timer ", ptr_repr(&ctx->node), " ", unsigned(ctx->type), ansifmt::reset, "\n");
@@ -1140,7 +1140,7 @@ void Service::schedule_retry_consume_from(cluster_node *n) {
 
 void Service::cleanup_connection(connection *const c, [[maybe_unused]] const uint32_t ref) {
 	enum {
-		trace = true,
+		trace = false,
 	};
         TANK_EXPECT(c);
         TANK_EXPECT(c->fd != -1);
@@ -2414,7 +2414,9 @@ bool Service::try_recv_prom(connection *const c) {
 }
 
 bool Service::try_recv_consumer(connection *const c) {
-        static constexpr bool trace{false};
+	enum {
+		trace = false,
+	};
         auto *const           b = c->inB;
 
         for (const auto *e = reinterpret_cast<uint8_t *>(b->end());;) {
@@ -2454,7 +2456,8 @@ bool Service::try_recv_consumer(connection *const c) {
                         }
 
                         c->as.tank.flags &= ~unsigned(connection::As::Tank::Flags::ConsideredReqHeader);
-                        if (!process_peer_msg(c, msg, reinterpret_cast<const uint8_t *>(p), msg_len)) {
+
+                        if (not process_peer_msg(c, msg, reinterpret_cast<const uint8_t *>(p), msg_len)) {
                                 return false;
                         }
 
@@ -2523,7 +2526,7 @@ bool Service::try_recv_tank(connection *const c) {
                         }
 
                         c->as.tank.flags &= ~unsigned(connection::As::Tank::Flags::ConsideredReqHeader);
-                        if (!process_msg(c, msg, reinterpret_cast<const uint8_t *>(p), msg_length)) {
+                        if (not process_msg(c, msg, reinterpret_cast<const uint8_t *>(p), msg_length)) {
                                 return false;
                         }
 
@@ -2589,9 +2592,9 @@ bool Service::try_recv(connection *const c) {
                         std::abort();
 
                 case connection::Type::Consumer:
-                        if (!try_recv_consumer(c)) {
+                        if (not try_recv_consumer(c)) {
                                 return false;
-                        } else if (auto b = c->inB; b && b->offset() == b->size()) {
+                        } else if (auto b = c->inB; b and b->offset() == b->size()) {
                                 put_buf(b);
                                 c->inB = nullptr;
                                 try_make_idle(c);
@@ -2602,7 +2605,7 @@ bool Service::try_recv(connection *const c) {
                         return try_recv_prom(c);
 
                 case connection::Type::TankClient:
-                        if (!try_recv_tank(c)) {
+                        if (not try_recv_tank(c)) {
                                 return false;
                         } else if (auto b = c->inB) {
                                 if (b->offset() == b->size()) {

@@ -482,7 +482,7 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                                 }
                         }
 
-                        if (consume_peer_req && peer) {
+                        if (consume_peer_req and peer) {
                                 peer_consumed_local_partition(partition, peer, abs_seq_num);
                         }
                 }

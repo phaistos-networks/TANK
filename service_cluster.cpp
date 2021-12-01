@@ -59,7 +59,7 @@ std::size_t Service::determine_min_fetch_size_for_new_stream() {
         // We should probably figure out an initial min_fetch_size based on how many streams
         // are currently active and have a global budget that for all of them. For now, start with a relatively low constant fetch size
         // for all new streams
-        return 2 * 1024 * 1024;
+        return 4 * 1024 * 1024;
 }
 
 // generate and schedule a new request for peer `node`, for replication of content for `partitions`
@@ -83,10 +83,12 @@ void Service::replicate_from(cluster_node *const node, topic_partition *const *p
 
         if (trace) {
                 SLog(ansifmt::bold, ansifmt::color_brown, "Will attempt to replicate ", partitions_cnt, " from ", node->id, "@", node->ep, ansifmt::reset, "\n");
+		SLog("To replicate:", values_repr_with_lambda(partitions, partitions_cnt, [](const auto it) noexcept { 
+			return Buffer{}.append(it->owner->name(), '/', it->idx); }), "\n");
         }
 
         if (c) {
-                if (const auto state = c->as.consumer.state; state == connection::As::Consumer::State::Connecting || state == connection::As::Consumer::State::Busy) {
+                if (const auto state = c->as.consumer.state; state == connection::As::Consumer::State::Connecting or state == connection::As::Consumer::State::Busy) {
                         // we are waiting for a response from an outstanding/active consume req
                         // or we are still trying to establish a connection
                         if (trace) {
@@ -120,7 +122,7 @@ void Service::replicate_from(cluster_node *const node, topic_partition *const *p
         }
 
         if (trace) {
-                SLog(ansifmt::color_green, "Will generate a CONSUME request for node ", node->id, "@", node->ep, ansifmt::reset, "\n");
+                SLog(ansifmt::color_green, "Will generate a CONSUME request for node ", node->id, "@", node->ep, ansifmt::reset, " (", partitions_cnt, " partitions)\n");
         }
 
         // topics are expected to be ordered
@@ -144,7 +146,7 @@ void Service::replicate_from(cluster_node *const node, topic_partition *const *p
         b->pack(static_cast<uint16_t>(0));
 
         dvp->buf = b;
-        for (size_t i{0}; i < partitions_cnt; ++i) {
+        for (size_t i{0}; i < partitions_cnt;) {
                 auto       topic = partitions[i]->owner;
                 const auto base  = i;
 
@@ -183,14 +185,14 @@ void Service::replicate_from(cluster_node *const node, topic_partition *const *p
                         stream->src = node;
 
                         if (trace) {
-                                SLog("Will request topic ", p->owner->name(), "/", p->idx, " from seq ", next, ", min_fetch_size = ", stream->min_fetch_size, "\n");
+                                SLog("Will request topic ", p->owner->name(), "/", p->idx, " from seq ", next, " (local last assigned:", partition_log(p)->lastAssignedSeqNum, "), min_fetch_size = ", stream->min_fetch_size, "\n");
                         }
 
                         b->pack(p->idx);                                        // partition
                         b->pack(static_cast<uint64_t>(next));                   // absolute sequence number to consume from
                         b->pack(static_cast<uint32_t>(stream->min_fetch_size)); // fetch size
 
-                } while (++i < partitions_cnt && partitions[i]->owner == topic);
+                } while (++i < partitions_cnt and partitions[i]->owner == topic);
 
                 const uint16_t total_partitions = i - base;
 
@@ -210,7 +212,7 @@ void Service::replicate_from(cluster_node *const node, topic_partition *const *p
 
 // Attempt to replicate from a peer content
 // for all partitions this node is a replica of and that peer is their leader
-void Service::try_replicate_from(cluster_node *peer) {
+void Service::try_replicate_from(cluster_node *const peer) {
 	enum {
 		trace = false,
 	};
@@ -227,7 +229,7 @@ void Service::try_replicate_from(cluster_node *peer) {
         auto partitions = partitions_to_replicate_from(peer);
 
         if (trace) {
-                SLog("Total partitions to replicate from peer ", partitions ? partitions->size() : 0, "\n");
+                SLog("Total partitions to replicate from peer ", peer->id, '@', peer->ep, ' ', partitions ? partitions->size() : 0, "\n");
         }
 
         if (partitions and not partitions->empty()) {

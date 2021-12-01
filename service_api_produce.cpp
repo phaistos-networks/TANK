@@ -1,8 +1,10 @@
 #include "service_common.h"
 
-// guarding against malformed requests because we really don' want rogue connections to kill TANK
+// guarding against malformed requests because we really don't want rogue connections to kill TANK
+//
 // XXX: the same partition cannot be present in the same produce request
 // TODO: we need to guard against that
+//
 // This, among other reasons, is because of how and why we use topic_partition::waiting_list, where
 // each value is a pair of (wait_ctx, uint8_t), the second being the index in wait_ctx::partitions[]
 // so we can't have the same partition more than once there.

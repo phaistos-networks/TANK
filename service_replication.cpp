@@ -7,7 +7,9 @@ static inline std::size_t aligned_to(const std::size_t v, const std::size_t alig
 
 #ifndef HWM_UPDATE_BASED_ON_ACKS
 void Service::rebuild_partition_tracked_isrs(topic_partition *const partition) {
-	static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(partition);
         const auto self = cluster_state.local_node.ref;
 
@@ -55,7 +57,9 @@ void Service::rebuild_partition_tracked_isrs(topic_partition *const partition) {
 
 // TODO: this is *not* optimal
 bool topic_partition::Cluster::ISR::Tracker::confirmed(const uint8_t k, const uint64_t seqnum) const TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
-        static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
 
         if (trace) {
                 SLog("confirmed() for k = ", k, ", seqnum = ", seqnum, ", size = ", size, "\n");
@@ -80,9 +84,9 @@ bool topic_partition::Cluster::ISR::Tracker::confirmed(const uint8_t k, const ui
         }
 
         // Producers get an ACK _regardless_ of HWM aadvancement
-	// i.e if a producer P produces a message with LSN 100, and ack = 2(requires an implicit ack from the leader, and 2 acks from peers in the ISR)
-	// then as soon as 2+ different peers issue a ConsumePeer for LSN > 100, that produce req. can get ack-ed.
-	// 
+        // i.e if a producer P produces a message with LSN 100, and ack = 2(requires an implicit ack from the leader, and 2 acks from peers in the ISR)
+        // then as soon as 2+ different peers issue a ConsumePeer for LSN > 100, that produce req. can get ack-ed.
+        //
         // e.g for seqnum = 8, k = 2
         // we may have data[0].lsn = 7, data[1] = 8
         for (unsigned i = 0; i < k; ++i) {
@@ -127,7 +131,7 @@ uint8_t topic::compute_required_peers_acks(const topic_partition *part, const ui
                 // magic: require acks from all peers
                 // so we need to return (effective_isr_size - 1)
                 // because ISR always include the local node as well
-		// TODO: need a special > 200 value, because 0 is a for acks is an acceptable value
+                // TODO: need a special > 200 value, because 0 is a for acks is an acceptable value
                 return peers_in_isr;
         } else if (required_acks == 255) {
                 // magic: quorum
@@ -141,7 +145,9 @@ uint8_t topic::compute_required_peers_acks(const topic_partition *part, const ui
 // if there is an active replication stream for that node, it will be closed
 // if no other partitions are to be replicated from that peer later
 void Service::try_abort_replication(topic_partition *p, cluster_node *src, const uint32_t ref) {
-        static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(p);
         TANK_EXPECT(src);
         TANK_EXPECT(cluster_aware());
@@ -168,8 +174,8 @@ void Service::try_abort_replication(topic_partition *p, cluster_node *src, const
                         // instead of checking if `src` is the lader of `p` before invoking this method, we can cheaply
                         // guard against that here
                         if (trace) {
-                                SLog("Stream active for partition ", p->owner->name(), "/", p->idx, 
-					", but streaming from ", stream->src->ep, " not from ", src->ep, "\n");
+                                SLog("Stream active for partition ", p->owner->name(), "/", p->idx,
+                                     ", but streaming from ", stream->src->ep, " not from ", src->ep, "\n");
                         }
 
                         return;
@@ -201,16 +207,18 @@ void Service::try_abort_replication(topic_partition *p, cluster_node *src, const
 }
 
 bool Service::any_partitions_to_replicate_from(cluster_node *n) const {
-        [[maybe_unused]] static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(n);
         TANK_EXPECT(cluster_aware());
         auto self = cluster_state.local_node.ref;
 
-        if (!can_accept_any_messages()) {
+        if (not can_accept_any_messages()) {
                 return false;
         }
 
-        if (!n->leadership.dirty) {
+        if (not n->leadership.dirty) {
                 // fast-path
 #ifdef TANK_RUNTIME_CHECKS
                 for (auto p : *n->leadership.local_replication_list) {
@@ -218,7 +226,7 @@ bool Service::any_partitions_to_replicate_from(cluster_node *n) const {
                 }
 #endif
 
-                if (!partitions_io_failed_cnt) {
+                if (0 == partitions_io_failed_cnt) {
                         // fast-path
                         return false == n->leadership.local_replication_list->empty();
                 } else {
@@ -232,9 +240,9 @@ bool Service::any_partitions_to_replicate_from(cluster_node *n) const {
         }
 
         for (auto it : n->leadership.list) {
-                const auto p = switch_list_entry(topic_partition, cluster.leader.leadership_ll, it);
+                const auto p = containerof(topic_partition, cluster.leader.leadership_ll, it);
 
-                if (self->is_replica_for(p) && can_accept_messages(p)) {
+                if (self->is_replica_for(p) and can_accept_messages(p)) {
                         return true;
                 }
         }
@@ -244,11 +252,13 @@ bool Service::any_partitions_to_replicate_from(cluster_node *n) const {
 
 // returns a list of all partitions where leader is `n` and we
 // are replicas of (i.e partitions to replicate from it)
-const std::vector<topic_partition *> *Service::partitions_to_replicate_from(cluster_node *n) {
+const std::vector<topic_partition *> *Service::partitions_to_replicate_from(cluster_node *const n) {
         TANK_EXPECT(n);
         TANK_EXPECT(cluster_aware());
-        static constexpr bool trace{false};
-        auto                  self = cluster_state.local_node.ref;
+        enum {
+                trace = false,
+        };
+        auto self = cluster_state.local_node.ref;
         TANK_EXPECT(self);
 
         if (n->leadership.list.empty()) {
@@ -259,7 +269,7 @@ const std::vector<topic_partition *> *Service::partitions_to_replicate_from(clus
                 return nullptr;
         }
 
-        if (!n->leadership.local_replication_list) {
+        if (not n->leadership.local_replication_list) {
                 if (trace) {
                         SLog("Will create local_replication_list\n");
                 }
@@ -270,7 +280,7 @@ const std::vector<topic_partition *> *Service::partitions_to_replicate_from(clus
 
         auto v = n->leadership.local_replication_list.get();
 
-        if (!can_accept_any_messages()) {
+        if (not can_accept_any_messages()) {
                 v->clear();
                 return v;
         }
@@ -280,9 +290,9 @@ const std::vector<topic_partition *> *Service::partitions_to_replicate_from(clus
 
                 // for each partition that node's a leader now
                 for (auto it : n->leadership.list) {
-                        auto p = switch_list_entry(topic_partition, cluster.leader.leadership_ll, it);
+                        auto p = containerof(topic_partition, cluster.leader.leadership_ll, it);
 
-                        if (self->is_replica_for(p) && can_accept_messages(p)) {
+                        if (self->is_replica_for(p) and can_accept_messages(p)) {
                                 v->emplace_back(p);
                         }
                 }
@@ -295,7 +305,10 @@ const std::vector<topic_partition *> *Service::partitions_to_replicate_from(clus
                 n->leadership.dirty = false;
 
                 if (trace) {
-                        SLog("Leadership list dirty, updated => ", v->size(), "\n");
+                        SLog("Leadership list dirty for node ", n->id, '@', n->ep, " updated => ", v->size(), " [", values_repr_with_lambda(v->data(), v->size(), [](const auto it) noexcept {
+                                     return Buffer{}.append(it->owner->name(), '/', it->idx);
+                             }),
+                             "\n");
                 }
         } else if (trace) {
                 SLog("Not Dirty => ", v->size(), "\n");
@@ -313,7 +326,9 @@ const std::vector<topic_partition *> *Service::partitions_to_replicate_from(clus
 // returns true if tried to send the response to client and client connection was shut down
 // invoked by complete_deferred_produce_response()
 bool Service::try_generate_produce_response(produce_response *pr) {
-        static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(pr);
 
         if (trace) {
@@ -351,7 +366,9 @@ bool Service::try_generate_produce_response(produce_response *pr) {
 // mostly serves as a trampoline for try_generate_produce_response()
 // invoked by confirm_deferred_produce_resp_partition()
 void Service::complete_deferred_produce_response(produce_response *dpr) {
-        static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(dpr);
 
         if (trace) {
@@ -375,7 +392,9 @@ void Service::complete_deferred_produce_response(produce_response *dpr) {
 
 // an update associated with a DPR(deferred pending response) has been acknowledged
 void Service::confirm_deferred_produce_resp_partition(produce_response *dpr, [[maybe_unused]] topic_partition *p, [[maybe_unused]] const uint8_t pr_participant_idx) {
-        static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(dpr);
         TANK_EXPECT(cluster_aware());
         TANK_EXPECT(p);
@@ -403,10 +422,12 @@ void Service::confirm_deferred_produce_resp_partition(produce_response *dpr, [[m
 // update_hwmark() by its bundle_last_msg_seq_num if there are other previously submitted(i.e in
 // pending_client_produce_acks_tracker.pending) product requests pending ack.
 void Service::consider_acknowledged_product_reqs(topic_partition *p) {
-        static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(p);
-        const auto &                                      q  = p->cluster.pending_client_produce_acks_tracker.pending;
-        auto &                                            pq = p->cluster.pending_client_produce_acks_tracker.acknowledged;
+        const auto                                       &q  = p->cluster.pending_client_produce_acks_tracker.pending;
+        auto                                             &pq = p->cluster.pending_client_produce_acks_tracker.acknowledged;
         topic_partition::Cluster::pending_ack_bundle_desc target{.last_msg_seqnum = 0};
         uint64_t                                          next;
 
@@ -447,7 +468,9 @@ void Service::consider_acknowledged_product_reqs(topic_partition *p) {
 #endif
 
 void Service::consider_pending_client_produce_responses(topic_partition *p, cluster_node *peer, const uint64_t seq_num) {
-	static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(p);
         TANK_EXPECT(peer);
         auto *const isr_e = p->cluster.isr.find(peer);
@@ -462,9 +485,9 @@ void Service::consider_pending_client_produce_responses(topic_partition *p, clus
                 // because it will commence consumption from a past sequence number, q.size() will be 0
                 // why?
                 // XXX: is this still an issue?
-		if (trace) {
-			SLog("ODD: unable to isr.find() for ", p->owner->name(), "/", p->idx, " for ", peer->id, "@", peer->ep, "\n");
-		}
+                if (trace) {
+                        SLog("ODD: unable to isr.find() for ", p->owner->name(), "/", p->idx, " for ", peer->id, "@", peer->ep, "\n");
+                }
                 return;
         }
 
@@ -483,7 +506,9 @@ void Service::consider_pending_client_produce_responses(topic_partition *p, clus
 void Service::consider_pending_client_produce_responses(isr_entry *const isr_e, topic_partition *p, cluster_node *peer, const uint64_t seq_num) {
         // https://www.confluent.io/blog/hands-free-kafka-replication-a-lesson-in-operational-simplicity/
         // See connection::As::Tank::pending_produce_reqs_acks
-        static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(p);
         TANK_EXPECT(peer);
         TANK_EXPECT(isr_e);
@@ -496,9 +521,9 @@ void Service::consider_pending_client_produce_responses(isr_entry *const isr_e, 
         auto &q = p->cluster.pending_client_produce_acks_tracker.pending; // this is an std::deque<>
 
 #ifndef HWM_UPDATE_BASED_ON_ACKS
-	if (trace) {
-		SLog("Considering q of size ", q.size(), ", cluster.isr.tracker.size = ", p->cluster.isr.tracker.size, ", p->cluster.isr.tracker.data[0].lsn = ", p->cluster.isr.tracker.data[0].lsn, "\n");
-	}
+        if (trace) {
+                SLog("Considering q of size ", q.size(), ", cluster.isr.tracker.size = ", p->cluster.isr.tracker.size, ", p->cluster.isr.tracker.data[0].lsn = ", p->cluster.isr.tracker.data[0].lsn, "\n");
+        }
 
         for (auto it = q.begin(); it != q.end();) {
                 auto &pa  = *it;
@@ -508,9 +533,9 @@ void Service::consider_pending_client_produce_responses(isr_entry *const isr_e, 
                 const auto bundle_desc             = pa.bundle_desc;
                 const auto bundle_last_msg_seq_num = bundle_desc.last_msg_seqnum;
 
-		if (trace) {
-			SLog("For pending, bundle_last_msg_seq_num = ", bundle_last_msg_seq_num, ", dpr_available = ", dpr_available, "\n");
-		}
+                if (trace) {
+                        SLog("For pending, bundle_last_msg_seq_num = ", bundle_last_msg_seq_num, ", dpr_available = ", dpr_available, "\n");
+                }
 
                 if (seq_num <= bundle_last_msg_seq_num) {
                         break;
@@ -522,10 +547,10 @@ void Service::consider_pending_client_produce_responses(isr_entry *const isr_e, 
 
                 const auto required_acks = pa.required_acks;
 
-		if (trace) {
-			SLog("required_acks = ", required_acks, ", confirmed() = ", 
-				p->cluster.isr.tracker.confirmed(required_acks, bundle_last_msg_seq_num), "\n");
-		}
+                if (trace) {
+                        SLog("required_acks = ", required_acks, ", confirmed() = ",
+                             p->cluster.isr.tracker.confirmed(required_acks, bundle_last_msg_seq_num), "\n");
+                }
 
                 if (!p->cluster.isr.tracker.confirmed(required_acks, bundle_last_msg_seq_num)) {
                         ++it;
@@ -633,7 +658,9 @@ void Service::consider_pending_client_produce_responses(topic_partition *const p
         // either because a node has been added or removed from it
         // and we get a chance to consider all pending client pending produce responses
         // where we may be able to satisfy the invariant
-        static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(p);
 
         if (trace) {
@@ -641,7 +668,7 @@ void Service::consider_pending_client_produce_responses(topic_partition *const p
                      p->owner->name(), "/", p->idx, " because ISR likely updated", ansifmt::reset, "\n");
         }
 
-        auto &     q        = p->cluster.pending_client_produce_acks_tracker.pending;
+        auto      &q        = p->cluster.pending_client_produce_acks_tracker.pending;
         const auto isr_size = p->cluster.isr.size();
 
         if (trace) {
@@ -650,7 +677,7 @@ void Service::consider_pending_client_produce_responses(topic_partition *const p
 
 #ifndef HWM_UPDATE_BASED_ON_ACKS
         for (auto it = q.begin(); it != q.end();) {
-                auto &     pa                      = *it;
+                auto      &pa                      = *it;
                 auto       dpr                     = pa.deferred_resp;
                 const auto dpr_available           = dpr->gen == pa.deferred_resp_gen;
                 const auto required_acks           = pa.required_acks;
@@ -658,12 +685,12 @@ void Service::consider_pending_client_produce_responses(topic_partition *const p
                 const auto bundle_last_msg_seq_num = bundle_desc.last_msg_seqnum;
 
                 if (!p->cluster.isr.tracker.confirmed(required_acks, bundle_last_msg_seq_num)) {
-			++it;
-			continue;
-		}
+                        ++it;
+                        continue;
+                }
 
                 if (dpr_available) {
-			// trampoline to try_generate_produce_response()
+                        // trampoline to try_generate_produce_response()
                         confirm_deferred_produce_resp_partition(dpr, p, pa.pr_participant_idx);
                 }
 
@@ -674,7 +701,7 @@ void Service::consider_pending_client_produce_responses(topic_partition *const p
         // this is potentially expensive but
         // likely not going to have to do this frequently
         for (auto it = q.begin(); it != q.end();) {
-                auto &     pa            = *it;
+                auto      &pa            = *it;
                 auto       dpr           = pa.deferred_resp;
                 const auto dpr_available = dpr->gen == pa.deferred_resp_gen; // cookie check
                 const auto required_acks = pa.required_acks;
@@ -712,12 +739,12 @@ void Service::consider_pending_client_produce_responses(topic_partition *const p
                 }
 
                 if (dpr_available) {
-			// trampoline to try_generate_produce_response()
+                        // trampoline to try_generate_produce_response()
                         confirm_deferred_produce_resp_partition(dpr, p, pa.pr_participant_idx);
                 }
 
-		// We first push into into the prio.queue and
-		// eventually consider_acknowledged_product_reqs() will pop from that pq
+                // We first push into into the prio.queue and
+                // eventually consider_acknowledged_product_reqs() will pop from that pq
                 p->cluster.pending_client_produce_acks_tracker.acknowledged.push(bundle_desc);
 
                 it = q.erase(it);
@@ -733,13 +760,15 @@ void Service::consider_pending_client_produce_responses(topic_partition *const p
 // 	- ISR tracking
 // 	- dealing with pending produce requests pending ack (based on RF)
 void Service::peer_consumed_local_partition(topic_partition *p, cluster_node *peer, const uint64_t seq_num) {
-        static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(p);
         TANK_EXPECT(peer);
         auto       log  = partition_log(p);
         const auto last = log->lastAssignedSeqNum;
 
-        if (!cluster_aware()) {
+        if (not cluster_aware()) {
                 // we shouldn't invoke this to begin with
                 if (trace) {
                         SLog("Not cluster-aware, will not proceed\n");
@@ -807,8 +836,8 @@ void Service::peer_consumed_local_partition(topic_partition *p, cluster_node *pe
                 }
 
 #ifndef HWM_UPDATE_BASED_ON_ACKS
-		// notice that we use (seq_num - 1)
-		// that is because we track the lsn of the last known. ack message
+                // notice that we use (seq_num - 1)
+                // that is because we track the lsn of the last known. ack message
                 isr_touch(isr_e, seq_num - 1);
 #endif
         } else {
@@ -823,8 +852,8 @@ void Service::peer_consumed_local_partition(topic_partition *p, cluster_node *pe
                 persist_isr(p, __LINE__);
 
 #ifndef HWM_UPDATE_BASED_ON_ACKS
-		// notice that we use (seq_num - 1)
-		// that is because we track the lsn of the last known. ack message
+                // notice that we use (seq_num - 1)
+                // that is because we track the lsn of the last known. ack message
                 isr_touch(isr_e, seq_num - 1);
 #endif
         }
@@ -854,10 +883,12 @@ static uint8_t choose_compression_codec(const topic_partition::msg *msgs, const 
 
 // content consumed from peer; commit locally
 void Service::persist_peer_partitions_content(topic_partition *const partition, const std::vector<topic_partition::msg> &partition_msgs, const bool first_sparse) {
-        static constexpr bool        trace{false};
+        enum {
+                trace = false,
+        };
         static thread_local IOBuffer cb_tls;
         const auto                   cnt = partition_msgs.size();
-        auto &                       cb{cb_tls};
+        auto                        &cb{cb_tls};
 
         TANK_EXPECT(partition);
 
@@ -883,7 +914,7 @@ void Service::persist_peer_partitions_content(topic_partition *const partition, 
         }
 
         for (const auto *p = partition_msgs.data(), *const e = p + cnt; p < e;) {
-		// determine batch size
+                // determine batch size
                 const auto upto                 = std::min(e, p + 128);
                 const auto msgset_first_seq_num = p->seqNum;
                 const auto msgset_msgs_cnt      = std::distance(p, upto);
@@ -894,7 +925,7 @@ void Service::persist_peer_partitions_content(topic_partition *const partition, 
                 bool       as_sparse            = false;
                 const auto codec                = choose_compression_codec(p, std::distance(p, upto));
 
-		// is this going to be a sparse batch?
+                // is this going to be a sparse batch?
                 for (const auto *it = p; it < upto; ++it) {
                         if (const auto seq_num = it->seqNum; seq_num != next_expected) {
                                 as_sparse = true;
@@ -1060,22 +1091,23 @@ void Service::persist_peer_partitions_content(topic_partition *const partition, 
 //
 // TODO: see optimization comments for TankClient::process_consume()
 bool Service::process_peer_consume_resp(connection *const c, const uint8_t *p, const size_t len) {
-        const auto            end = p + len;
-        static constexpr bool trace{false};
-        auto &                partition_msgs   = reusable.partition_msgs;
-        auto &                acquired_buffers = reusable.acquired_buffers;
-        str_view8             key;
-        const auto            hdr_size      = decode_pod<uint32_t>(p);
-        const auto *          bundles_chunk = p + hdr_size;            // first partition's bundles chunk (see ^^ about partitions chunks)
-        const auto            topics_cnt    = decode_pod<uint16_t>(p); // ConsumePeer: topics_cnt is encoded as u16
-        auto                  peer          = c->as.consumer.node;
+        enum { trace = false,
+        };
+        const auto  end              = p + len;
+        auto       &partition_msgs   = reusable.partition_msgs;
+        auto       &acquired_buffers = reusable.acquired_buffers;
+        str_view8   key;
+        const auto  hdr_size      = decode_pod<uint32_t>(p);
+        const auto *bundles_chunk = p + hdr_size;            // first partition's bundles chunk (see ^^ about partitions chunks)
+        const auto  topics_cnt    = decode_pod<uint16_t>(p); // ConsumePeer: topics_cnt is encoded as u16
+        auto        peer          = c->as.consumer.node;
         TANK_EXPECT(peer);
 
         partition_msgs.clear();
         acquired_buffers.clear();
 
         if (trace) {
-                SLog(ansifmt::color_brown, ansifmt::bold, "GOT consume response for ", topics_cnt, " topics", ansifmt::reset, "\n");
+                SLog(ansifmt::color_brown, ansifmt::bold, "GOT consume response for ", topics_cnt, " topics", ansifmt::reset, " from ", peer->id, '@', peer->ep, "\n");
         }
 
         c->as.consumer.state = connection::As::Consumer::State::Idle;
@@ -1170,8 +1202,8 @@ bool Service::process_peer_consume_resp(connection *const c, const uint8_t *p, c
                         [[maybe_unused]] const auto highwater_mark    = decode_pod<uint64_t>(p);
                         const auto                  bundles_chunk_len = decode_pod<uint32_t>(p); // length of this particion's chunk that contains 0+ bundles
                         const uint64_t              requested_seqnum  = partition
-                                                              ? (partition_log(partition)->lastAssignedSeqNum + 1)
-                                                              : std::numeric_limits<uint64_t>::max();
+                                                                            ? (partition_log(partition)->lastAssignedSeqNum + 1)
+                                                                            : std::numeric_limits<uint64_t>::max();
 
                         if (trace) {
                                 SLog("highwater_mark = ", highwater_mark, "\n");
@@ -1183,29 +1215,28 @@ bool Service::process_peer_consume_resp(connection *const c, const uint8_t *p, c
                                 // this can happen when we have just switched to a different leader
                                 // so for a few MS we may have to deal with boundary faults
                                 // but this is OK because it only lasts for a few MS until this is resolved
-				//
-				// This can also happen if you used tank-cli to mirror a partition from a different cluster/node
-				// and the first available message's LSN is not 1. tank-cli will produce to the leader, but if RF > 1
-				// other peers will try to replicate starting from 1 (because it is a new partition, and thus it will fail
-				//
-				// it also happen when we are dealing with sparse partitions
+                                //
+                                // This can also happen if you used tank-cli to mirror a partition from a different cluster/node
+                                // and the first available message's LSN is not 1. tank-cli will produce to the leader, but if RF > 1
+                                // other peers will try to replicate starting from 1 (because it is a new partition, and thus it will fail
+                                //
+                                // it also happen when we are dealing with sparse partitions
                                 [[maybe_unused]] const auto first_avail_seqnum = decode_pod<uint64_t>(p);
-				uint64_t next = requested_seqnum;
+                                uint64_t                    next               = requested_seqnum;
 
                                 if (next < first_avail_seqnum) {
-                                        next =  first_avail_seqnum;
+                                        next = first_avail_seqnum;
                                 } else if (next > highwater_mark) {
                                         next = highwater_mark + 1;
                                 }
 
-				// next time we 'll fetch content for that partition, we 'll fetch starting from next
-				TANK_EXPECT(partition);
-				partition->cluster.consume_next_lsn = next;
+                                // next time we 'll fetch content for that partition, we 'll fetch starting from next
+                                TANK_EXPECT(partition);
+                                partition->cluster.consume_next_lsn = next;
 
                                 if (trace || true) {
                                         SLog("At ", Date::ts_repr(time(nullptr)), ": Boundary check fault, requested_seqnum = ", requested_seqnum, ", first_avail_seqnum = ", first_avail_seqnum, ", highwater_mark = ", highwater_mark, ", next time we will consume from ", next, "\n");
                                 }
-
 
                                 continue;
                         } else if (err_flags && err_flags < 0xfe) {
@@ -1217,7 +1248,7 @@ bool Service::process_peer_consume_resp(connection *const c, const uint8_t *p, c
                         [[maybe_unused]] const auto drained_partition = (bundles_chunk_len == 0);
                         const auto                  partition_bundles = bundles_chunk;
                         uint64_t                    first_msg_seqnum, last_msg_seqnum;
-                        const uint8_t *             need_from, *need_upto;
+                        const uint8_t              *need_from, *need_upto;
                         bool                        any_captured{false}, first_sparse{false};
 
                         bundles_chunk += bundles_chunk_len; // skip bundles for this partition
@@ -1481,7 +1512,7 @@ bool Service::process_peer_consume_resp(connection *const c, const uint8_t *p, c
 
                 next_partition:
                         if (trace) {
-                                SLog("DONE WITH that partition ", partition_msgs.size(), " collected, need span  = ", std::distance(need_from,  need_upto), "\n");
+                                SLog("DONE WITH that partition ", partition_msgs.size(), " collected, need span  = ", std::distance(need_from, need_upto), "\n");
                         }
 
                         if (not partition) {
@@ -1489,7 +1520,6 @@ bool Service::process_peer_consume_resp(connection *const c, const uint8_t *p, c
                         }
 
                         assert(need_from <= need_upto);
-
 
                         enum : std::size_t {
                                 alignment = 512 * 1024,
@@ -1504,7 +1534,7 @@ bool Service::process_peer_consume_resp(connection *const c, const uint8_t *p, c
                                 // maybe next should also account for that
                                 const auto next = aligned_to(std::max<std::size_t>(stream->min_fetch_size,
                                                                                    aligned_to(std::distance(need_from, need_upto), 4096)),
-										   alignment);
+                                                             alignment);
 
                                 stream->min_fetch_size = next;
                         }
@@ -1521,12 +1551,14 @@ bool Service::process_peer_consume_resp(connection *const c, const uint8_t *p, c
 }
 
 void Service::invalidate_replicated_partitions_from_peer_cache(cluster_node *n) TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
-        static constexpr bool trace{false};
+        enum {
+                trace = false,
+        };
 
         TANK_EXPECT(n);
 
         if (trace) {
-                SLog(ansifmt::bold, "|| Invalidating cache of partitions this node replicates from ", n->id, "@", n->ep, "\n");
+                SLog(ansifmt::bold, "|| Invalidating cache of partitions this node replicates from ", n->id, "@", n->ep, ansifmt::reset, "\n");
         }
 
         n->leadership.dirty = true;

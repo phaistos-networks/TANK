@@ -1661,3 +1661,32 @@ static inline void PrintImpl(Buffer &out, const values_repr<T> &r) {
                 }
         }
 }
+
+template <typename T, typename LT>
+struct values_repr_with_lambda final {
+        const LT &     l;
+        const T *const s;
+        const T *const e;
+        const char     sep;
+
+        values_repr_with_lambda(const T *a, const uint32_t cnt, const LT &&_l, const char s = ',') noexcept
+            : s{a}, e{a + cnt}, l{_l}, sep{s} {
+        }
+};
+
+template <typename T, typename LT>
+static inline void PrintImpl(Buffer &out, const values_repr_with_lambda<T, LT> &r) {
+        const auto *it = r.s;
+        const auto  e  = r.e;
+        const auto &l  = r.l;
+
+        if (it != e) {
+                const auto sep = r.sep;
+
+                PrintImpl(out, l(*it));
+                for (++it; it < e; ++it) {
+                        out.append(sep);
+                        PrintImpl(out, l(*it));
+                }
+        }
+}
