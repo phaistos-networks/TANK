@@ -2,7 +2,7 @@ TANK is [a very high performance distributed log](https://github.com/phaistos-ne
 
 
 #### Introduction
-You should begin by [reading about the core concepts](https://github.com/phaistos-networks/TANK/wiki/Core-Concepts) and the [client API](https://github.com/phaistos-networks/TANK/wiki/Client-API) (A new [Java Tank Client](https://github.com/phaistos-networks/TANK-JavaClient) is now available).
+You should begin by [reading about the core concepts](https://github.com/phaistos-networks/TANK/wiki/Core-Concepts) and the [client API](https://github.com/phaistos-networks/TANK/wiki/Client-API).
 
 Please see [building instructions](https://github.com/phaistos-networks/TANK/wiki/Building-Tank). You may also want to [run Tank using its Docker image](https://github.com/phaistos-networks/TANK/wiki/Docker).
 
@@ -21,3 +21,8 @@ If you need very high performance, operation simplicity and no reliance on other
 Please see the [wiki](https://github.com/phaistos-networks/TANK/wiki) for more information.
 
 We chose the name TANK because its a storage chamber, suitable for liquids and gas - which we think is analogous to a storage container for data that flows, from and to other containers and other systems via 'pipes' (connections).
+
+## Other clients
+
+- [TankGO](https://github.com/TheBestCo/tankgo) Tank client for GoLang
+- [Java Tank Client](https://github.com/phaistos-networks/TANK-JavaClient) Java client
