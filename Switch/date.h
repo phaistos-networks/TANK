@@ -35,6 +35,49 @@ namespace Date {
                 return (hours + (delta % 24)) % 24;
         }
 
+        inline bool constexpr IsLeapYear(const uint32_t year) noexcept {
+                return !(year % 400) || ((year % 100) && !(year & 3));
+        }
+
+        inline uint32_t DaysOfMonth(const uint32_t month, const uint32_t year) {
+                static const uint8_t daysOfMonth[2][12] =
+                    {
+                        {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31},
+                        {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}};
+
+                return daysOfMonth[IsLeapYear(year)][month - 1];
+        }
+
+        inline bool valid_yyyymmdd(const uint32_t yyyymmdd) noexcept {
+                if (yyyymmdd >= 19000101) {
+                        const uint32_t y = yyyymmdd / 10000 - 1;
+
+                        if (y < 1970 or y > 2100) [[unlikely]] {
+                                return false;
+                        }
+
+                        const uint32_t m = ((yyyymmdd % 10000) / 100);
+
+                        if (m < 1 or m > 12) [[unlikely]] {
+                                return false;
+                        }
+
+                        const uint32_t d = (yyyymmdd % 100);
+
+                        if (d < 1 or d > 31) [[unlikely]] {
+                                return false;
+                        }
+
+                        if (d > DaysOfMonth(m, y)) {
+                                return false;
+                        }
+
+                        return true;
+                }
+
+                return false;
+        }
+
         inline time32_t DaysAgo(time_t now, const uint32_t days) {
                 struct tm tm, then;
 
