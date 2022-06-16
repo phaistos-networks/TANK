@@ -631,6 +631,25 @@ struct strwithlen {
                 return l == len && memcmp(v, p, l) == 0;
         }
 
+        inline bool EqNoCaseU(const CT *const v, const LT l) const noexcept {
+                if (l != len) {
+                        return false;
+                }
+
+                for (uint32_t i{0}; i < l; ++i) {
+                        const auto c  = p[i];
+                        const auto uc = (c >= 'a' && c <= 'z')
+                                            ? (c - 'a' + 'A')
+                                            : c;
+
+                        if (uc != v[i]) {
+                                return false;
+                        }
+                }
+
+                return true;
+        }
+
         inline typename std::enable_if<std::is_same<char, CT>::value, bool>::type EqNoCase(const CT *const v, const LT l) const {
                 return l == len ? !strncasecmp((char *)v, (char *)p, l) : false;
         }
