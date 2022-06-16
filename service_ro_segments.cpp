@@ -61,7 +61,7 @@ bool ro_segment::prepare_access(const topic_partition *const partition) {
                 if (EPOLLIN == saved) {
                         // provide some guidance because this may result in a lot of wasted time
                         Print(ansifmt::color_red, ansifmt::bold, "Unable to access ", ansifmt::reset, path,
-                              ": The effective UID of the calleer does not match the owner of the file, and the caller is not privilleged\n");
+                              ": The effective UID of the caller does not match the owner of the file, and the caller is not privilleged\n");
                 }
 
                 Print("Failed to access log file ", path, ":", strerror(saved));

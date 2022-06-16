@@ -401,84 +401,19 @@ int main(int argc, char *argv[]) {
                                         break;
 
                                 case 'T': {
-                                        str_view32  s = str_view32::make_with_cstr(optarg), s2;
-                                        const char *p = s.data(), *const e = p + s.size();
-                                        char c = 0;
+                                        str_view32 spec   = str_view32::make_with_cstr(optarg);
+                                        const auto [s, e] = TankClient::parse_time_window(spec);
 
-                                        if (p + "T-"_len < e) {
-                                                p += "T-"_len;
-                                        }
-
-                                        while (p < e) {
-                                                if (*p == '-' || *p == ',') {
-                                                        s2 = s.SuffixFrom(p + 1);
-                                                        s.set_end(p);
-                                                        c = '-';
-                                                        break;
-                                                } else if (*p == '.' && p[1] == '.') {
-                                                        const auto _p = p;
-
-                                                        for (++p; p < e && *p == '.'; ++p) {
-                                                                // as many dots as you want
-                                                        }
-                                                        s2 = s.SuffixFrom(p);
-                                                        s.set_end(_p);
-                                                        c = '-';
-                                                        break;
-                                                } else if (*p == '+') {
-                                                        s2 = s.SuffixFrom(p + 1);
-                                                        s.set_end(p);
-                                                        c = '+';
-                                                        break;
-                                                } else {
-                                                        ++p;
-                                                }
-                                        }
-
-                                        time_range.offset = parse_timestamp(s);
-                                        if (!time_range.offset) {
-                                                Print("Failed to parse timestamp ", s, "\n");
+                                        if (0 == s) {
+                                                Print("Unexpected time window notation\n");
                                                 return 1;
                                         }
 
-                                        if (c == '-') {
-                                                if (const auto end = parse_timestamp(s2); !end) {
-                                                        Print("Failed to parse timestamp ", s2, "\n");
-
-                                                        return 1;
-                                                } else {
-                                                        time_range.SetEnd(end + 1);
-                                                }
-
-                                        } else if (c == '+') {
-                                                const char *p = s2.data(), *const e = p + s2.size();
-
-                                                if (p == e || !isdigit(*p)) {
-                                                        Print("Unexpected offset\n");
-                                                        return 1;
-                                                }
-
-                                                uint32_t v{0};
-
-                                                do {
-                                                        v = v * 10 + (*(p++) - '0');
-                                                } while (p < e && isdigit(*p));
-
-                                                if (p < e) {
-                                                        if (*p == 's' || *p == 'S') {
-                                                                // seconds
-                                                        } else if (*p == 'm' || *p == 'M') {
-                                                                v *= 60;
-                                                        } else if (*p == 'h' || *p == 'H') {
-                                                                v *= 3600;
-                                                        } else if (*p == 'd' || *p == 'D') {
-                                                                v *= 86400;
-                                                        }
-                                                }
-
-                                                time_range.len = v * 1000;
+                                        time_range.offset = Timings::Seconds::ToMillis(s);
+                                        if (e == std::numeric_limits<time_t>::max()) {
+                                                time_range.len = std::numeric_limits<uint64_t>::max() - time_range.offset;
                                         } else {
-                                                time_range.len = UINT64_MAX - time_range.offset;
+                                                time_range.len = Timings::Seconds::ToMillis(e + 1u /* inclusive */) - time_range.offset;
                                         }
                                 } break;
 
@@ -661,7 +596,17 @@ int main(int argc, char *argv[]) {
                                 }
 
                                 if (statsOnly) {
-                                        Print(">> ", dotnotation_repr(it.msgs.size()), " messages\n");
+					if (not filter) {
+                                        	Print(">> ", dotnotation_repr(it.msgs.size()), " messages\n");
+                                        } else {
+                                                std::size_t n = 0;
+
+                                                for (const auto m : it.msgs) {
+                                                        n += static_cast<bool>(m->content.Search(filter.data(), filter.size()));
+                                                }
+
+                                                Print(">> ", dotnotation_repr(n), " messages\n");
+                                        }
 
                                         if (time_range.offset) {
                                                 bool should_abort{false};
@@ -669,7 +614,7 @@ int main(int argc, char *argv[]) {
                                                 if (verbose) {
                                                         for (const auto m : it.msgs) {
                                                                 if (time_range.Contains(m->ts)) {
-                                                                        if (filter && !m->content.Search(filter.data(), filter.size())) {
+                                                                        if (filter and not m->content.Search(filter.data(), filter.size())) {
                                                                                 continue;
                                                                         }
 
@@ -688,7 +633,7 @@ int main(int argc, char *argv[]) {
                                                 } else {
                                                         for (const auto m : it.msgs) {
                                                                 if (time_range.Contains(m->ts)) {
-                                                                        if (filter && !m->content.Search(filter.data(), filter.size())) {
+                                                                        if (filter and not m->content.Search(filter.data(), filter.size())) {
                                                                                 continue;
                                                                         }
 
@@ -713,7 +658,7 @@ int main(int argc, char *argv[]) {
 
                                                 if (verbose) {
                                                         for (const auto m : it.msgs) {
-                                                                if (filter && !m->content.Search(filter.data(), filter.size())) {
+                                                                if (filter and not m->content.Search(filter.data(), filter.size())) {
                                                                         continue;
                                                                 }
 
@@ -726,7 +671,7 @@ int main(int argc, char *argv[]) {
                                                         }
                                                 } else {
                                                         for (const auto m : it.msgs) {
-                                                                if (filter && !m->content.Search(filter.data(), filter.size())) {
+                                                                if (filter and not m->content.Search(filter.data(), filter.size())) {
                                                                         continue;
                                                                 }
 

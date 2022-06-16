@@ -519,3 +519,6 @@ inline size_t count_brokers() const noexcept {
 void set_report_drained_if_consumed_upto_hwmark(const bool v = true) {
 	behavior.report_drain_if_consumed_upto_hwmark = true;
 }
+
+// return <start, end>. start = 0 on failure
+static std::pair<time_t, time_t> parse_time_window(const str_view32, const bool accept_yyyyymmdd = false);

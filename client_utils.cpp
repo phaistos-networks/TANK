@@ -247,9 +247,280 @@ uint64_t TankClient::sequence_number_by_event_time(const topic_partition &topic_
                 }
         }
 
-	if (trace) {
-		SLog("Returning low = ", low, "\n");
-	}
+        if (trace) {
+                SLog("Returning low = ", low, "\n");
+        }
 
         return low;
 }
+
+std::pair<time_t, time_t> TankClient::parse_time_window(const str_view32 s, const bool accept_yyyyymmdd) {
+        // T
+        // (yyyyy.mm.dd|today|yesterday)[@hh[:mm[:sec]]
+        // optional followed by
+        // +count<unit>
+        const auto  b = s.data();
+        const char *p = b;
+        const auto  e = p + s.size();
+        time_t      start;
+        bool        have_tm = false;
+        struct tm   tm;
+
+        while (p < e and ((*p >= 'a' and *p <= 'z') or (*p >= 'A' and *p <= 'Z'))) {
+                ++p;
+        }
+
+        if (const str_view32 m(b, std::distance(b, p)); m) {
+                if (m.EqNoCaseU(_S("TODAY"))) {
+                        start = Date::day_first_second(time(nullptr));
+                } else if (m.EqNoCaseU(_S("YESTERDAY"))) {
+                        start = Date::day_first_second(Date::DaysAgo(time(nullptr), 1u));
+                } else if (m.EqNoCaseU(_S("T"))) {
+                        start = time(nullptr);
+                        goto parse_end;
+                } else {
+                        return {};
+                }
+        } else {
+                // is it a YYYYMMDD?
+                uint32_t v = 0;
+
+                while (p < e and (*p >= '0' and *p <= '9')) {
+                        v = v * 10 + (*(p++) - '0');
+                }
+
+                if (accept_yyyyymmdd and std::distance(b, p) == "YYYYMMDD"_len) {
+                        if (not Date::valid_yyyymmdd(v)) {
+                                return {};
+                        } else {
+                                const auto [y, m, d] = Date::from_yyyymmdd(v);
+
+                                tm.tm_isdst = -1;
+                                tm.tm_year  = y - 1900;
+                                tm.tm_mon   = m - 1;
+                                tm.tm_mday  = d;
+                                tm.tm_hour  = 0;
+                                tm.tm_min   = 0;
+                                tm.tm_sec   = 0;
+
+                                have_tm = true;
+                        }
+                } else {
+                        if (v < 1900 or v > 2200) [[unlikely]] {
+                                return {};
+                        }
+
+                        if (p >= e or *p != '.') [[unlikely]] {
+                                return {};
+                        }
+
+                        const auto year = v;
+
+                        for (v = 0, ++p; p < e and (*p >= '0' and *p <= '9'); ++p) {
+                                v = v * 10 + (*p - '0');
+                        }
+
+                        const auto mon = v;
+
+                        if (mon < 1 or mon > 12) [[unlikely]] {
+                                return {};
+                        }
+
+                        if (p >= e or *p != '.') [[unlikely]] {
+                                return {};
+                        }
+
+                        for (v = 0, ++p; p < e and (*p >= '0' and *p <= '9'); ++p) {
+                                v = v * 10 + (*p - '0');
+                        }
+
+                        const auto mday = v;
+
+                        if (mday < 1 or mday > 31) [[unlikely]] {
+                                return {};
+                        }
+
+                        if (mday > Date::DaysOfMonth(mon, year)) [[unlikely]] {
+                                return {};
+                        }
+
+                        tm.tm_isdst = -1;
+                        tm.tm_year  = year - 1900;
+                        tm.tm_mon   = mon - 1;
+                        tm.tm_mday  = mday;
+                        tm.tm_hour  = 0;
+                        tm.tm_min   = 0;
+                        tm.tm_sec   = 0;
+
+                        have_tm = true;
+                }
+        }
+
+        if (p < e and *p == '@') {
+                // parse hour (offset to start)
+                uint32_t v;
+
+                if (++p == e) [[unlikely]] {
+                        return {};
+                }
+
+                if (*p >= '0' and *p <= '9') {
+                        v = *p - '0';
+                } else {
+                        return {};
+                }
+
+                if (not have_tm) {
+                        localtime_r(&start, &tm);
+                        have_tm = true;
+                }
+
+                for (++p; p < e and (*p >= '0' and *p <= '9'); ++p) {
+                        v = v * 10 + (*p - '0');
+                }
+
+                if (v > 23) [[unlikely]] {
+                        return {};
+                }
+
+                tm.tm_isdst = -1;
+                tm.tm_hour  = v;
+                tm.tm_min   = 0;
+                tm.tm_sec   = 0;
+
+                if (p != e and *p == ':') {
+                        if (++p == e) [[unlikely]] {
+                                return {};
+                        }
+
+                        if (*p >= '0' and *p <= '9') {
+                                v = *p - '0';
+                        } else {
+                                return {};
+                        }
+
+                        for (++p; p < e and (*p >= '0' and *p <= '9'); ++p) {
+                                v = v * 10 + (*p - '0');
+                        }
+
+                        if (v > 59) [[unlikely]] {
+                                return {};
+                        }
+                        tm.tm_min = v;
+
+                        if (p != e and *p == ':') {
+                                if (++p == e) [[unlikely]] {
+                                        return {};
+                                }
+
+                                if (*p >= '0' and *p <= '9') {
+                                        v = *p - '0';
+                                } else {
+                                        return {};
+                                }
+
+                                for (++p; p < e and (*p >= '0' and *p <= '9'); ++p) {
+                                        v = v * 10 + (*p - '0');
+                                }
+
+                                if (v > 59) [[unlikely]] {
+                                        return {};
+                                }
+
+                                tm.tm_sec = v;
+                        }
+                }
+        }
+
+parse_end:
+        if (have_tm) {
+                start = mktime(&tm);
+        }
+
+        static const auto from_unit = [](const str_view32 s) noexcept -> uint32_t {
+                if (not s or s.EqNoCaseU(_S("S")) or s.EqNoCaseU(_S("SECONDS"))) {
+                        return 1;
+                } else if (s.EqNoCaseU(_S("M")) or s.EqNoCaseU(_S("MINUTES"))) {
+                        return 60;
+                } else if (s.EqNoCaseU(_S("H")) or s.EqNoCaseU(_S("HOURS"))) {
+                        return 3600;
+                } else if (s.EqNoCaseU(_S("D")) or s.EqNoCaseU(_S("DAYS"))) {
+                        return 86400;
+                } else {
+                        return 0;
+                }
+        };
+
+        if (p < e and *p == '-') {
+                uint32_t v;
+
+                if (++p == e) [[unlikely]] {
+                        return {};
+                }
+
+                if (*p >= '0' and *p <= '9') {
+                        v = *p - '0';
+                } else {
+                        return {};
+                }
+
+                for (++p; p < e and (*p >= '0' and *p <= '9'); ++p) {
+                        v = v * 10 + (*p - '0');
+                }
+
+                str_view32 unit;
+
+                for (unit.p = p; p < e and ((*p >= 'a' and *p <= 'z') or (*p >= 'A' and *p <= 'Z')); ++p) {
+                        continue;
+                }
+
+                unit.set_end(p);
+
+                if (const auto c = from_unit(unit); 0 == c) {
+                        return {};
+                } else {
+                        start -= v * c;
+                }
+        }
+
+        time_t end = std::numeric_limits<time_t>::max();
+
+        if (p < e and *p == '+') {
+                uint32_t v;
+
+                if (++p == e) [[unlikely]] {
+                        return {};
+                }
+
+                if (*p >= '0' and *p <= '9') {
+                        v = *p - '0';
+                } else {
+                        return {};
+                }
+
+                for (++p; p < e and (*p >= '0' and *p <= '9'); ++p) {
+                        v = v * 10 + (*p - '0');
+                }
+
+                str_view32 unit;
+
+                for (unit.p = p; p < e and ((*p >= 'a' and *p <= 'z') or (*p >= 'A' and *p <= 'Z')); ++p) {
+                        continue;
+                }
+
+                unit.set_end(p);
+
+                if (const auto c = from_unit(unit); 0 == c) {
+                        return {};
+                } else {
+                        end = start + v * c;
+                }
+        }
+
+        if (p != e) {
+                return {};
+        }
+
+        return {start, end};
+}
+

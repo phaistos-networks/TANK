@@ -2338,9 +2338,9 @@ bool Service::try_recv_prom(connection *const c) {
                                         // shutdown immediately
                                         return true;
                                 }
-                                if (!method.Eq(_S("GET"))) {
+                                if (not method.Eq(_S("GET"))) {
                                         http_error(c, "405 Method Not Allowed"_s32);
-                                } else if (!path.BeginsWith(_S("/metrics"))) {
+                                } else if (not path.BeginsWith(_S("/metrics"))) {
                                         http_error(c, "404 Not Found"_s32);
                                 } else {
                                         auto b = get_buf();

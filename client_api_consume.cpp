@@ -2,7 +2,8 @@
 
 // build a consume payload for a broker API request
 TankClient::broker_outgoing_payload *TankClient::build_consume_broker_req_payload(const broker_api_request *broker_req) {
-	enum {trace =false,};
+        enum { trace = false,
+        };
         auto                  payload = new_req_payload(const_cast<broker_api_request *>(broker_req));
         [[maybe_unused]] auto broker  = broker_req->br;
         auto                  b       = payload->b;
@@ -71,7 +72,7 @@ uint32_t TankClient::consume(const std::vector<std::pair<topic_partition,
                              const uint64_t                                               max_wait,
                              const uint32_t                                               min_size) {
 
-	return consume(sources.data(), sources.size(), max_wait, min_size);
+        return consume(sources.data(), sources.size(), max_wait, min_size);
 }
 
 uint32_t TankClient::consume(const std::pair<topic_partition, std::pair<uint64_t, uint32_t>> *sources, const size_t total_sources,
@@ -249,7 +250,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
         }
 
         const auto                           hdr_size      = decode_pod<uint32_t>(p);
-        const auto *                         bundles_chunk = p + hdr_size; // first partition's bundles chunk (see ^^ about partitions chunks)
+        const auto                          *bundles_chunk = p + hdr_size; // first partition's bundles chunk (see ^^ about partitions chunks)
         const auto                           req_id        = decode_pod<uint32_t>(p);
         const auto                           it            = pending_brokers_requests.find(req_id);
         str_view8                            key;
@@ -348,7 +349,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                         SLog("Ignoring partition ", req_part->partition, "\n");
                                 }
 
-				discard_request_partition_ctx(api_req, req_part);
+                                discard_request_partition_ctx(api_req, req_part);
 
                                 br_req_partctx_it = next;
                         } while (br_req_partctx_it != &br_req->partitions_list &&
@@ -388,7 +389,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 TANK_EXPECT(br_req_partctx_it != &br_req->partitions_list);
                                 auto req_part = switch_list_entry(request_partition_ctx, partitions_list_ll, br_req_partctx_it);
 
-				discard_request_partition_ctx(api_req, req_part);
+                                discard_request_partition_ctx(api_req, req_part);
 
                                 br_req_partctx_it = next;
                                 continue;
@@ -405,7 +406,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 TANK_EXPECT(br_req_partctx_it != &br_req->partitions_list);
                                 auto req_part = switch_list_entry(request_partition_ctx, partitions_list_ll, br_req_partctx_it);
 
-				discard_request_partition_ctx(api_req, req_part);
+                                discard_request_partition_ctx(api_req, req_part);
 
                                 br_req_partctx_it = next;
                                 continue;
@@ -533,7 +534,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 TANK_EXPECT(br_req_partctx_it != &br_req->partitions_list);
                                 auto req_part = switch_list_entry(request_partition_ctx, partitions_list_ll, br_req_partctx_it);
 
-				discard_request_partition_ctx(api_req, req_part);
+                                discard_request_partition_ctx(api_req, req_part);
 
                                 br_req_partctx_it = next;
                                 continue;
@@ -571,13 +572,13 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                         used_buffers.clear();
                         // process all bundles in this partition's bundles chunk
                         for (const auto *p = partition_bundles, *const chunk_end = std::min(end, bundles_chunk);;) {
-                                need_from = p;               // it's important to track need_from from the beginning of the bundl
+                                need_from = p;                // it's important to track need_from from the beginning of the bundl
                                 need_upto = need_from + 1024; // 256 was a bit too low
 
                                 if (unlikely(not Compression::check_decode_varuint32(p, chunk_end))) {
                                         if (trace) {
-                                                SLog("Unable to decode bundle_len:", std::distance(need_from, chunk_end), 
-							" to end of the chunk. Consumed so far ", size_repr(std::distance(content, need_from)), "\n");
+                                                SLog("Unable to decode bundle_len:", std::distance(need_from, chunk_end),
+                                                     " to end of the chunk. Consumed so far ", size_repr(std::distance(content, need_from)), "\n");
                                         }
 
                                         break;
@@ -610,8 +611,8 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 range_base<const uint8_t *, size_t> msgset_content;
 
                                 if (0 == msgset_size) {
-					// message set(in messages) > 15
-					// so encoded separately as a varu32
+                                        // message set(in messages) > 15
+                                        // so encoded separately as a varu32
                                         if (unlikely(!Compression::check_decode_varuint32(p, chunk_end))) {
                                                 break;
                                         } else {
@@ -897,11 +898,12 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                         auto       next          = br_req_partctx_it->next;
                         const auto next_min_span = std::distance(need_from, need_upto); // TODO: + 256
                         const auto next_seqnum   = consumed
-                                                     ? requested_seqnum == std::numeric_limits<uint64_t>::max()
-                                                           ? last_bucket->data[last_bucket_size - 1].seqNum + 1
-                                                           : std::max(requested_seqnum, last_bucket->data[last_bucket_size - 1].seqNum + 1)
-                                                     : requested_seqnum == std::numeric_limits<uint64_t>::max() ? highwater_mark + 1 : requested_seqnum;
-                        auto &req_part_resp = req_part->as_op.consume.response;
+                                                       ? requested_seqnum == std::numeric_limits<uint64_t>::max()
+                                                             ? last_bucket->data[last_bucket_size - 1].seqNum + 1
+                                                             : std::max(requested_seqnum, last_bucket->data[last_bucket_size - 1].seqNum + 1)
+                                                   : requested_seqnum == std::numeric_limits<uint64_t>::max() ? highwater_mark + 1
+                                                                                                              : requested_seqnum;
+                        auto      &req_part_resp = req_part->as_op.consume.response;
 
                         if (trace) {
                                 SLog(ansifmt::bgcolor_red, "consumed = ", consumed,
@@ -943,7 +945,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 auto out = consumed <= sizeof_array(req_part_resp.msgs.list.small)
                                                ? req_part_resp.msgs.list.small + 0
                                                : (req_part_resp.msgs.list.large = static_cast<consumed_msg *>(malloc(sizeof(consumed_msg) * consumed)));
-                                auto it = first_bucket;
+                                auto it  = first_bucket;
 
                                 while (it != last_bucket) {
                                         auto next = it->next;
