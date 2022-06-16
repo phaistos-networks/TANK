@@ -1,7 +1,7 @@
 #pragma once
 
 namespace Date {
-        inline time32_t day_first_second(const time32_t ts) {
+        inline time32_t day_first_second(const time_t ts) {
                 struct tm tm;
 
                 localtime_r(&ts, &tm);
@@ -12,7 +12,7 @@ namespace Date {
                 return mktime(&tm);
         }
 
-        inline time32_t day_last_second(const time32_t ts) {
+        inline time32_t day_last_second(const time_t ts) {
                 struct tm tm;
 
                 localtime_r(&ts, &tm);
