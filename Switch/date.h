@@ -35,7 +35,7 @@ namespace Date {
                 return (hours + (delta % 24)) % 24;
         }
 
-        inline time32_t DaysAgo(time32_t now, const uint32_t days) {
+        inline time32_t DaysAgo(time_t now, const uint32_t days) {
                 struct tm tm, then;
 
                 localtime_r(&now, &tm);
