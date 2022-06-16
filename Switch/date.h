@@ -23,6 +23,10 @@ namespace Date {
                 return mktime(&tm);
         }
 
+        inline std::tuple<uint32_t, uint32_t, uint32_t> from_yyyymmdd(const uint32_t r) {
+                return std::make_tuple<uint32_t, uint32_t, uint32_t>(r / 10000, (r / 100) % 100, r % 100);
+        }
+
         inline int HoursByDelta(const int32_t hours, const int32_t delta) {
                 return (24 + (hours + (delta % 24))) % 24;
         }
