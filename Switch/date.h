@@ -1,7 +1,7 @@
 #pragma once
 
 namespace Date {
-        inline time32_t day_first_second(const time32_t) {
+        inline time32_t day_first_second(const time32_t ts) {
                 struct tm tm;
 
                 localtime_r(&ts, &tm);
@@ -12,7 +12,7 @@ namespace Date {
                 return mktime(&tm);
         }
 
-        inline time32_t day_last_second(const time32_t) {
+        inline time32_t day_last_second(const time32_t ts) {
                 struct tm tm;
 
                 localtime_r(&ts, &tm);
@@ -34,10 +34,10 @@ namespace Date {
         inline time32_t DaysAgo(time32_t now, const uint32_t days) {
                 struct tm tm, then;
 
-                _safe_localtime_r(&now, &tm);
+                localtime_r(&now, &tm);
                 now -= 86400 * days;
 
-                _safe_localtime_r(&now, &then);
+                localtime_r(&now, &then);
                 if (then.tm_hour == HoursLater(tm.tm_hour, 1))
                         now -= 3600;
                 else if (then.tm_hour == HoursAgo(tm.tm_hour, 1))
