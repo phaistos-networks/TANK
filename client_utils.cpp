@@ -265,6 +265,17 @@ std::pair<time_t, time_t> TankClient::parse_time_window(const str_view32 s, cons
         time_t      start;
         bool        have_tm = false;
         struct tm   tm;
+#if 1
+	static constexpr const auto fault = []() noexcept {
+		return std::pair<time_t, time_t>{};
+	};
+#else
+	static constexpr const auto fault = [](const unsigned ref = __builtin_LINE()) noexcept {
+		SLog("Failed at ", ref, "\n");
+
+		return std::pair<time_t, time_t>{};
+	};
+#endif
 
         while (p < e and ((*p >= 'a' and *p <= 'z') or (*p >= 'A' and *p <= 'Z'))) {
                 ++p;
@@ -279,7 +290,7 @@ std::pair<time_t, time_t> TankClient::parse_time_window(const str_view32 s, cons
                         start = time(nullptr);
                         goto parse_end;
                 } else {
-                        return {};
+                        return fault();
                 }
         } else {
                 // is it a YYYYMMDD?
@@ -291,7 +302,7 @@ std::pair<time_t, time_t> TankClient::parse_time_window(const str_view32 s, cons
 
                 if (accept_yyyyymmdd and std::distance(b, p) == "YYYYMMDD"_len) {
                         if (not Date::valid_yyyymmdd(v)) {
-                                return {};
+                                return fault();
                         } else {
                                 const auto [y, m, d] = Date::from_yyyymmdd(v);
 
@@ -307,11 +318,11 @@ std::pair<time_t, time_t> TankClient::parse_time_window(const str_view32 s, cons
                         }
                 } else {
                         if (v < 1900 or v > 2200) [[unlikely]] {
-                                return {};
+                                return fault();
                         }
 
                         if (p >= e or *p != '.') [[unlikely]] {
-                                return {};
+                                return fault();
                         }
 
                         const auto year = v;
@@ -323,11 +334,11 @@ std::pair<time_t, time_t> TankClient::parse_time_window(const str_view32 s, cons
                         const auto mon = v;
 
                         if (mon < 1 or mon > 12) [[unlikely]] {
-                                return {};
+                                return fault();
                         }
 
                         if (p >= e or *p != '.') [[unlikely]] {
-                                return {};
+                                return fault();
                         }
 
                         for (v = 0, ++p; p < e and (*p >= '0' and *p <= '9'); ++p) {
@@ -337,11 +348,11 @@ std::pair<time_t, time_t> TankClient::parse_time_window(const str_view32 s, cons
                         const auto mday = v;
 
                         if (mday < 1 or mday > 31) [[unlikely]] {
-                                return {};
+                                return fault();
                         }
 
                         if (mday > Date::DaysOfMonth(mon, year)) [[unlikely]] {
-                                return {};
+                                return fault();
                         }
 
                         tm.tm_isdst = -1;
@@ -361,13 +372,13 @@ std::pair<time_t, time_t> TankClient::parse_time_window(const str_view32 s, cons
                 uint32_t v;
 
                 if (++p == e) [[unlikely]] {
-                        return {};
+                        return fault();
                 }
 
                 if (*p >= '0' and *p <= '9') {
                         v = *p - '0';
                 } else {
-                        return {};
+                        return fault();
                 }
 
                 if (not have_tm) {
@@ -380,7 +391,7 @@ std::pair<time_t, time_t> TankClient::parse_time_window(const str_view32 s, cons
                 }
 
                 if (v > 23) [[unlikely]] {
-                        return {};
+                        return fault();
                 }
 
                 tm.tm_isdst = -1;
@@ -390,13 +401,13 @@ std::pair<time_t, time_t> TankClient::parse_time_window(const str_view32 s, cons
 
                 if (p != e and *p == ':') {
                         if (++p == e) [[unlikely]] {
-                                return {};
+                                return fault();
                         }
 
                         if (*p >= '0' and *p <= '9') {
                                 v = *p - '0';
                         } else {
-                                return {};
+                                return fault();
                         }
 
                         for (++p; p < e and (*p >= '0' and *p <= '9'); ++p) {
@@ -404,19 +415,19 @@ std::pair<time_t, time_t> TankClient::parse_time_window(const str_view32 s, cons
                         }
 
                         if (v > 59) [[unlikely]] {
-                                return {};
+                                return fault();
                         }
                         tm.tm_min = v;
 
                         if (p != e and *p == ':') {
                                 if (++p == e) [[unlikely]] {
-                                        return {};
+                                        return fault();
                                 }
 
                                 if (*p >= '0' and *p <= '9') {
                                         v = *p - '0';
                                 } else {
-                                        return {};
+                                        return fault();
                                 }
 
                                 for (++p; p < e and (*p >= '0' and *p <= '9'); ++p) {
@@ -424,7 +435,7 @@ std::pair<time_t, time_t> TankClient::parse_time_window(const str_view32 s, cons
                                 }
 
                                 if (v > 59) [[unlikely]] {
-                                        return {};
+                                        return fault();
                                 }
 
                                 tm.tm_sec = v;
@@ -455,13 +466,13 @@ parse_end:
                 uint32_t v;
 
                 if (++p == e) [[unlikely]] {
-                        return {};
+                        return fault();
                 }
 
                 if (*p >= '0' and *p <= '9') {
                         v = *p - '0';
                 } else {
-                        return {};
+                        return fault();
                 }
 
                 for (++p; p < e and (*p >= '0' and *p <= '9'); ++p) {
@@ -477,7 +488,7 @@ parse_end:
                 unit.set_end(p);
 
                 if (const auto c = from_unit(unit); 0 == c) {
-                        return {};
+                        return fault();
                 } else {
                         start -= v * c;
                 }
@@ -489,13 +500,13 @@ parse_end:
                 uint32_t v;
 
                 if (++p == e) [[unlikely]] {
-                        return {};
+                        return fault();
                 }
 
                 if (*p >= '0' and *p <= '9') {
                         v = *p - '0';
                 } else {
-                        return {};
+                        return fault();
                 }
 
                 for (++p; p < e and (*p >= '0' and *p <= '9'); ++p) {
@@ -511,14 +522,14 @@ parse_end:
                 unit.set_end(p);
 
                 if (const auto c = from_unit(unit); 0 == c) {
-                        return {};
+                        return fault();
                 } else {
                         end = start + v * c;
                 }
         }
 
         if (p != e) {
-                return {};
+                return fault();
         }
 
         return {start, end};

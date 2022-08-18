@@ -18,9 +18,10 @@ void Service::set_hwmark(topic_partition *const __restrict__ p, const uint64_t s
 			if (seqnum >  l->lastAssignedSeqNum) [[unlikely]] {
 				// This can happen if TANK is misconfigured, where for example
 				// a replica(not the leader) of a partition has content (e.g for topic/0 
-				// but thep partition leader of topic/0 doesnt).
+				// but the partition leader of topic/0 doesnt).
                                 Print(ansifmt::bold, ansifmt::color_red, "Attempted to set hwmark to ", seqnum,
                                       ", whereas, lastAssignedSeqNum = ", l->lastAssignedSeqNum, ansifmt::reset, "\n");
+
                                 std::abort();
 			}
 
