@@ -594,6 +594,7 @@ class TankClient {
                         struct Consume final {
                                 uint64_t max_wait;
                                 size_t   min_size;
+				uint8_t flags;
                         } consume;
 
                         struct CreateTopic final {
@@ -1088,6 +1089,16 @@ class TankClient {
                         clear();
                 }
         } rsrc_tracker;
+
+	// 2022-08-18: we are going to have 2 leaders; one for reads and one for write because
+	// we may want to consume from the a partition replica(in ISR) that is cloest to the client, which
+	// may not necessary be the partition leader(writes will always be routed to the partition leader)
+	struct partition_nodes final {
+                Switch::endpoint provider; // for reads/consume requests
+                Switch::endpoint leader;   // the leader
+        };
+
+
 #ifdef HAVE_NETIO_THROTTLE
         switch_dlist throttled_connections_read_list{&throttled_connections_read_list, &throttled_connections_read_list};
         switch_dlist throttled_connections_write_list{&throttled_connections_write_list, &throttled_connections_write_list};
@@ -1111,7 +1122,7 @@ class TankClient {
         CompressionStrategy                                                  compressionStrategy{CompressionStrategy::CompressIntelligently};
         robin_hood::unordered_map<Switch::endpoint, std::unique_ptr<broker>> brokers;
         switch_dlist                                                         all_brokers{&all_brokers, &all_brokers};
-        robin_hood::unordered_map<topic_partition, Switch::endpoint>         leaders;
+        robin_hood::unordered_map<topic_partition, partition_nodes>          leaders;
         robin_hood::unordered_map<str_view8, bool>                           topics_intern_map;
         bool                                                                 allowStreamingConsumeResponses{false};
         int                                                                  sndBufSize{128 * 1024}, rcvBufSize{1 * 1024 * 1024};

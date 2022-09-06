@@ -7,8 +7,10 @@ bool adjust_consume_range_start(lookup_res &res, const uint64_t abs_seq_num, rob
 //
 // if we don't do that, then the consumer will not fetch any content until the registered wait context times out
 void Service::wakeup_all_consumers(topic_partition *const p) {
+        enum {
+                trace = false,
+        };
         TANK_EXPECT(p);
-        static constexpr bool trace{false};
         auto &                waiting_list = p->waiting_list;
         auto &                woken_up     = reusable.woken_up;
 
@@ -119,9 +121,9 @@ bool Service::register_consumer_wait(const TankAPIMsgType _msg, connection *cons
                 // we can't set hwmark_threshold to 0
                 // because 0 is a valid(in this context) sequence number
                 // so instead we 'll use magic value std::numeric_limits<uint64_t>::max()
-                out->hwmark_threshold = (false == ca || _msg == TankAPIMsgType::ConsumePeer)
+                out->hwmark_threshold = (false == ca or _msg == TankAPIMsgType::ConsumePeer)
                                             ? std::numeric_limits<uint64_t>::max()
-                                            : partition_hwmark(p);
+                                            : partition_hwmark_for_consume(p);
                 out->range.reset();
 
                 if (trace) {
@@ -189,20 +191,20 @@ bool Service::register_consumer_wait(const TankAPIMsgType _msg, connection *cons
 
 // requirements were met
 // generate the deferred consume response
-void Service::wakeup_wait_ctx(wait_ctx *const wctx, connection *const produceConnection) {
-	enum {
-	trace =false,
-	};
-        auto                  response_hdr = get_buf();
-        uint16_t              topicsCnt{0};
-        auto                  c = wctx->c;
-        auto *const           q = c->outQ ?: (c->outQ = get_outgoing_queue());
-        size_t                sum{0};
-        const auto            msg = wctx->_msg;
+void Service::wakeup_wait_ctx(wait_ctx *const wctx, connection *const produceConnection, const unsigned ref) {
+        enum {
+                trace = false,
+        };
+        auto        response_hdr = get_buf();
+        uint16_t    topicsCnt{0};
+        auto        c = wctx->c;
+        auto *const q = c->outQ ?: (c->outQ = get_outgoing_queue());
+        size_t      sum{0};
+        const auto  msg = wctx->_msg;
 
         if (trace) {
                 SLog(ansifmt::bold, ansifmt::color_green, "Waking up wait ctx ", ptr_repr(wctx), ", request_id = ", wctx->requestId,
-                     ansifmt::reset, " msg=", unsigned(msg), "\n");
+                     ansifmt::reset, " msg=", unsigned(msg), ", ref = ", ref, "\n");
         }
 
         auto payload = get_data_vector_payload();
@@ -217,6 +219,10 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, connection *const produceCon
         response_hdr->RoomFor(sizeof(uint32_t));
 
         if (msg == TankAPIMsgType::Consume) {
+		if (trace) {
+			SLog("Request ID = ", wctx->requestId, "\n");
+		}
+
                 response_hdr->Serialize(wctx->requestId);
         }
 
@@ -234,11 +240,11 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, connection *const produceCon
         }
 
         for (uint32_t i{0}; i < pcnt;) {
-                auto        it        = wctx->partitions + i;
-                const auto *p         = it->partition;
-                const auto  t         = p->owner;
-                const auto  topicName = t->name();
-                const auto  saved_i   = i;
+                auto       it        = wctx->partitions + i;
+                auto      *p         = it->partition;
+                const auto t         = p->owner;
+                const auto topicName = t->name();
+                const auto saved_i   = i;
 
                 ++topicsCnt;
                 response_hdr->pack(topicName.size());
@@ -263,12 +269,20 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, connection *const produceCon
                         response_hdr->pack(static_cast<uint16_t>(p->idx)); // partition
                         response_hdr->pack(static_cast<uint8_t>(0));       // error_flags
 
+#ifdef TANK_SUPPORT_CONSUME_FLAGS
+                        // 2022-08-18: PARTITION_PROVIDER
+                        const uint64_t part_hwmark = partition_hwmark_for_consume(p);
+#else
+                        const uint64_t part_hwmark = p->hwmark();
+#endif
+
                         if (it->fdh) {
                                 if (trace) {
                                         SLog("HAVE data for ", topicName, ".", p->idx,
                                              ", seqNum = ", it->seqNum,
                                              ", hwmark = ", p->hwmark(),
                                              ", range = ", it->range,
+					     ", log->lastAssignedSeqNum = ", p->log_open() ? p->_log->lastAssignedSeqNum : 0,
                                              " (", it->range.len, ")", ptr_repr(it->fdh.get()),
                                              " ", it->fdh.use_count(), "\n");
                                 }
@@ -276,7 +290,7 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, connection *const produceCon
                                 static_assert(sizeof(it->seqNum) == sizeof(uint64_t));
 
                                 response_hdr->pack(it->seqNum);
-                                response_hdr->pack(p->hwmark());
+                                response_hdr->pack(part_hwmark);
                                 response_hdr->pack(static_cast<uint32_t>(it->range.size()));
 
                                 sum += it->range.len;
@@ -287,11 +301,11 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, connection *const produceCon
                                 q->push_back(p);
                         } else {
                                 response_hdr->pack(static_cast<uint64_t>(0));
-                                response_hdr->pack(p->hwmark());
+                                response_hdr->pack(part_hwmark);
                                 response_hdr->pack(static_cast<uint32_t>(0));
                         }
 
-                } while (++i < pcnt && (p = (it = wctx->partitions + i)->partition)->owner == t);
+                } while (++i < pcnt and (p = (it = wctx->partitions + i)->partition)->owner == t);
 
                 if (msg == TankAPIMsgType::ConsumePeer) {
                         *reinterpret_cast<uint16_t *>(response_hdr->At(partitions_cnt_offset)) = i - saved_i;
@@ -316,10 +330,16 @@ void Service::wakeup_wait_ctx(wait_ctx *const wctx, connection *const produceCon
 
         if (c != produceConnection) {
                 // see process_produce()
-		assert(c);
+                assert(c);
+
+		if (trace) {
+			SLog("Sending response to ", ip4addr_repr(c->addr4), "\n");
+		}
 
                 try_tx(c);
-        }
+        } else if (trace) {
+		SLog("Will not tx()\n");
+	}
 }
 
 // timed out, generate a response
@@ -336,7 +356,7 @@ void Service::abort_wait_ctx(wait_ctx *const wctx) {
         auto       c   = wctx->c;
         const auto msg = wctx->_msg;
 
-        TANK_EXPECT(c && c->fd != -1 && c->gen != std::numeric_limits<uint64_t>::max());
+        TANK_EXPECT(c and c->fd != -1 and c->gen != std::numeric_limits<uint64_t>::max());
 
         if (trace) {
                 SLog("Aborting wait ctx ", ptr_repr(wctx), ", ", wctx->requestId, "\n");
@@ -392,7 +412,7 @@ void Service::abort_wait_ctx(wait_ctx *const wctx) {
                         response_hdr->pack(static_cast<uint64_t>(0)); // first available sequence number
                         response_hdr->pack(static_cast<uint64_t>(p->hwmark()));
                         response_hdr->pack(static_cast<uint32_t>((0)));
-                } while (++i < pcnt && (p = (it = wctx->partitions + i)->partition)->owner == t);
+                } while (++i < pcnt and (p = (it = wctx->partitions + i)->partition)->owner == t);
 
                 if (msg == TankAPIMsgType::ConsumePeer) {
                         *reinterpret_cast<uint16_t *>(response_hdr->At(partitions_cnt_offset)) = i - saved_i;
@@ -494,7 +514,9 @@ void Service::gc_waitctx_deferred() {
 // invoked whenever the highwater mark of a partition is updated
 // we may wake up any sleeping consumers
 void Service::consider_highwatermark_update(topic_partition *partition, const uint64_t hwmark, std::vector<wait_ctx *> *woken_up_ctx) {
-        static constexpr bool trace{false};
+	enum {
+		trace = false,
+	};
         TANK_EXPECT(partition);
         TANK_EXPECT(woken_up_ctx);
         auto &waiting_list = partition->waiting_list;
@@ -549,7 +571,7 @@ void Service::consider_highwatermark_update(topic_partition *partition, const ui
                 // any subsequent consider_highwatermark_update or consider_append_res will use it
                 ctx->hwmark_threshold = 0;
 
-                if (!ctx->fdh) {
+                if (not ctx->fdh) {
                         // it's OK if we don't respect minBytes here
                         // this onyl happens very rarely and consumers are expected to retry
                         auto                 res = partition->read_from_local(false, ctx->seqNum, it->minBytes);
@@ -607,14 +629,15 @@ void Service::consider_highwatermark_update(topic_partition *partition, const ui
 
 // invoked whenever a partition leader (i.e local node) persists new messages for a partition
 void Service::consider_append_res(topic_partition *partition, append_res &res, std::vector<wait_ctx *> *woken_up_ctx) {
-        static constexpr bool trace{false};
+        enum { trace = false,
+        };
         TANK_EXPECT(partition);
         TANK_EXPECT(woken_up_ctx);
         bool  have_switched_segment{false};
         auto &waiting_list = partition->waiting_list;
 
         if (trace) {
-                SLog(ansifmt::color_blue, ansifmt::bold, ansifmt::inverse, " waitingList.size() = ", waiting_list.size(), ansifmt::reset, "\n");
+                SLog(ansifmt::color_blue, ansifmt::bold, ansifmt::inverse, " waitingList.size() = ", waiting_list.size(), ansifmt::reset, " for ", partition->owner->name(), "/", partition->idx, "\n");
         }
 
         // for all wait contexts this partition is registered with
@@ -624,7 +647,7 @@ void Service::consider_append_res(topic_partition *partition, append_res &res, s
 
                 TANK_EXPECT(ctx->partition == partition);
 
-                if (ctx->hwmark_threshold != std::numeric_limits<uint64_t>::max() && !ctx->fdh) {
+                if (ctx->hwmark_threshold != std::numeric_limits<uint64_t>::max() and !ctx->fdh) {
                         if (trace) {
                                 SLog("Will ignore because requires HWM update(no fdh)\n");
                         }
@@ -633,7 +656,7 @@ void Service::consider_append_res(topic_partition *partition, append_res &res, s
                         continue;
                 }
 
-                if (!ctx->fdh) {
+                if (not ctx->fdh) {
                         // not bound to a log segment yet
                         // bind it now
                         ctx->fdh         = res.fdh;
@@ -662,7 +685,7 @@ void Service::consider_append_res(topic_partition *partition, append_res &res, s
 
                         if (trace) {
                                 SLog("Extending range, capturedSize(", it->capturedSize, "), range ", ctx->range, "\n");
-			}
+                        }
                 }
 
                 if (have_switched_segment) {
@@ -679,8 +702,26 @@ void Service::consider_append_res(topic_partition *partition, append_res &res, s
                 if (ctx->hwmark_threshold != std::numeric_limits<uint64_t>::max()) {
                         if (trace) {
                                 SLog("Will not bother waking up, because depends on HWM (hwmark_threshold = ", ctx->hwmark_threshold, ")\n");
+                                SLog("partition->highwater_mark.seq_num = ", partition->highwater_mark.seq_num, "\n");
+                                if (partition->log_open()) {
+                                        SLog("partition->log->lastAssignedSeqNum = ", partition->_log->lastAssignedSeqNum, "\n");
+                                }
+                                SLog("res.msgSeqNumRange = ", res.msgSeqNumRange, "\n");
                         }
+
+#ifdef TANK_SUPPORT_CONSUME_FLAGS
+                        // 2022-08-18: PARTITION_PROVIDER
+                        // we need to do this to support reading from a partition ISR node that may not be a leader
+                        if (partition->log_open() and partition->_log->lastAssignedSeqNum > ctx->hwmark_threshold) {
+                                if (trace) {
+                                        SLog("YES, partition->_log->lastAssignedSeqNum(", partition->_log->lastAssignedSeqNum, ") > ctx->hwmark_threshold(", ctx->hwmark_threshold, ")\n");
+                                }
+
+                                goto l10;
+                        }
+#endif
                 } else {
+                l10:
                         if (it->capturedSize >= it->minBytes) {
                                 if (trace) {
                                         SLog("either have_switched_segment(", have_switched_segment, "), or capturedSize(",

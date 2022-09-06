@@ -21,7 +21,15 @@
 #endif
 
 #define MAKE_TANK_RELEASE(major, minor) ((major)*100 + (minor))
-#define TANK_VERSION (MAKE_TANK_RELEASE(3, 9))
+#define TANK_VERSION (MAKE_TANK_RELEASE(4, 0))
+
+// 2022-08-18:  PARTITION_PROVIDER
+// This is tricky, but very important for certain applications. If enabled, consume requests may include flags, and one such flag
+// may be used to specify that, in cluster-aware setups, the closest to the client replica for a topic partition consume request(among the ones in its ISR)
+// should be used instead of the leader.
+//
+// This is not sufficiently tested yet
+#define TANK_SUPPORT_CONSUME_FLAGS 1
 
 namespace TankFlags {
         enum class BundleMsgFlags : uint8_t {
@@ -35,6 +43,12 @@ namespace TANK_Limits {
         static constexpr const std::size_t max_topic_partitions{65530};
         static constexpr const std::size_t max_topic_name_len{64};
 } // namespace TANK_Limits
+
+enum class ConsumeFlags : uint8_t {
+        // if set, and there is a TANK instance running locally(i.e the endpoint IP4 address
+        // matches the client's IP4 address, and that instance is in the ISR of the partition, then that instance will be used("provider")
+        prefer_local_node = 1u << 0,
+};
 
 enum class TankAPIMsgType : uint8_t {
         Produce               = 0x1,

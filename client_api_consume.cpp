@@ -1,4 +1,5 @@
 #include "client_common.h"
+#include "common.h"
 
 // build a consume payload for a broker API request
 TankClient::broker_outgoing_payload *TankClient::build_consume_broker_req_payload(const broker_api_request *broker_req) {
@@ -18,11 +19,22 @@ TankClient::broker_outgoing_payload *TankClient::build_consume_broker_req_payloa
         b->pack(static_cast<uint8_t>(TankAPIMsgType::Consume)); // request type
         b->pack(static_cast<uint32_t>(0));                      // size (will patch)
 
+#ifdef TANK_SUPPORT_CONSUME_FLAGS
+        // 2022-08-18: version >= 3 includes op_flags after min_size PARTITION_PROVIDER
+        // (only iff flags is != 0 )
+        b->pack(static_cast<uint16_t>(api_req->as.consume.flags ? 3 : 2)); // client version
+#else
         b->pack(static_cast<uint16_t>(2)); // client version
+#endif
         b->pack(broker_req->id);
         b->pack(""_s8); // client identifier
         b->pack(api_req->as.consume.max_wait);
         b->pack(static_cast<uint32_t>(api_req->as.consume.min_size));
+#ifdef TANK_SUPPORT_CONSUME_FLAGS
+        if (api_req->as.consume.flags) {
+                b->pack(api_req->as.consume.flags); // 2022-08-18 (for version >= 3)
+        }
+#endif
 
         auto       it = broker_req->partitions_list.next;
         uint8_t    topics_cnt{0};
@@ -70,15 +82,30 @@ TankClient::broker_outgoing_payload *TankClient::build_consume_broker_req_payloa
 uint32_t TankClient::consume(const std::vector<std::pair<topic_partition,
                                                          std::pair<uint64_t, uint32_t>>> &sources,
                              const uint64_t                                               max_wait,
-                             const uint32_t                                               min_size) {
+                             const uint32_t                                               min_size,
+                             const uint8_t                                                op_flags) {
 
-        return consume(sources.data(), sources.size(), max_wait, min_size);
+        return consume(sources.data(), sources.size(),
+                       max_wait,
+                       min_size,
+                       op_flags);
 }
 
 uint32_t TankClient::consume(const std::pair<topic_partition, std::pair<uint64_t, uint32_t>> *sources, const size_t total_sources,
                              const uint64_t max_wait,
-                             const uint32_t min_size) {
-        static constexpr bool trace{false};
+                             const uint32_t min_size,
+                             const uint8_t  op_flags_) {
+        enum {
+                trace = false,
+        };
+#ifdef TANK_SUPPORT_CONSUME_FLAGS
+        const auto op_flags = op_flags_;
+#else
+        enum : uint8_t {
+                op_flags = 0u,
+        };
+#endif
+
         // fan-out: api_req will coordinate broker api requests
         // NOTE: get_api_request() will update now_ms
 
@@ -129,6 +156,7 @@ uint32_t TankClient::consume(const std::pair<topic_partition, std::pair<uint64_t
         //		}
         //		req_id = 0;
         //	}
+        // }
         //
         // In this example, process_message() may take 1s, so next time poll() is called
         // the api request will likely be aborted as well.
@@ -153,24 +181,29 @@ uint32_t TankClient::consume(const std::pair<topic_partition, std::pair<uint64_t
         auto api_req = get_api_request(0);
 #endif
         std::vector<std::pair<broker *, request_partition_ctx *>> contexts;
+#ifdef TANK_SUPPORT_CONSUME_FLAGS
+        const bool use_provider = op_flags & unsigned(ConsumeFlags::prefer_local_node);
+#endif
 
         if (trace) {
-                SLog(ansifmt::bold, ansifmt::color_red, ansifmt::inverse, "Will consume from ", total_sources, " sources", ansifmt::reset, "\n");
+                SLog(ansifmt::bold, ansifmt::color_red, ansifmt::inverse, "Will consume from ", total_sources, " sources", ansifmt::reset, ", op_flags = ", op_flags, "\n");
         }
 
         // initialize the api request for consume
         api_req->as.consume.max_wait = max_wait;
         api_req->as.consume.min_size = min_size;
+        api_req->as.consume.flags    = op_flags;
         api_req->type                = api_request::Type::Consume;
 
         // we could have a generic method that returns
         // a decltype(contexts) and then we would
         // initialize the respective request partition context, but it's not currently necessary
-        for (unsigned i = 0; i < total_sources; ++i) {
+        for (std::size_t i = 0; i < total_sources; ++i) {
                 const auto &it        = sources[i];
                 auto        topic     = intern_topic(it.first.first);
                 auto        partition = it.first.second;
                 auto        req_part  = get_request_partition_ctx();
+                broker     *broker;
                 // if we have a leader for this topic, choose it, explicitly
                 // otherwise, select any broker and we 'll get to update assignments later
                 // and potentially retry the request on another broker
@@ -184,7 +217,22 @@ uint32_t TankClient::consume(const std::pair<topic_partition, std::pair<uint64_t
                 // would save us an unordered_map<>::emplace.
                 //
                 // We are not doing this for now though.
-                auto broker = partition_leader(topic, partition) ?: any_broker();
+#ifdef TANK_SUPPORT_CONSUME_FLAGS
+                if (use_provider) {
+                        broker = partition_provider(topic, partition) ?: any_broker();
+
+                        if (trace) {
+                                SLog("provider ", broker ? broker->ep : Switch::endpoint{}, "\n");
+                        }
+                } else
+#endif
+                {
+                        broker = partition_leader(topic, partition) ?: any_broker();
+
+                        if (trace) {
+                                SLog("leader ", broker ? broker->ep : Switch::endpoint{}, "\n");
+                        }
+                }
 
                 // initialize the broker partition request context
                 req_part->topic     = topic;
@@ -196,8 +244,8 @@ uint32_t TankClient::consume(const std::pair<topic_partition, std::pair<uint64_t
                 contexts.emplace_back(std::make_pair(broker, req_part));
 
                 if (trace) {
-                        SLog("Fetch from ", req_part->topic, "/", req_part->partition,
-                             " min_fetch_size = ", it.second.second,
+                        SLog("Fetch from ", req_part->topic, "/", req_part->partition, " from seqnum = ", it.second.first,
+                             ", min_fetch_size = ", it.second.second,
                              " (", size_repr(it.second.second), ")\n");
                 }
 
@@ -285,7 +333,9 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
         const auto                  topics_cnt        = decode_pod<uint8_t>(p);
         bool                        any_faults        = false;
         [[maybe_unused]] const auto before            = Timings::Microseconds::Tick();
-        std::vector<IOBuffer *>     used_buffers; // TODO: reuse
+        std::vector<IOBuffer *>     used_buffers;                                  // TODO: reuse
+        const auto                  req_op_flags      = api_req->as.consume.flags; // 2022-08-18
+        const bool                  prefer_local_node = req_op_flags & unsigned(ConsumeFlags::prefer_local_node);
 
         DEFER({
                 for (auto b : used_buffers) {
@@ -370,6 +420,9 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
 
                         const auto partition_id = decode_pod<uint16_t>(p);
                         const auto err_flags    = decode_pod<uint8_t>(p);
+                        enum {
+                                trace = false,
+                        };
 
                         if (trace) {
                                 SLog(ansifmt::color_green, "For partition ", partition_id, ", err_flags ", err_flags, ansifmt::reset, "\n");
@@ -380,7 +433,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 auto next = br_req_partctx_it->next;
 
                                 if (trace_faults) {
-                                        SLog("system error while attempting to access  partition ", topic_name, "/", partition_id, "\n");
+                                        SLog("system error while attempting to access partition ", topic_name, "/", partition_id, "\n");
                                 }
 
                                 capture_system_fault(api_req, topic_name, partition_id);
@@ -412,6 +465,9 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 continue;
                         } else if (err_flags == 0xfd) {
                                 // no leader
+                                enum {
+                                        trace = false,
+                                };
                                 auto next = br_req_partctx_it->next;
 
                                 if (trace) {
@@ -426,8 +482,11 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                 req_part->partitions_list_ll.detach_and_reset();
                                 br_req_partctx_it = next;
                                 continue;
-                        } else if (err_flags == (0xfc)) {
-                                // different leader
+                        } else if (err_flags == 0xfc) {
+                                // different leader or partition provider
+                                enum {
+                                        trace = false,
+                                };
                                 auto next = br_req_partctx_it->next;
 
                                 if (unlikely(p + sizeof(uint32_t) + sizeof(uint16_t) > end)) {
@@ -446,10 +505,24 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                                   br_req_partctx_it);
 
                                 if (trace) {
-                                        SLog(ansifmt::color_cyan, "Leader for ", topic_name, "/", partition_id, " is now ", ep, ansifmt::reset, "\n");
+                                        SLog(ansifmt::color_cyan, "Leader/provider for ", topic_name, "/", partition_id, " is now ", ep, ansifmt::reset, "\n");
                                 }
 
-                                set_leader(intern_topic(topic_name), partition_id, ep);
+                                if (prefer_local_node) {
+                                        // PARTITION_PROVIDER
+                                        if (trace) {
+                                                SLog("will set_partition_provider() to ", ep, "\n");
+                                        }
+
+                                        set_partition_provider(intern_topic(topic_name), partition_id, ep);
+                                } else {
+                                        if (trace) {
+                                                SLog("Will set_partition_leader() to ", ep, "\n");
+                                        }
+
+                                        set_partition_leader(intern_topic(topic_name), partition_id, ep);
+                                }
+
                                 retry.emplace_back(req_part);
 
                                 req_part->partitions_list_ll.detach_and_reset();
@@ -486,9 +559,14 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                         auto req_part = switch_list_entry(request_partition_ctx,
                                                           partitions_list_ll, br_req_partctx_it);
 
-                        // OK, we know that this broker is the current leader for this partition
-                        // see comment sin TankClient::consume() about an optimization
-                        set_leader(req_part->topic, req_part->partition, br_req->br->ep);
+                        if (prefer_local_node) {
+                                // PARTITION_PROVIDER
+                                set_partition_provider(req_part->topic, req_part->partition, br_req->br->ep);
+                        } else {
+                                // OK, we know that this broker is the current leader for this partition
+                                // see comment sin TankClient::consume() about an optimization
+                                set_partition_leader(req_part->topic, req_part->partition, br_req->br->ep);
+                        }
 
                         if (unlikely(p + sizeof(uint64_t) + sizeof(uint32_t) > end)) {
                                 if (trace) {
@@ -847,7 +925,7 @@ bool TankClient::process_consume(connection *const c, const uint8_t *const conte
                                                 // abort immediately
                                                 // we need to respect the semantics
                                                 if (trace) {
-                                                        SLog("Past HW mark\n");
+                                                        SLog("Past HW mark (msg_abs_seqnum = ", msg_abs_seqnum, ", highwater_mark = ", highwater_mark, ")\n");
                                                 }
 
                                                 goto next_partition;
@@ -1008,9 +1086,14 @@ uint32_t TankClient::consume_from(const topic_partition &from,
                                   const uint64_t         seqNum,
                                   const uint32_t         minFetchSize,
                                   const uint64_t         maxWait,
-                                  const uint32_t         minSize) {
+                                  const uint32_t         minSize,
+                                  const uint8_t          op_flags) {
         const std::vector<std::pair<topic_partition, std::pair<uint64_t, uint32_t>>> sources{
-            std::make_pair(from, std::make_pair(seqNum, minFetchSize))};
+            std::make_pair(from, std::make_pair(seqNum, minFetchSize)),
+        };
 
-        return consume(sources, maxWait, minSize);
+        return consume(sources,
+                       maxWait,
+                       minSize,
+                       op_flags);
 }

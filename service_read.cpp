@@ -650,18 +650,18 @@ lookup_res topic_partition_log::range_for(uint64_t abs_seqnum, const uint32_t ma
         // then we are supposed to respect the highwater mark
         //
         // callees should special-case Fault::PastMax
-        if (abs_seqnum > max_abs_seq_num) {
-                if (trace) {
-                        SLog(abs_seqnum, " is past max_abs_seq_num = ", max_abs_seq_num, "\n");
-                }
-
-                return {lookup_res::Fault::PastMax};
-        } else if (abs_seqnum == lastAssignedSeqNum + 1) {
+        if (abs_seqnum == lastAssignedSeqNum + 1) { // 2022-08-18: now checking for (abs_seqnum == lastAssignedSeqNum + 1) before (abs_seqnum > max_abs_seq_num)
                 if (trace) {
                         SLog("Asked for next(AtEOF)\n");
                 }
 
                 return {lookup_res::Fault::AtEOF};
+	} else if (abs_seqnum > max_abs_seq_num) {
+                if (trace) {
+                        SLog(abs_seqnum, " is past max_abs_seq_num = ", max_abs_seq_num, "\n");
+                }
+
+                return {lookup_res::Fault::PastMax};
         } else if (abs_seqnum > lastAssignedSeqNum) {
                 if (trace) {
                         SLog("PAST abs_seqnum(", abs_seqnum, ") > lastAssignedSeqNum(", lastAssignedSeqNum, ")\n");
@@ -989,7 +989,15 @@ lookup_res topic_partition::read_from_local([[maybe_unused]] const bool fetch_on
         enum {
                 trace = false,
         };
-        const uint64_t max_abs_seq_num = fetch_only_committed ? hwmark() : std::numeric_limits<uint64_t>::max();
+#ifdef TANK_SUPPORT_CONSUME_FLAGS // 2022-08-18: PARTITION_PROVIDER
+        const uint64_t max_abs_seq_num = fetch_only_committed
+                                             ? std::max<uint64_t>(hwmark(), log_open() ? _log->lastAssignedSeqNum : 0u)
+                                             : std::numeric_limits<uint64_t>::max();
+#else
+        const uint64_t max_abs_seq_num = fetch_only_committed
+                                             ? hwmark()
+                                             : std::numeric_limits<uint64_t>::max();
+#endif
         auto           log             = _log.get();
 
         assert(log);

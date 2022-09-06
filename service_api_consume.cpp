@@ -1,4 +1,8 @@
+//#define OVERSEER_TRACES 1
 #include "service_common.h"
+#ifdef OVERSEER_TRACES
+#include <overseer_client.h>
+#endif
 
 // We need to discriminate between requests originating from peers and clients
 // requests originating from clients are subject to a partitions' high water mark, that is the committed offset
@@ -9,19 +13,26 @@
 // Will guard against malformed requests
 bool Service::process_consume(const TankAPIMsgType _msg,
                               connection *const    c,
-                              const uint8_t *      p,
+                              const uint8_t       *p,
                               const size_t         _len) {
-        assert(c);
-        assert(c->fd > 2);
+        TANK_EXPECT(c);
+        TANK_EXPECT(c->fd > 2);
+#if 1
         enum {
                 trace        = false,
                 trace_faults = false,
         };
-        const bool            consume_peer_req = _msg == TankAPIMsgType::ConsumePeer;
-        const auto            consume_req      = !consume_peer_req;
-        const auto            ca               = cluster_aware();
-        auto                  self             = cluster_state.local_node.ref;
-        const auto            end              = p + _len;
+#endif
+        const bool consume_peer_req = _msg == TankAPIMsgType::ConsumePeer;
+        const auto consume_req      = !consume_peer_req;
+        const auto ca               = cluster_aware();
+        auto       self             = cluster_state.local_node.ref;
+        const auto end              = p + _len;
+
+#if 0
+	const bool trace_faults = _msg == TankAPIMsgType::Consume;
+	const bool trace = trace_faults;
+#endif
 
         if (trace) {
                 SLog("====================================| Processing CONSUME request for ", _len, "\n");
@@ -41,6 +52,10 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                 client_version = decode_pod<uint16_t>(p);
                 request_id     = decode_pod<uint32_t>(p);
 
+		// XXX:
+		// invariant: (client_version != 0) because it is reserved for ConsumePeer messages
+		// TODO: enforce it
+
                 if (unlikely(p + p[0] + sizeof(uint8_t) > end)) {
                         return shutdown(c);
                 }
@@ -55,7 +70,7 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                 if (trace) {
                         SLog("Consume request from client [", client_id,
                              "] version ", client_version,
-                             ", request_id ", request_id, "\n");
+                             ", request_id=", request_id, " from ", ip4addr_repr(c->addr4), ", this ", ip4addr_repr(listen_ep.addr4), "\n");
                 }
         } else {
                 if (unlikely(p + sizeof(uint16_t) > end)) {
@@ -69,10 +84,15 @@ bool Service::process_consume(const TankAPIMsgType _msg,
         }
 
         if (trace) {
-                SLog("**New CONSUME request of type [", _msg == TankAPIMsgType::Consume ? "Consume" : "ConsumePeer", "]\n");
+                SLog("**New CONSUME request of type [", _msg == TankAPIMsgType::Consume ? "Consume" : "ConsumePeer", "] for request_id=", request_id, "\n");
         }
 
-        if (unlikely(p + sizeof(uint64_t) + sizeof(uint32_t) + sizeof(uint16_t) > end)) {
+        if (unlikely(p +
+                         (client_version >= 3 ? sizeof(uint8_t) : 0u) +
+                         sizeof(uint64_t) +
+                         sizeof(uint32_t) +
+                         sizeof(uint16_t) >
+                     end)) {
                 if (trace) {
                         SLog("Shutting down CONSUME request connection because missing ",
                              std::distance(end, p + sizeof(uint64_t) + sizeof(uint32_t) + sizeof(uint16_t)), " for header\n");
@@ -81,10 +101,12 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                 return shutdown(c);
         }
 
-        const auto     max_wait   = normalized_max_wait(decode_pod<uint64_t>(p));
-        const auto     min_bytes  = std::min<uint32_t>(decode_pod<uint32_t>(p), 64 * 1024 * 1024); // keep it sane
-        const uint16_t topics_cnt = consume_peer_req ? decode_pod<uint16_t>(p) : decode_pod<uint8_t>(p);
-        auto           resp_hdr   = get_buf();
+        const auto     max_wait     = normalized_max_wait(decode_pod<uint64_t>(p));
+        const auto     min_bytes    = std::min<uint32_t>(decode_pod<uint32_t>(p), 64 * 1024 * 1024); // keep it sane
+        const uint8_t  op_flags     = client_version >= 3 ? decode_pod<uint8_t>(p) : 0u;             // 2022-08-18 (client_version for ConsumePeer is _always_ 0) PARTITION_PROVIDER
+        const bool     prefer_local = op_flags & unsigned(ConsumeFlags::prefer_local_node);
+        const uint16_t topics_cnt   = consume_peer_req ? decode_pod<uint16_t>(p) : decode_pod<uint8_t>(p);
+        auto           resp_hdr     = get_buf();
         uint32_t       patch_list_size{0};
         const auto     track_partition_eof = [&, this](auto partition) {
                 const auto l = resp_hdr->size();
@@ -108,9 +130,21 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                 }
         };
 
-        if (trace) {
-                SLog(ansifmt::bold, ansifmt::color_magenta, "New CONSUME request for topicsCnt = ", topics_cnt, ansifmt::reset, "\n");
+#ifdef OVERSEER_TRACES
+        if (trace or true) {
+                char repr_buf[64];
+                char repr_buf2[64];
+
+                SLog(ansifmt::bold, ansifmt::color_magenta, "New CONSUME request for topicsCnt = ", topics_cnt, ansifmt::reset, " prefer_local = ", prefer_local, ", client addr4 = ", ip4addr_repr(c->addr4), "\n");
+
+                Overseer::Emit(_S("tank.srv.api.consume"), {
+                                                               {"prefer_local"_s8, prefer_local},
+                                                               {"client_addr4"_s8, ip4addr_repr(c->addr4).Get(repr_buf)},
+                                                               {"listen_addr4"_s8, ip4addr_repr(listen_ep.addr4).Get(repr_buf2)},
+                                                               {"topics_cnt"_s8, topics_cnt},
+                                                           });
         }
+#endif
 
         resp_hdr->pack(static_cast<uint8_t>(_msg));
         const auto size_offset = resp_hdr->size();
@@ -146,7 +180,7 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                 return shutdown(c);
         }
 
-        for (uint32_t i{0}; i < topics_cnt; ++i) {
+        for (std::size_t  i{0}; i < topics_cnt; ++i) {
                 if (unlikely(p + (*p) + sizeof(uint16_t) > end)) {
                         put_buf(resp_hdr);
                         return shutdown(c);
@@ -170,7 +204,7 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                         resp_hdr->pack(static_cast<uint16_t>(partitions_cnt));
                 }
 
-                if (!topic) {
+                if (not topic) {
                         if (trace) {
                                 SLog("Unknown topic [", topic_name, "]\n");
                         }
@@ -199,18 +233,18 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                 }
 
                 for (uint32_t k{0}; k < partitions_cnt; ++k) {
-                        const auto  partition_id = decode_pod<uint16_t>(p);
-                        auto        abs_seq_num  = decode_pod<uint64_t>(p);
-			// Sanity Check
-			// XXX: this may become a problem if a single message bundle is close to 64MB
-			// but this is rather ludicrous
-			// we need to protect against clients that may request too much data anyway
-                        const auto  fetch_size   = std::min<uint32_t>(decode_pod<uint32_t>(p), 64 * 1024 * 1024);
-                        auto *const partition    = topic->partition(partition_id);
+                        const auto partition_id = decode_pod<uint16_t>(p);
+                        auto       abs_seq_num  = decode_pod<uint64_t>(p);
+                        // Sanity Check
+                        // XXX: this may become a problem if a single message bundle is close to 64MB
+                        // but this is rather ludicrous
+                        // we need to protect against clients that may request too much data anyway
+                        const auto  fetch_size = std::min<uint32_t>(decode_pod<uint32_t>(p), 64 * 1024 * 1024);
+                        auto *const partition  = topic->partition(partition_id);
 
                         resp_hdr->pack(partition_id);
 
-                        if (!partition || !partition->enabled()) {
+                        if (not partition or not partition->enabled()) {
                                 if (trace) {
                                         SLog("Undefined partition ", partition_id, "\n");
                                 }
@@ -221,34 +255,129 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                         }
 
                         if (ca) {
-                                auto partition_leader = partition->cluster.leader.node;
+#ifdef TANK_SUPPORT_CONSUME_FLAGS
+                                if (prefer_local) {
+                                        // 2022-08-18: PARTITION_PROVIDER
+                                        // we need to know the IP4 address of this client; if there is a node in the ISR of this partition with that ip4 address, and
+                                        // it is not this node, then we need to ask the client to route requests there
+                                        enum { trace = false,
+                                        };
+                                        const auto &isr          = partition->cluster.isr;
+                                        const auto  client_addr4 = c->addr4;
 
-                                if (!partition_leader) {
-                                        // no leader? this makes no sense
-                                        // likely a transient issue
+                                        TANK_EXPECT(_msg == TankAPIMsgType::Consume); // can't be ConsumePeer
+
                                         if (trace) {
-                                                SLog("No Leader for ", partition->owner->name(), "/", partition->idx, "\n");
+                                                SLog("connection.addr4 = ", ip4addr_repr(client_addr4), ", listen_ep_addr = ", ip4addr_repr(listen_ep.addr4), "\n");
+
+                                                for (const auto it : isr.list) {
+                                                        const auto isr_e = containerof(isr_entry, partition_ll, it);
+
+                                                        SLog("ISR node ", isr_e->node()->ep, "\n");
+                                                }
                                         }
 
-                                        resp_hdr->pack(static_cast<uint8_t>(0xfd));
-                                        respond_now = true;
-                                        continue;
-                                } else if (partition_leader != self) {
-                                        // ask to redirect for this partition
-                                        if (trace) {
-                                                SLog("Different leader:", partition_leader->ep, "\n");
-                                        }
+					// TODO: 
+					// we could fast-path it by just checking for (self->ep.addr4 == client_addr4) but self may have been removed from the ISR
+					// That optimization makes sense because once the client "learns" that this is the local/closest node for that partition
+					// it would be contacting it directly henceforth.
+					// 
+					// XXX: However, self may be no longer in the ISR. To get this to work, we should have some kind of revision counter for a partition's ISR, where
+					// we bump it whenever it changes, so that we 'd use that revision to decide if we need to consider for self inclusing in ISR (because it has
+					// been updated since last time we checked, tracked with the ISR rev.)
+#if 0
+					if (self->ep.addr4 == client_addr4) {
 
-                                        resp_hdr->pack(static_cast<uint8_t>(0xfc));
-                                        resp_hdr->pack(partition_leader->ep.addr4, partition_leader->ep.port);
-                                        respond_now = true;
-                                        continue;
+
+					} else 
+#endif
+                                        {
+                                                cluster_node *selected{nullptr};
+
+                                                for (const auto it : isr.list) {
+                                                        const auto isr_e = containerof(isr_entry, partition_ll, it);
+                                                        const auto n     = isr_e->node();
+
+                                                        if (n->ep.addr4 == client_addr4) {
+                                                                selected = n;
+								break;
+                                                        }
+                                                }
+
+						if (nullptr == selected) {
+                                                        // unable to find any node in the ISR local to the client
+                                                        // XXX: maybe we can cache this keyed to the client addr4 and expire whenever the ISR is updated for performance
+                                                        selected = partition->cluster.leader.node;
+
+                                                        if (trace) {
+                                                                SLog("No provider; selected ", selected ? selected->ep : Switch::endpoint{}, "\n");
+                                                        }
+                                                } else if (trace) {
+                                                        SLog("selected ", selected->ep, " == self ", selected == self, "\n");
+                                                }
+
+#ifdef OVERSEER_TRACES
+                                                if (true and selected) {
+                                                        char repr[64];
+                                                        char repr2[64];
+                                                        char repr3[64];
+
+                                                        Overseer::Emit(_S("tank.srv.api.consume-part-prefer-local"), {
+                                                                                                                         {"selected_addr4"_s8, ip4addr_repr(selected->ep.addr4).Get(repr)},
+                                                                                                                         {"client_addr4"_s8, ip4addr_repr(c->addr4).Get(repr2)},
+                                                                                                                         {"self_addr4"_s8, ip4addr_repr(self->ep.addr4).Get(repr3)},
+                                                                                                                         {"topic"_s8, topic_name},
+                                                                                                                         {"part"_s8, partition_id},
+                                                                                                                         {"from_self"_s8, selected == self},
+                                                                                                                     });
+                                                }
+#endif
+
+                                                if (nullptr == selected) {
+                                                        resp_hdr->pack(static_cast<uint8_t>(0xfd));
+                                                        respond_now = true;
+                                                        continue;
+						} else if (self != selected) {
+							// TODO:
+							// we sure we can't just check for (selected != self)?
+                                                        resp_hdr->pack(static_cast<uint8_t>(0xfc));
+                                                        resp_hdr->pack(selected->ep.addr4, selected->ep.port);
+                                                        respond_now = true;
+                                                        continue;
+                                                }
+                                        }
+                                } else 
+#endif
+				{
+                                        auto partition_leader = partition->cluster.leader.node;
+
+                                        if (not partition_leader) {
+                                                // no leader? this makes no sense
+                                                // likely a transient issue
+                                                if (trace) {
+                                                        SLog("No Leader for ", partition->owner->name(), "/", partition->idx, "\n");
+                                                }
+
+                                                resp_hdr->pack(static_cast<uint8_t>(0xfd));
+                                                respond_now = true;
+                                                continue;
+                                        } else if (partition_leader != self) {
+                                                // ask to redirect for this partition
+                                                if (trace) {
+                                                        SLog("Different leader:", partition_leader->ep, "\n");
+                                                }
+
+                                                resp_hdr->pack(static_cast<uint8_t>(0xfc));
+                                                resp_hdr->pack(partition_leader->ep.addr4, partition_leader->ep.port);
+                                                respond_now = true;
+                                                continue;
+                                        }
                                 }
                         }
 
                         topic_partition_log *log;
 
-			assert(c->fd > 2);
+                        TANK_EXPECT(c->fd > 2);
 
                         try {
 
@@ -263,7 +392,7 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                                 continue;
                         }
 
-			assert(log);
+                        TANK_EXPECT(log);
 
                         if (trace) {
                                 SLog(ansifmt::color_green, ansifmt::inverse, "> REQUEST FOR partition ", partition_id,
@@ -273,13 +402,24 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                                      ", lastAssignedSeqNum = ", log->lastAssignedSeqNum, ansifmt::reset, "\n");
                         }
 
+#ifdef OVERSEER_TRACES
+                        if (true) {
+                                Overseer::Emit(_S("tank.srv.api.consume-read"), {
+                                                                                    {"topic"_s8, topic_name},
+                                                                                    {"part"_s8, partition_id},
+                                                                                    {"fetch_size"_s8, fetch_size},
+                                                                                });
+                        }
+#endif
+
                         if (abs_seq_num == UINT64_MAX) {
                                 if (cluster_aware()) {
-                                        abs_seq_num = partition_hwmark(partition) + 1;
+                                        abs_seq_num = partition_hwmark_for_consume(partition) + 1;
 
                                         if (trace) {
                                                 SLog("Requested EOF, set to (hwmark+1) => ", abs_seq_num, "\n");
                                         }
+
                                         goto l100;
                                 } else {
                                         track_partition_eof(partition);
@@ -291,27 +431,31 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                                 uint64_t   start;
                                 const bool fetch_only_committed = consume_req;
                                 auto       res                  = partition->read_from_local(fetch_only_committed, abs_seq_num, fetch_size);
-                                const auto hwmark               = partition_hwmark(partition);
-                                const auto ceil_seqnum          = (false == cluster_aware() || _msg != TankAPIMsgType::Consume)
-                                                             ? log->lastAssignedSeqNum
-                                                             : hwmark;
+                                const auto hwmark               = partition_hwmark_for_consume(partition);
+                                const auto ceil_seqnum          = (false == cluster_aware() or _msg != TankAPIMsgType::Consume)
+                                                                      ? log->lastAssignedSeqNum
+                                                                      : hwmark;
 
                                 if (trace) {
                                         SLog("Partition HWM is ", hwmark, "\n");
                                 }
 
                                 switch (res.fault) {
-					case lookup_res::Fault::SystemFault:
+                                        case lookup_res::Fault::SystemFault:
                                                 resp_hdr->pack(static_cast<uint8_t>(0xfb));
                                                 respond_now = true;
                                                 break;
 
                                         case lookup_res::Fault::PastMax: {
                                                 // we attempted to read past the highwater mark(i.e last committed message seq.num)
-                                                const auto hwmark = partition->highwater_mark.seq_num;
+#ifdef TANK_SUPPORT_CONSUME_FLAGS
+						const auto hwmark = partition_hwmark_for_consume(partition);
+#else
+                                                const auto hwmark = partition->highwater_mark.seq_num; // i.e partition->hwmark()
+#endif
 
                                                 if (trace) {
-                                                        SLog("Fault::PastMax ", abs_seq_num, ", hwmark = ", hwmark, "\n");
+                                                        SLog("Fault::PastMax: abs_seq_num = ", abs_seq_num, ", hwmark = ", hwmark, "\n");
                                                 }
 
                                                 if (abs_seq_num == hwmark + 1) {
@@ -355,16 +499,15 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                                                 start                  = Timings::Microseconds::Tick();
                                                 first_bundle_is_sparse = res.first_bundle_is_sparse;
 
-						TANK_EXPECT(res.fileOffsetCeiling >= res.fileOffset);
-						// WAS: range.Set(res.fileOffset, fetch_size);
-						// we need to respect the returned res.fileOffsetCeiling
-						// and never try to clip it by fetch_size
-						range.Set(res.fileOffset, res.fileOffsetCeiling - res.fileOffset);
+                                                TANK_EXPECT(res.fileOffsetCeiling >= res.fileOffset);
+                                                // WAS: range.Set(res.fileOffset, fetch_size);
+                                                // we need to respect the returned res.fileOffsetCeiling
+                                                // and never try to clip it by fetch_size
+                                                range.Set(res.fileOffset, res.fileOffsetCeiling - res.fileOffset);
 
                                                 if (trace) {
                                                         SLog(ansifmt::bold, ansifmt::color_green, "Initial range ", range, ansifmt::reset, " for ", abs_seq_num, "\n");
                                                 }
-
 
                                                 if (trace) {
                                                         SLog(ansifmt::bold, "Response:(base_seqnum = ",
@@ -459,7 +602,6 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                                                 respond_now = true;
                                                 break;
 
-
                                         case lookup_res::Fault::BoundaryCheck:
                                                 if (trace) {
                                                         SLog("RETURNING boundary check\n");
@@ -494,7 +636,7 @@ bool Service::process_consume(const TankAPIMsgType _msg,
 
         // TODO(markp): https://github.com/phaistos-networks/TANK/issues/17#issuecomment-236106945
         // (don't respond even if we have any data, amount >= minBytes)
-        if (respond_now || 0 == max_wait) {
+        if (respond_now or 0 == max_wait) {
                 uint32_t   extra = 0;
                 const auto n     = partitions_requested_eof.size();
 
@@ -595,8 +737,8 @@ bool Service::process_consume(const TankAPIMsgType _msg,
                 header_payload->buf = buf;
 
                 if (trace) {
-                        SLog(ansifmt::color_brown, ansifmt::bold, 
-				"Created ", q->size(), " data_vector_payload's", ansifmt::reset, "\n");
+                        SLog(ansifmt::color_brown, ansifmt::bold,
+                             "Created ", q->size(), " data_vector_payload's", ansifmt::reset, "\n");
 
                         SLog("\n\n\n\n\n\n\n\n");
                 }

@@ -164,13 +164,14 @@ uint64_t TankClient::sequence_number_by_event_time(const topic_partition &topic_
 
                 // determine the timestamp of the first message with (seq_num >= mid)
                 for (uint32_t req_id{0}, fetch_size{32 * 1024};;) {
-                        if (!req_id) {
+                        if (0 == req_id) {
                                 if (trace) {
                                         SLog("Consuming ", topic_partition, " at ", mid, ", fetch_size = ", fetch_size, "\n");
                                 }
 
-                                req_id = consume_from(topic_partition, mid, fetch_size, 0, 0);
-                                if (!req_id) {
+                                req_id = consume_from(topic_partition, mid, fetch_size, 0, 0, unsigned(ConsumeFlags::prefer_local_node));
+
+                                if (0 == req_id) {
                                         reset();
                                         continue;
                                 }

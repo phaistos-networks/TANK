@@ -19,9 +19,11 @@ void manage_throttled_connections();
 
 Switch::endpoint leader_for(const str_view8, const uint16_t);
 
+Switch::endpoint provider_for(const str_view8, const uint16_t);
+
 void shift_failed_broker(broker *);
 
-void update_api_req(api_request *, const bool , std::vector<request_partition_ctx *> *, std::vector<request_partition_ctx *> *);
+void update_api_req(api_request *, const bool, std::vector<request_partition_ctx *> *, std::vector<request_partition_ctx *> *);
 
 broker *any_broker();
 
@@ -72,7 +74,7 @@ void abort_api_request_retry_bundles(api_request *, std::vector<request_partitio
 
 void retry_bundle_impl(retry_bundle *);
 
-void schedule_retry(api_request *, request_partition_ctx **, const uint16_t , const uint64_t);
+void schedule_retry(api_request *, request_partition_ctx **, const uint16_t, const uint64_t);
 
 void check_pending_retries();
 
@@ -82,9 +84,19 @@ bool schedule_req_partitions(api_request *, std::vector<std::pair<broker *, requ
 
 bool schedule_req_partitions(api_request *, request_partition_ctx **, const size_t);
 
-void set_leader(const str_view8, const uint16_t, const Switch::endpoint);
+#ifdef TANK_SUPPORT_CONSUME_FLAGS
+// content provider(for consumption)
+void set_partition_provider(const str_view8, const uint16_t, const Switch::endpoint);
 
-void set_leader(const str_view8, const uint16_t, const str_view32);
+void set_partition_provider(const str_view8, const uint16_t, const str_view32);
+
+broker *partition_provider(const str_view8, const uint16_t);
+#endif
+
+// the leader; all updates for a partition are routed to its leader
+void set_partition_leader(const str_view8, const uint16_t, const Switch::endpoint);
+
+void set_partition_leader(const str_view8, const uint16_t, const str_view32);
 
 broker *partition_leader(const str_view8, const uint16_t);
 
@@ -125,18 +137,18 @@ void end_reactor_loop_iteration();
 void make_api_req_ready(api_request *, const uint32_t);
 
 void retain_mb(managed_buf *b) {
-	TANK_EXPECT(b);
+        TANK_EXPECT(b);
 
-	b->retain();
+        b->retain();
 }
 
 void release_mb(managed_buf *b) {
         TANK_EXPECT(b);
 
-	if (!b->use_count()) {
-		SLog("Attempting to release ", ptr_repr(b), " with rc == 0\n");
-		std::abort();
-	}
+        if (!b->use_count()) {
+                SLog("Attempting to release ", ptr_repr(b), " with rc == 0\n");
+                std::abort();
+        }
 
         TANK_EXPECT(b->use_count());
 
@@ -158,8 +170,8 @@ void check_pending_api_responses();
 void unlink_broker_req(broker_api_request *, const size_t);
 
 void release_broker_req(broker_api_request *const br_req, const unsigned ref = __builtin_LINE()) {
-	unlink_broker_req(br_req, ref);
-	put_broker_api_request(br_req);
+        unlink_broker_req(br_req, ref);
+        put_broker_api_request(br_req);
 }
 
 void check_conns_pending_est();
@@ -200,7 +212,7 @@ bool schedule_broker_req(broker_api_request *);
 
 std::unique_ptr<api_request> get_api_request(const uint64_t expiration);
 
-void put_api_request(std::unique_ptr<api_request> );
+void put_api_request(std::unique_ptr<api_request>);
 
 broker_api_request *get_broker_api_request();
 
@@ -250,7 +262,6 @@ broker_outgoing_payload *build_srv_status_broker_req_payload(const broker_api_re
 
 bool process_msg(connection *const c, const uint8_t msg, const uint8_t *const content, const size_t len);
 
-
 bool rcv(connection *const c);
 
 bool tx_tank(connection *c);
@@ -268,7 +279,7 @@ void put_buffer(IOBuffer *const b);
 auto get_payload() {
         broker_outgoing_payload *p;
 
-	++rsrc_tracker.payload;
+        ++rsrc_tracker.payload;
         if (false == reusable_payloads.empty()) {
                 p = reusable_payloads.back();
 
@@ -287,8 +298,8 @@ auto get_payload() {
 broker_outgoing_payload *get_payload_for(connection *, const size_t);
 
 void put_payload(broker_outgoing_payload *p, [[maybe_unused]] const uint32_t ref) {
-	TANK_EXPECT(rsrc_tracker.payload);
-	--rsrc_tracker.payload;
+        TANK_EXPECT(rsrc_tracker.payload);
+        --rsrc_tracker.payload;
 
         if (auto b = std::exchange(p->b, nullptr)) {
                 put_buffer(b);
@@ -300,7 +311,7 @@ void put_payload(broker_outgoing_payload *p, [[maybe_unused]] const uint32_t ref
 auto get_connection() {
         connection *c;
 
-	++rsrc_tracker.connection;
+        ++rsrc_tracker.connection;
 
         if (!reusable_connections.empty()) {
                 c = reusable_connections.back().release();
@@ -315,8 +326,8 @@ auto get_connection() {
 }
 
 void put_connection(connection *const c) {
-	TANK_EXPECT(rsrc_tracker.connection);
-	--rsrc_tracker.connection;
+        TANK_EXPECT(rsrc_tracker.connection);
+        --rsrc_tracker.connection;
 
         c->state.flags = 0;
         reusable_connections.emplace_back(std::move(c));
@@ -332,8 +343,8 @@ public:
 TankClient(const strwlen32_t endpoints = {});
 
 TankClient(const char *s)
-	: TankClient(str_view32::make_with_cstr(s)) {
-	//
+    : TankClient(str_view32::make_with_cstr(s)) {
+        //
 }
 
 ~TankClient();
@@ -351,11 +362,11 @@ const auto &produce_acks() const noexcept {
 }
 
 const auto &discovered_topics() const noexcept {
-	return all_discovered_topics;
+        return all_discovered_topics;
 }
 
 const auto &discovered_topologies() const noexcept {
-	return _discovered_topologies;
+        return _discovered_topologies;
 }
 
 const auto &discovered_partitions() const noexcept {
@@ -371,7 +382,7 @@ const auto &created_topics() const noexcept {
 }
 
 const auto &statuses() const noexcept {
-	return collected_cluster_status_v;
+        return collected_cluster_status_v;
 }
 
 inline void poll(const uint32_t timeout_ms) {
@@ -379,7 +390,7 @@ inline void poll(const uint32_t timeout_ms) {
 }
 
 inline void poll() {
-	reactor_step(std::numeric_limits<uint32_t>::max());
+        reactor_step(std::numeric_limits<uint32_t>::max());
 }
 
 bool any_responses() const noexcept {
@@ -398,7 +409,7 @@ bool any_responses() const noexcept {
 [[gnu::warn_unused_result, nodiscard]] uint32_t produce(const std::pair<topic_partition, std::vector<msg>> *, const size_t);
 
 [[gnu::warn_unused_result, nodiscard]] inline uint32_t produce(const std::vector<std::pair<topic_partition, std::vector<msg>>> &req) {
-	return produce(req.data(), req.size());
+        return produce(req.data(), req.size());
 }
 
 [[gnu::warn_unused_result, nodiscard]] uint32_t produce_to(const topic_partition &to, const std::vector<msg> &msgs);
@@ -417,25 +428,34 @@ bool any_responses() const noexcept {
 [[gnu::warn_unused_result, nodiscard]] uint32_t produce_with_seqnum(const std::pair<topic_partition, std::vector<consumed_msg>> *, const size_t);
 
 [[gnu::warn_unused_result, nodiscard]] inline uint32_t produce_with_seqnum(const std::vector<std::pair<topic_partition, std::vector<consumed_msg>>> &req) {
-	return produce_with_seqnum(req.data(), req.size());
+        return produce_with_seqnum(req.data(), req.size());
 }
+
+enum class ConsumeFlags : uint8_t {
+        // if set, and there is a TANK instance running locally(i.e the endpoint IP4 address
+        // matches the client's IP4 address, and that instance is in the ISR of the partition, then that instance will be used("provider")
+        prefer_local_node = 1u << 0,
+};
 
 [[gnu::warn_unused_result, nodiscard]] uint32_t consume(const std::pair<topic_partition,
                                                                         std::pair<uint64_t, uint32_t>> *,
                                                         const std::size_t,
                                                         const uint64_t maxWait,
-                                                        const uint32_t minSize);
+                                                        const uint32_t minSize,
+                                                        const uint8_t  flags = 0);
 
 [[gnu::warn_unused_result, nodiscard]] uint32_t consume(const std::vector<std::pair<topic_partition,
                                                                                     std::pair<uint64_t, uint32_t>>> &req,
                                                         const uint64_t                                               maxWait,
-                                                        const uint32_t                                               minSize);
+                                                        const uint32_t                                               minSize,
+                                                        const uint8_t                                                flags = 0);
 
 [[gnu::warn_unused_result, nodiscard]] uint32_t consume_from(const topic_partition &from,
                                                              const uint64_t         seqNum,
                                                              const uint32_t         minFetchSize,
                                                              const uint64_t         maxWait,
-                                                             const uint32_t         minSize);
+                                                             const uint32_t         minSize,
+                                                             const uint8_t          flags = 0);
 
 [[gnu::warn_unused_result, nodiscard]] uint32_t discover_topology();
 
@@ -458,7 +478,7 @@ void set_client_id(const char *const p, const uint32_t len) {
 }
 
 void set_retry_strategy(const RetryStrategy) noexcept {
-	// no-op
+        // no-op
 }
 
 void set_compression_strategy(const CompressionStrategy c) noexcept {
@@ -484,9 +504,9 @@ void set_default_leader(const strwlen32_t e) {
 }
 
 void set_default_leader(const char *p) {
-	set_default_leader(str_view32::make_with_cstr(p));
+        set_default_leader(str_view32::make_with_cstr(p));
 }
-	
+
 void interrupt_poll();
 
 bool should_poll() const noexcept;
@@ -507,7 +527,7 @@ uint64_t sequence_number_by_event_time(const topic_partition &,
                                        const uint64_t cut_off_threshold = Timings::Minutes::ToMillis(5));
 
 inline size_t count_brokers() const noexcept {
-	return all_brokers.size();
+        return all_brokers.size();
 }
 
 // This is useful in very latency sensitive applications
@@ -517,7 +537,7 @@ inline size_t count_brokers() const noexcept {
 // If you get a response with messages, and the last seq_num consumed from that request is the partition's high watermark
 // we can then set the partition as drained.
 void set_report_drained_if_consumed_upto_hwmark(const bool v = true) {
-	behavior.report_drain_if_consumed_upto_hwmark = true;
+        behavior.report_drain_if_consumed_upto_hwmark = true;
 }
 
 // return <start, end>. start = 0 on failure

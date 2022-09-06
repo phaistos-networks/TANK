@@ -2598,6 +2598,7 @@ class Service {
                 TearDown,
         } reactor_state;
         Switch::endpoint tank_listen_ep{0}, prom_endpoint{};
+	Switch::endpoint listen_ep; // when listening; if tank_listen_ep.addr4 == INADDR_ANY, we really need to know the IP4 address
         struct {
                 PubSubQueue<pending_compaction> pendingCompactions;
                 std::unique_ptr<std::thread>    compaction_thread;

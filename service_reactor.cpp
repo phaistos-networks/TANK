@@ -904,6 +904,22 @@ bool Service::enable_listener() {
                 return false;
         }
 
+
+	// 2022-08-18
+        if (tank_listen_ep.addr4 != INADDR_ANY) {
+                listen_ep = tank_listen_ep;
+        } else {
+                struct sockaddr_in sa;
+                socklen_t          sl = sizeof(sa);
+
+                if (-1 == getsockname(listenFd, reinterpret_cast<sockaddr *>(&sa), &sl)) {
+                        IMPLEMENT_ME();
+                } else {
+                        listen_ep.addr4 = *reinterpret_cast<const uint32_t *>(&sa.sin_addr.s_addr);
+                        listen_ep.port  = ntohs(sa.sin_port);
+                }
+        }
+
         if (trace) {
                 SLog("Enabled listener\n");
         }
@@ -2117,8 +2133,7 @@ _accept:
                 TANK_EXPECT(saLen == sizeof(sockaddr_in));
                 static const auto rcvBufSize = str_view32::make_with_cstr(getenv("TANK_BROKER_SOCKBUF_RCV_SIZE") ?: "0").as_uint32();
                 static const auto sndBufSize = str_view32::make_with_cstr(getenv("TANK_BROKER_SOCKBUF_SND_SIZE") ?: "0").as_uint32();
-
-                auto c = get_connection();
+                auto              c          = get_connection();
 
                 TANK_EXPECT(c);
 
@@ -2139,6 +2154,10 @@ _accept:
                 c->type  = connection::Type::TankClient;
                 c->addr4 = *reinterpret_cast<const uint32_t *>(&sa.sin_addr.s_addr);
                 c->fd    = newFd;
+
+		// 2022-09-05
+		// verified that c->addr4 is the peer addr4
+
 
                 TANK_EXPECT(c->fd > 2);
 

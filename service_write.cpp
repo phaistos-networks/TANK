@@ -354,7 +354,9 @@ append_res topic_partition_log::append_bundle(const time_t   now,
                                               const uint32_t bundleMsgsCnt,
                                               const uint64_t firstMsgSeqNum,
                                               const uint64_t lastMsgSeqNum) {
-        static constexpr bool trace{false};
+	enum {
+		trace = false,
+	};
         const auto            saved_last_assigned_seqnum = lastAssignedSeqNum;
         const auto            absSeqNum                  = firstMsgSeqNum ?: lastAssignedSeqNum + 1;
 

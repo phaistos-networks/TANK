@@ -362,7 +362,7 @@ bool process_msg(connection *const c, const uint8_t msg, const uint8_t *const da
 
 bool process_peer_msg(connection *const c, const uint8_t msg, const uint8_t *const data, const size_t len);
 
-void wakeup_wait_ctx(wait_ctx *const wctx, connection *);
+void wakeup_wait_ctx(wait_ctx *const wctx, connection *, const unsigned ref = __builtin_LINE());
 
 void abort_wait_ctx(wait_ctx *const wctx);
 
@@ -615,6 +615,18 @@ void set_hwmark(topic_partition *, const uint64_t);
 void set_hwmark(topic_partition *, const uint64_t, fd_handle *, const uint32_t);
 
 uint64_t partition_hwmark(topic_partition *) TANK_NOEXCEPT_IF_NORUNTIME_CHECKS;
+
+#ifndef TANK_SUPPORT_CONSUME_FLAGS
+inline uint64_t partition_hwmark_for_consume(topic_partition *p) TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+	return partition_hwmark(p);
+}
+#else
+inline uint64_t partition_hwmark_for_consume(topic_partition *p) TANK_NOEXCEPT_IF_NORUNTIME_CHECKS {
+        return std::max<uint64_t>(
+            cluster_aware() ? p->hwmark() /* p->highwater_mark.seq_num */ : 0u,
+            partition_log(p)->lastAssignedSeqNum);
+}
+#endif
 
 void update_hwmark(topic_partition *, const topic_partition::Cluster::pending_ack_bundle_desc);
 

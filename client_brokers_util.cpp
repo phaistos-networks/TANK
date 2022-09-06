@@ -702,14 +702,22 @@ void TankClient::shift_failed_broker(broker *br) {
 // then we mark the broker as failed and use any_broker() again to get another node, and if we can't then wait anyway
 TankClient::broker *TankClient::partition_leader(const str_view8 topic, const uint16_t partition) {
         if (const auto it = leaders.find(topic_partition{topic, partition}); it != leaders.end()) {
-                const auto e = it->second;
-
-                return broker_by_endpoint(e);
+                return broker_by_endpoint(it->second.leader);
         }
 
         // we don't know about that yet
         return nullptr;
 }
+
+#ifdef TANK_SUPPORT_CONSUME_FLAGS
+TankClient::broker *TankClient::partition_provider(const str_view8 topic, const uint16_t partition) {
+        if (const auto it = leaders.find(topic_partition{topic, partition}); it != leaders.end()) {
+                return broker_by_endpoint(it->second.provider);
+        }
+
+        return nullptr;
+}
+#endif
 
 str_view8 TankClient::intern_topic(const str_view8 topic_name) {
         const auto res = topics_intern_map.emplace(topic_name, true);
@@ -797,7 +805,9 @@ bool TankClient::schedule_broker_payload([[maybe_unused]] broker_api_request *br
 // Each created API request is tracked
 // the request id generated is what's passed to the library user
 uint32_t TankClient::track_pending_resp(std::unique_ptr<api_request> req) {
-        static constexpr bool trace{false};
+	enum {
+		trace = false,
+	};
         TANK_EXPECT(req);
         TANK_EXPECT(req->request_id == 0);
         const auto id = next_api_request_id++;
@@ -813,7 +823,7 @@ uint32_t TankClient::track_pending_resp(std::unique_ptr<api_request> req) {
         TANK_EXPECT(res.second);
 
         if (trace) {
-                SLog(ansifmt::bold, ansifmt::bgcolor_green, "SCHEDULING new api request", ansifmt::reset, "\n");
+                SLog(ansifmt::bold, ansifmt::bgcolor_green, "SCHEDULING new api request", ansifmt::reset, " ID=", id, "\n");
         }
 
         return id;
@@ -849,7 +859,9 @@ void TankClient::fail_api_request(std::unique_ptr<api_request> ar) {
 
 // Generate a new payload for each broker_api_request associated with this api_request and schedule them
 uint32_t TankClient::schedule_new_api_req(std::unique_ptr<api_request> api_req) {
-        static constexpr const bool trace{false};
+	enum {
+		trace = false,
+	};
         TANK_EXPECT(!api_req->broker_requests_list.empty());
 
         if (trace) {
@@ -859,8 +871,10 @@ uint32_t TankClient::schedule_new_api_req(std::unique_ptr<api_request> api_req) 
         for (auto it = api_req->broker_requests_list.next; it != &api_req->broker_requests_list; it = it->next) {
                 auto broker_req = containerof(broker_api_request, broker_requests_list_ll, it);
 
-                if (!schedule_broker_req(broker_req)) {
-                        static constexpr const bool trace{false};
+                if (not schedule_broker_req(broker_req)) {
+			enum {
+				trace = false,
+			};
                         // we will need to _fail_ this request
                         //
                         // we have a few options here:
@@ -1053,7 +1067,7 @@ void TankClient::process_undeliverable_broker_req(broker_api_request *br_req, co
                         }
 
                         for (auto br_req : reqs) {
-                                if (!schedule_broker_req(br_req)) {
+                                if (not schedule_broker_req(br_req)) {
                                         while (!br_req->partitions_list.empty()) {
                                                 auto part = containerof(request_partition_ctx, partitions_list_ll, br_req->partitions_list.next);
 
@@ -1117,7 +1131,7 @@ bool TankClient::schedule_req_partitions(api_request *api_req, std::vector<std::
         for (auto it = assign_req_partitions_to_api_req(api_req, contexts); it != &api_req->broker_requests_list; it = it->next) {
                 auto broker_req = containerof(broker_api_request, broker_requests_list_ll, it);
 
-                if (!schedule_broker_req(broker_req)) {
+                if (not schedule_broker_req(broker_req)) {
                         return false;
                 }
         }
@@ -1125,14 +1139,30 @@ bool TankClient::schedule_req_partitions(api_request *api_req, std::vector<std::
         return true;
 }
 
-bool TankClient::schedule_req_partitions(api_request *api_req, request_partition_ctx **l, const size_t cnt) {
-        static constexpr bool                                     trace{false};
+bool TankClient::schedule_req_partitions(api_request *const api_req, request_partition_ctx **l, const size_t cnt) {
+        enum {
+                trace = false,
+        };
         std::vector<std::pair<broker *, request_partition_ctx *>> contexts;
+        const bool                                                as_provider = api_req->type == api_request::Type::Consume and
+                                 (api_req->as.consume.flags & unsigned(ConsumeFlags::prefer_local_node));
 
         // pair each partition with a node (likely the leader)
         for (size_t i{0}; i < cnt; ++i) {
-                auto req_part = l[i];
-                auto broker   = partition_leader(req_part->topic, req_part->partition) ?: any_broker();
+                auto    req_part = l[i];
+                broker *broker;
+
+                if (as_provider) {
+                        broker = partition_provider(req_part->topic, req_part->partition);
+
+                        if (broker) {
+                                goto l1;
+                        }
+                }
+
+                broker = partition_leader(req_part->topic, req_part->partition) ?: any_broker();
+
+        l1:
 
                 if (trace) {
                         SLog("For ", req_part->topic, "/", req_part->partition, " ", broker->ep, "\n");

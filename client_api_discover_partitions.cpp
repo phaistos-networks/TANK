@@ -150,7 +150,7 @@ bool TankClient::process_discover_partitions(connection *const c, const uint8_t 
                                                 SLog("Different leader for ", topic_name, "/", i, " ", ep, "\n");
                                         }
 
-                                        set_leader(topic_name, i, ep);
+                                        set_partition_leader(topic_name, i, ep);
 
                                         req_part->topic     = topic_name;
                                         req_part->partition = i;
@@ -164,7 +164,7 @@ bool TankClient::process_discover_partitions(connection *const c, const uint8_t 
                                         SLog("For partition ", i, " ", first_available_seqnum, ", ", hwmark, "\n");
                                 }
 
-                                set_leader(req_part->topic, i, br_req->br->ep);
+                                set_partition_leader(req_part->topic, i, br_req->br->ep);
                                 all->emplace_back(std::make_pair(i, std::make_pair(first_available_seqnum, hwmark)));
                         }
                 }
@@ -209,7 +209,7 @@ bool TankClient::process_discover_partitions(connection *const c, const uint8_t 
                                                 SLog("New leader for ", req_part->topic, "/", req_part->partition, " ", Switch::endpoint{addr4, port}, "\n");
                                         }
 
-                                        set_leader(req_part->topic, partition, {addr4, port});
+                                        set_partition_leader(req_part->topic, partition, {addr4, port});
                                         retry.emplace_back(req_part);
                                 } else {
                                         IMPLEMENT_ME();
@@ -219,7 +219,7 @@ bool TankClient::process_discover_partitions(connection *const c, const uint8_t 
                                         SLog("For ", req_part->topic, "/", req_part->partition, " {", first_available_seqnum, ", ", hwmark, "}\n");
                                 }
 
-                                set_leader(req_part->topic, partition, br_req->br->ep);
+                                set_partition_leader(req_part->topic, partition, br_req->br->ep);
                                 all->emplace_back(std::make_pair(partition, std::make_pair(first_available_seqnum, hwmark)));
 
                                 api_req->ready_partitions_list.push_back(it);

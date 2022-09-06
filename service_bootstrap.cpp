@@ -29,7 +29,7 @@ int Service::start(int argc, char **argv) {
         Switch::trapCommonUnexpectedSignals();
 #endif
 
-        if (argc > 1 && !strcmp(argv[1], "verify")) {
+        if (argc > 1 and !strcmp(argv[1], "verify")) {
                 // https://github.com/phaistos-networks/TANK/wiki/Managing-Segments-files
                 return verify(argv + 2, argc - 2);
         }
@@ -54,10 +54,10 @@ int Service::start(int argc, char **argv) {
                                         cluster_name.set_end(p);
                                 }
 
-                                if (!id_repr || !id_repr.all_of_digits()) {
+                                if (!id_repr or !id_repr.all_of_digits()) {
                                         Print("Invalid cluster ID\n");
                                         return 1;
-                                } else if (!cluster_name || cluster_name.size() > 32) {
+                                } else if (!cluster_name or cluster_name.size() > 32) {
                                         Print("Invalid cluster name\n");
                                         return 1;
                                 }
@@ -91,7 +91,7 @@ int Service::start(int argc, char **argv) {
                                         Print(ansifmt::color_red, "Failed to access tank_consul.token: ", ansifmt::reset, strerror(errno), "\n");
                                         Print("The consul agent API token should be stored in that file so that interfacing with the Consul Cluster can be accomplished.\n");
                                         return 1;
-                                } else if (const auto file_size = lseek(fd, 0, SEEK_END); file_size == 0 || file_size > 64) {
+                                } else if (const auto file_size = lseek(fd, 0, SEEK_END); file_size == 0 or file_size > 64) {
                                         TANKUtil::safe_close(fd);
                                         Print("Not valid consul agent API token found in tank_consul.token.\n");
                                         Print("That file should only contain a valid consul API token\n");
@@ -132,7 +132,7 @@ int Service::start(int argc, char **argv) {
 
                         case 'l':
                                 tank_listen_ep = Switch::ParseSrvEndpoint(str_view32::make_with_cstr(optarg), _S8("tank"), 11011);
-                                if (!tank_listen_ep) {
+                                if (not tank_listen_ep) {
                                         Print("Failed to parse endpoint from ", optarg, "\n");
                                         return 1;
                                 }
@@ -165,10 +165,10 @@ int Service::start(int argc, char **argv) {
                 }
         }
 
-        if (!tank_listen_ep) {
+        if (not tank_listen_ep) {
                 Print("Listen address not specified. Use -l address to specify it\n");
                 return 1;
-        } else if (cluster_aware() && tank_listen_ep.addr4 == INADDR_ANY) {
+        } else if (cluster_aware() and tank_listen_ep.addr4 == INADDR_ANY) {
                 Print("Expected address:port for cluster aware TANK mode\n");
                 return 1;
         }
@@ -258,7 +258,7 @@ int Service::start(int argc, char **argv) {
                                                                 cleanupCheckpoints.push_back({{{a.CopyOf(topicName.p, topicName.len), topicName.len}, partition}, seqNum});
                                                         }
                                                 }
-                                        } else if (name == "."_s8 || name == ".."_s8) {
+                                        } else if (name == "."_s8 or name == ".."_s8) {
                                                 continue;
                                         } else {
                                                 struct stat64 st;
@@ -276,7 +276,7 @@ int Service::start(int argc, char **argv) {
                                                         }
                                                 } else {
                                                         if (name.front() == '.') {
-                                                                if (false && false == read_only) {
+                                                                if (false and false == read_only) {
                                                                         Print(ansifmt::color_red, "Found stray topic '", name, "'. Will attempt to delete it", ansifmt::reset, "\n");
                                                                         rm_tankdir(fullPath);
                                                                 } else {
@@ -313,7 +313,7 @@ int Service::start(int argc, char **argv) {
                                         const auto len  = basePath_.size();
 
                                         if (stat64(path, &st) == -1) {
-#if defined(TANK_THROW_SWITCH_EXCEPTIONS) || __cplusplus <= 201703L
+#if defined(TANK_THROW_SWITCH_EXCEPTIONS) or __cplusplus <= 201703L
                                                 throw Switch::system_error("stat(", str_view32(path, len), ") failed:", strerror(errno));
 #else
                                                 throw std::filesystem::filesystem_error(std::string{}
@@ -359,7 +359,7 @@ int Service::start(int argc, char **argv) {
 
                                                 try {
                                                         if (partitionsCnt) {
-                                                                if (min != 0 && max != partitionsCnt - 1) {
+                                                                if (min != 0 and max != partitionsCnt - 1) {
                                                                         throw Switch::system_error("Unexpected partitions list; expected [0, ", partitionsCnt - 1, "]");
                                                                 }
 
@@ -372,7 +372,7 @@ int Service::start(int argc, char **argv) {
                                                         } else {
                                                                 path[len] = '\0'; // this is important
 
-                                                                if (false && false == read_only) {
+                                                                if (false and false == read_only) {
                                                                         Print(ansifmt::color_red, "No partions found in ", path,
                                                                               ": Will delete topic", ansifmt::reset, "\n");
 

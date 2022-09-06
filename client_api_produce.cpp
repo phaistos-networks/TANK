@@ -238,7 +238,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                         if (err == 0) {
                                 // OK
                                 req_part->partitions_list_ll.detach_and_reset();
-                                set_leader(req_part->topic, req_part->partition, br_req->br->ep);
+                                set_partition_leader(req_part->topic, req_part->partition, br_req->br->ep);
 
                                 api_req->ready_partitions_list.push_back(&req_part->partitions_list_ll);
 
@@ -283,7 +283,7 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
                                         SLog("New Leader ", new_leader, "\n");
                                 }
 
-                                set_leader(req_part->topic, req_part->partition, new_leader);
+                                set_partition_leader(req_part->topic, req_part->partition, new_leader);
                                 retry.emplace_back(req_part);
                         } else if (err == 0x2) {
                                 // I/O
@@ -293,9 +293,13 @@ bool TankClient::process_produce(connection *const c, const uint8_t *const conte
 
                                 any_faults = true;
                         } else if (err == 0x3) {
-                                // unable to get acks.
+                                // unable to get acks. from all other nodes
+				// TODO: we should perhaps retry it
+                                capture_system_fault(api_req, req_part->topic, req_part->partition);
+
+                                discard_request_partition_ctx(api_req, req_part);
+
                                 any_faults = true;
-                                IMPLEMENT_ME();
                         } else if (err == 0x4) {
                                 // insufficient replicas - cannot service the produce request
                                 capture_insuficient_replicas(api_req, req_part->topic, req_part->partition);

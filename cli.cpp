@@ -163,7 +163,7 @@ int main(int argc, char *argv[]) {
                                 break;
 
                         case 't': {
-				const auto s= str_view32::make_with_cstr(optarg);
+                                const auto s = str_view32::make_with_cstr(optarg);
 
                                 topic.clear();
 
@@ -196,7 +196,7 @@ int main(int argc, char *argv[]) {
                         } break;
 
                         case 'p': {
-				const auto s = str_view32::make_with_cstr(optarg);
+                                const auto s = str_view32::make_with_cstr(optarg);
 
                                 if (!s.IsDigits()) {
                                         Print("Invalid partition '", s, "'. Expected numeric id from 0 upto ", UINT16_MAX, "\n");
@@ -250,8 +250,8 @@ int main(int argc, char *argv[]) {
         argv += optind;
 
         try {
-		if (not endpoint.empty()) {
-                        tank_client.set_default_leader(endpoint.AsS32());
+                if (not endpoint.empty()) {
+                        tank_client.set_default_leader(endpoint.as_s32());
                 } else {
                         // By default, access local instance
                         tank_client.set_default_leader(":11011"_s32);
@@ -271,7 +271,7 @@ int main(int argc, char *argv[]) {
                 return 1;
         }
 
-	const auto cmd = str_view32::make_with_cstr(argv[0]);
+        const auto cmd = str_view32::make_with_cstr(argv[0]);
 
         if (topic.empty()) {
                 if (not cmd.Eq(_S("status")) and
@@ -343,9 +343,10 @@ int main(int argc, char *argv[]) {
                         TS,
                         TS_MS,
                         Size,
-			TimeSince,
+                        TimeSince,
                 };
                 uint8_t    displayFields{1u << uint8_t(Fields::Content)};
+                bool       no_output = false;
                 size_t     defaultMinFetchSize{128 * 1024 * 1024};
                 uint32_t   pendingResp{0};
                 bool       statsOnly{false}, asKV{false};
@@ -356,15 +357,20 @@ int main(int argc, char *argv[]) {
                 str_view32 filter;
                 uint64_t   msgs_limit   = std::numeric_limits<uint64_t>::max();
                 auto       minFetchSize = defaultMinFetchSize;
+                uint8_t    op_flags     = 0;
 
                 if (1 == argc) {
                         goto help_get;
                 }
 
                 optind = 0;
-                while ((r = getopt(argc, argv, "+SF:hBT:KdE:s:f:l:LZ:")) != -1) {
+                while ((r = getopt(argc, argv, "+SF:hBT:KdE:s:f:l:LZ:P")) != -1) {
                         switch (r) {
-				case 'Z':
+                                case 'P':
+                                        op_flags |= unsigned(ConsumeFlags::prefer_local_node);
+                                        break;
+
+                                case 'Z':
                                         minFetchSize = str_view32::make_with_cstr(optarg).as_uint32();
                                         break;
 
@@ -423,8 +429,12 @@ int main(int argc, char *argv[]) {
 
                                 case 'F':
                                         displayFields = 0;
+
                                         for (const auto it : strwlen32_t::make_with_cstr(optarg).Split(',')) {
-                                                if (it.Eq(_S("seqnum"))) {
+                                                if (it.Eq(_S("ignore"))) {
+                                                        no_output = true;
+                                                        break;
+                                                } else if (it.Eq(_S("seqnum"))) {
                                                         displayFields |= 1u << uint8_t(Fields::SeqNum);
                                                 } else if (it.Eq(_S("key"))) {
                                                         displayFields |= 1u << uint8_t(Fields::Key);
@@ -457,6 +467,9 @@ int main(int argc, char *argv[]) {
                                         Print(Buffer{}.append(align_to(3), "-S"_s32), "\n");
                                         Print(Buffer{}.append(left_aligned(5, "Displays statistics about retrieved messages instead of the messages themselves"_s32, 76)), "\n\n");
 
+                                        Print(Buffer{}.append(align_to(3), "-P"_s32), "\n");
+                                        Print(Buffer{}.append(left_aligned(5, "Prefers local node for consume requests"_s32, 76)), "\n\n");
+
                                         Print(Buffer{}.append(align_to(3), "-l <limit>"_s32), "\n");
                                         Print(Buffer{}.append(left_aligned(5, "Limit number of messages output"_s32, 76)), "\n\n");
 
@@ -488,7 +501,7 @@ int main(int argc, char *argv[]) {
                         Print("Expected <sequence-number> with _no additional_arguments_  to begin consuming from. Please see ", app, " consume -h\n");
                         return 1;
                 } else {
-			const auto from = str_view32::make_with_cstr(argv[0]);
+                        const auto from = str_view32::make_with_cstr(argv[0]);
 
                         if (from.EqNoCase(_S("beginning")) || from.Eq(_S("first")))
                                 next = 0;
@@ -502,11 +515,14 @@ int main(int argc, char *argv[]) {
                         }
                 }
 
+
                 size_t totalMsgs{0}, sumBytes{0};
 
                 if (const auto seek_ts = time_range.offset) {
-                        static constexpr bool trace{false};
-                        const auto            before = Timings::Microseconds::Tick();
+                        enum {
+                                trace = false,
+                        };
+                        const auto before = Timings::Microseconds::Tick();
 
                         try {
                                 next = tank_client.sequence_number_by_event_time(topicPartition, seek_ts, 5 * 60 * 100);
@@ -520,21 +536,23 @@ int main(int argc, char *argv[]) {
                         }
                 }
 
-                const auto b = Timings::Microseconds::Tick();
-		unsigned nwfaults_reries = 0;
+                const auto  b               = Timings::Microseconds::Tick();
+                std::size_t nwfaults_reries = 0;
 
                 for (const auto time_range_end = time_range.offset + time_range.size();;) {
-                        if (!pendingResp) {
+                        if (0 == pendingResp) {
                                 if (verbose) {
-                                        Print("Requesting from ", next, " ", minFetchSize, "\n");
+                                        Print("Requesting from ", next, " ", minFetchSize, ", op_flags = ", op_flags, "\n");
                                 }
 
-                                pendingResp = tank_client.consume({{topicPartition,
-                                                                    {next, minFetchSize}}},
-                                                                  drain_and_exit ? 0 : std::numeric_limits<uint32_t>::max(),
-                                                                  0);
+                                pendingResp = tank_client.consume_from(topicPartition,
+                                                                       next,
+                                                                       minFetchSize,
+                                                                       drain_and_exit ? 0 : std::numeric_limits<uint32_t>::max(),
+                                                                       0,
+                                                                       op_flags);
 
-                                if (!pendingResp) {
+                                if (0 == pendingResp) {
                                         Print("Unable to issue consume request. Will abort\n");
                                         return 1;
                                 }
@@ -596,8 +614,8 @@ int main(int argc, char *argv[]) {
                                 }
 
                                 if (statsOnly) {
-					if (not filter) {
-                                        	Print(">> ", dotnotation_repr(it.msgs.size()), " messages\n");
+                                        if (not filter) {
+                                                Print(">> ", dotnotation_repr(it.msgs.size()), " messages\n");
                                         } else {
                                                 std::size_t n = 0;
 
@@ -717,45 +735,49 @@ int main(int argc, char *argv[]) {
                                                         should_abort = true;
                                                         break;
                                                 } else if (time_range.Contains(m->ts)) {
-                                                        if (filter && !m->content.Search(filter.data(), filter.size())) {
+                                                        if (filter and not m->content.Search(filter.data(), filter.size())) {
                                                                 continue;
                                                         }
 
-                                                        if (asKV) {
-                                                                buf.append(m->seqNum, " [", m->key, "] = [", m->content, "]");
-                                                        } else if (displayFields) {
-                                                                if (displayFields & (1u << uint8_t(Fields::TS))) {
-                                                                        buf.append(Date::ts_repr(Timings::Milliseconds::ToSeconds(m->ts)), ':');
-                                                                }
+                                                        if (no_output) {
+								//
+                                                        } else {
+                                                                if (asKV) {
+                                                                        buf.append(m->seqNum, " [", m->key, "] = [", m->content, "]");
+                                                                } else if (displayFields) {
+                                                                        if (displayFields & (1u << uint8_t(Fields::TS))) {
+                                                                                buf.append(Date::ts_repr(Timings::Milliseconds::ToSeconds(m->ts)), ':');
+                                                                        }
 
-                                                                if (displayFields & (1u << uint8_t(Fields::TS_MS))) {
-                                                                        buf.append(m->ts, ':');
-                                                                }
+                                                                        if (displayFields & (1u << uint8_t(Fields::TS_MS))) {
+                                                                                buf.append(m->ts, ':');
+                                                                        }
 
-                                                                if (displayFields & (1u << uint8_t(Fields::SeqNum))) {
-                                                                        buf.append("seq=", m->seqNum, ':');
-                                                                }
+                                                                        if (displayFields & (1u << uint8_t(Fields::SeqNum))) {
+                                                                                buf.append("seq=", m->seqNum, ':');
+                                                                        }
 
-                                                                if (displayFields & (1u << uint8_t(Fields::Size))) {
-                                                                        buf.append("size=", m->content.size(), ':');
-                                                                }
+                                                                        if (displayFields & (1u << uint8_t(Fields::Size))) {
+                                                                                buf.append("size=", m->content.size(), ':');
+                                                                        }
 
-                                                                if (displayFields & (1u << unsigned(Fields::Key))) {
-                                                                        buf.append('[', m->key, "]:"_s32);
-                                                                }
+                                                                        if (displayFields & (1u << unsigned(Fields::Key))) {
+                                                                                buf.append('[', m->key, "]:"_s32);
+                                                                        }
 
-                                                                if (displayFields & (1u << uint8_t(Fields::Content))) {
+                                                                        if (displayFields & (1u << uint8_t(Fields::Content))) {
+                                                                                buf.append(m->content);
+                                                                        }
+
+                                                                        if (displayFields & (1u << uint8_t(Fields::TimeSince))) {
+                                                                                buf.append(duration_repr(Timings::Milliseconds::ToMicros(Timings::Milliseconds::SysTime() - m->ts)));
+                                                                        }
+                                                                } else {
                                                                         buf.append(m->content);
                                                                 }
 
-								if (displayFields & (1u << uint8_t(Fields::TimeSince))) {
-									buf.append(duration_repr(Timings::Milliseconds::ToMicros(Timings::Milliseconds::SysTime() - m->ts)));
-								}
-                                                        } else {
-                                                                buf.append(m->content);
+                                                                buf.append('\n');
                                                         }
-
-                                                        buf.append('\n');
 
                                                         if (++totalMsgs == msgs_limit) {
                                                                 break;
@@ -765,11 +787,11 @@ int main(int argc, char *argv[]) {
 
                                         if (auto s = buf.as_s32()) {
                                                 if (respect_lbs) {
-							// this _may_ be important for some programs
-							// that may expect to always read termined lines from stdin
-							// as opposed to input that doesn't terminate in a new line
-							// see setbuf(), setvbuf()
-							static constexpr size_t threshold= 8192;
+                                                        // this _may_ be important for some programs
+                                                        // that may expect to always read termined lines from stdin
+                                                        // as opposed to input that doesn't terminate in a new line
+                                                        // see setbuf(), setvbuf()
+                                                        static constexpr size_t threshold = 8192;
 
                                                         while (s) {
                                                                 const auto *p    = s.data();
@@ -808,7 +830,7 @@ int main(int argc, char *argv[]) {
                                         }
                                 }
 
-				//SLog("Current = ", next, " ", it.next.seq_num, " ", minFetchSize, " ", it.next.min_fetch_size, "\n");
+                                // SLog("Current = ", next, " ", it.next.seq_num, " ", minFetchSize, " ", it.next.min_fetch_size, "\n");
 
                                 minFetchSize = std::max<std::size_t>(it.next.min_fetch_size, minFetchSize);
                                 next         = it.next.seq_num;
@@ -863,7 +885,7 @@ int main(int argc, char *argv[]) {
                                 return 0;
                         }
 
-			Print("Cluster name:", res.cluster_name, "\n");
+                        Print("Cluster name:", res.cluster_name, "\n");
                         Print(Buffer{}.append("ID"_s32, align_to(8), "Available"_s32, align_to(20), "Blocked"_s32, align_to(32), "Endpoint"_s32, "\n"));
 
                         for (std::size_t i = 0; i < res.nodes.size; ++i) {
@@ -892,12 +914,12 @@ int main(int argc, char *argv[]) {
                 argc -= optind;
                 argv += optind;
 
-		const auto req_id = tank_client.discover_topics();
+                const auto req_id = tank_client.discover_topics();
 
-		if (0 == req_id) {
-			Print("Unable to schedule request\n");
-			return 1;
-		}
+                if (0 == req_id) {
+                        Print("Unable to schedule request\n");
+                        return 1;
+                }
 
                 while (tank_client.should_poll()) {
                         tank_client.poll();
@@ -965,13 +987,13 @@ int main(int argc, char *argv[]) {
                                         Print(Buffer{}.append("Cluster"_s32, align_to(32), str_view32(it.cluster_name.data, it.cluster_name.len)), "\n");
                                 }
 
-				if (const auto v = it.startup_ts) {
+                                if (const auto v = it.startup_ts) {
                                         Print(Buffer{}.append("Startup"_s32, align_to(32), Date::ts_repr(v)), "\n");
-				}
+                                }
 
-				if (const auto v = it.version) {
+                                if (const auto v = it.version) {
                                         Print(Buffer{}.append("Version"_s32, align_to(32), v / 100, '.', v % 100), "\n");
-				}
+                                }
                         }
                 }
 
@@ -1017,7 +1039,7 @@ int main(int argc, char *argv[]) {
                         return 1;
                 }
 
-		const auto s = str_view32::make_with_cstr(argv[0]);
+                const auto s = str_view32::make_with_cstr(argv[0]);
 
                 if (!s.IsDigits() || s.AsUint32() > UINT16_MAX || !s.AsUint32()) {
                         Print("Invalid total partitions specified\n");
@@ -1758,7 +1780,7 @@ int main(int argc, char *argv[]) {
                                 for (;;) {
                                         if (content.capacity() < 8192) {
                                                 content.reserve(65536);
-					}
+                                        }
 
                                         const auto r = read(fd, content.end(), content.capacity());
 
@@ -1886,7 +1908,7 @@ int main(int argc, char *argv[]) {
                         return 1;
                 }
 
-		const auto type = str_view32::make_with_cstr(argv[0]);
+                const auto type = str_view32::make_with_cstr(argv[0]);
 
                 if (type.Eq(_S("p2c"))) {
                         // Measure latency when publishing from publisher to broker and from broker to consume

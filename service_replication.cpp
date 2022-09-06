@@ -169,7 +169,7 @@ void Service::try_abort_replication(topic_partition *p, cluster_node *src, const
                         SLog("Replication stream available for partition\n");
                 }
 
-                if (!stream->src || stream->src != src) {
+                if (!stream->src or stream->src != src) {
                         // this is fine
                         // instead of checking if `src` is the lader of `p` before invoking this method, we can cheaply
                         // guard against that here
@@ -299,7 +299,7 @@ const std::vector<topic_partition *> *Service::partitions_to_replicate_from(clus
 
                 // sort it so that replicate_from() can use this
                 std::sort(v->begin(), v->end(), [](const auto a, const auto b) noexcept {
-                        return a->owner < b->owner || (a->owner == b->owner && a->idx < b->idx);
+                        return a->owner < b->owner or (a->owner == b->owner and a->idx < b->idx);
                 });
 
                 n->leadership.dirty = false;
@@ -346,7 +346,7 @@ bool Service::try_generate_produce_response(produce_response *pr) {
 
         auto c = pr->client_ctx.ch.get();
 
-        if (!c || -1 == c->fd) {
+        if (!c or -1 == c->fd) {
                 // client connection went away already
                 // will check for (-1 == c->fd) because this may have been invoked in cleanup_connection()
                 if (trace) {
@@ -791,7 +791,7 @@ void Service::peer_consumed_local_partition(topic_partition *p, cluster_node *pe
                      "Peer ", peer->id, "@", peer->ep, " consumed content from ", p->owner->name(), "/", p->idx, " at ", seq_num, ", last = ", last, ansifmt::reset, "\n");
         }
 
-        if (!p->cluster.replicas.count(peer->id)) {
+        if (not p->cluster.replicas.count(peer->id)) {
                 // peer who consumed is not a replica for this partition
                 if (trace) {
                         SLog("Unexpected CONSUME from node that is not in the partition's ISR\n");
@@ -799,6 +799,8 @@ void Service::peer_consumed_local_partition(topic_partition *p, cluster_node *pe
 
                 return;
         }
+
+        isr_entry *isr_e{nullptr};
 
         // manage this partition's ISR
         // it's important that we first deal with ISR and then with pending produce responses
@@ -811,10 +813,11 @@ void Service::peer_consumed_local_partition(topic_partition *p, cluster_node *pe
                         SLog("Peer hasn't caught up yet because (seq_num(", seq_num, ") <= last(", last, "))\n");
                 }
 
-                goto l1;
+		//2022-08-18: now just returning instead of goto l11;
+                //WAS: goto l1;
+		return;
         }
 
-        isr_entry *isr_e;
 
         if ((isr_e = p->cluster.isr.find(peer))) {
                 // peer is already in this partition's ISR
@@ -849,6 +852,9 @@ void Service::peer_consumed_local_partition(topic_partition *p, cluster_node *pe
                 isr_e = isr_bind(p, peer, __LINE__);
 #endif
 
+		TANK_EXPECT(isr_e);
+
+
                 persist_isr(p, __LINE__);
 
 #ifndef HWM_UPDATE_BASED_ON_ACKS
@@ -860,6 +866,9 @@ void Service::peer_consumed_local_partition(topic_partition *p, cluster_node *pe
 
 l1:
         // deal with any pending produce responses
+	TANK_EXPECT(isr_e);
+
+
         consider_pending_client_produce_responses(isr_e, p, peer, seq_num);
 }
 
@@ -891,6 +900,10 @@ void Service::persist_peer_partitions_content(topic_partition *const partition, 
         auto                        &cb{cb_tls};
 
         TANK_EXPECT(partition);
+
+	if (trace) {
+		SLog("Persist ", dotnotation_repr(cnt), "  msgs for ", partition->owner->name(), "/", partition->idx, "\n");
+	}
 
         if (0 == cnt) {
                 return;
@@ -971,14 +984,14 @@ void Service::persist_peer_partitions_content(topic_partition *const partition, 
                         do {
                                 const auto &m                     = *p;
                                 uint8_t     flags                 = m.key ? static_cast<uint8_t>(TankFlags::BundleMsgFlags::HaveKey) : 0;
-                                const auto  use_last_specified_ts = p != first_msg && m.ts == p[-1].ts;
+                                const auto  use_last_specified_ts = p != first_msg and m.ts == p[-1].ts;
                                 uint32_t    delta;
 
                                 if (use_last_specified_ts) {
                                         flags |= static_cast<uint8_t>(TankFlags::BundleMsgFlags::UseLastSpecifiedTS);
                                 }
 
-                                if (as_sparse && p != first_msg && p != last_msg) {
+                                if (as_sparse and p != first_msg and p != last_msg) {
                                         delta = m.seqNum - p[-1].seqNum - 1;
 
                                         if (!delta) {
@@ -1021,14 +1034,14 @@ void Service::persist_peer_partitions_content(topic_partition *const partition, 
                         do {
                                 const auto &m                     = *p;
                                 uint8_t     flags                 = m.key ? static_cast<uint8_t>(TankFlags::BundleMsgFlags::HaveKey) : 0;
-                                const auto  use_last_specified_ts = p != first_msg && m.ts == p[-1].ts;
+                                const auto  use_last_specified_ts = p != first_msg and m.ts == p[-1].ts;
                                 uint32_t    delta;
 
                                 if (use_last_specified_ts) {
                                         flags |= static_cast<uint8_t>(TankFlags::BundleMsgFlags::UseLastSpecifiedTS);
                                 }
 
-                                if (as_sparse && p != first_msg && p != last_msg) {
+                                if (as_sparse and p != first_msg and p != last_msg) {
                                         delta = m.seqNum - p[-1].seqNum - 1;
 
                                         if (!delta) {
@@ -1063,12 +1076,15 @@ void Service::persist_peer_partitions_content(topic_partition *const partition, 
                         SLog(ansifmt::bold, ansifmt::color_brown, "Generated bundle of ", msgset_msgs_cnt, " size ", size_repr(b->size()), ansifmt::reset, "\n");
                 }
 
-                const auto res = log->append_bundle(curTime,
+                auto res = log->append_bundle(curTime,
                                                     reinterpret_cast<const uint8_t *>(b->data()), b->size(),
                                                     msgset_msgs_cnt,
                                                     msgset_first_seq_num, msgset_last_seq_num);
 
-                if (!res.fdh) {
+
+
+
+                if (not res.fdh) {
                         if (res.dataRange.size() == std::numeric_limits<uint32_t>::max()) {
                                 // invalid request(offsets)
                                 IMPLEMENT_ME();
@@ -1078,6 +1094,24 @@ void Service::persist_peer_partitions_content(topic_partition *const partition, 
                         }
                 } else {
                         // success
+
+#ifdef TANK_SUPPORT_CONSUME_FLAGS
+                        // 2022-08-18: PARTITION_PROVIDER
+                        now_awake.clear();
+                        consider_append_res(partition, res, &now_awake);
+
+			if (trace) {
+				SLog(ansifmt::color_blue, ansifmt::inverse, "now_awake.size() = ", now_awake.size(), ansifmt::reset, "\n");
+			}
+
+			for (auto ctx : now_awake) {
+				wakeup_wait_ctx(ctx, nullptr);
+			}
+
+                        now_awake.clear();
+#endif
+
+
                 }
         }
 }
@@ -1113,7 +1147,7 @@ bool Service::process_peer_consume_resp(connection *const c, const uint8_t *p, c
         c->as.consumer.state = connection::As::Consumer::State::Idle;
 
 #pragma mark BEGIN
-        for (size_t i{0}; i < topics_cnt; ++i) {
+        for (std::size_t i{0}; i < topics_cnt; ++i) {
                 const auto      len = decode_pod<uint8_t>(p);
                 const str_view8 topic_name(reinterpret_cast<const char *>(p), len);
                 p += len;
@@ -1166,7 +1200,7 @@ bool Service::process_peer_consume_resp(connection *const c, const uint8_t *p, c
                                 // but P doesn't yet know it is the leader.
                                 //
                                 // We will just try again
-                                if (trace || true) {
+                                if (trace or true) {
                                         SLog("No leader yet for ", topic_name, "/", partition_id, " (reported by ", peer->id, "@", peer->ep, ")\n");
                                 }
 
@@ -1234,12 +1268,12 @@ bool Service::process_peer_consume_resp(connection *const c, const uint8_t *p, c
                                 TANK_EXPECT(partition);
                                 partition->cluster.consume_next_lsn = next;
 
-                                if (trace || true) {
+                                if (trace or true) {
                                         SLog("At ", Date::ts_repr(time(nullptr)), ": Boundary check fault, requested_seqnum = ", requested_seqnum, ", first_avail_seqnum = ", first_avail_seqnum, ", highwater_mark = ", highwater_mark, ", next time we will consume from ", next, "\n");
                                 }
 
                                 continue;
-                        } else if (err_flags && err_flags < 0xfe) {
+                        } else if (err_flags and err_flags < 0xfe) {
                                 // other type of fault
                                 IMPLEMENT_ME();
                                 continue;
@@ -1341,7 +1375,7 @@ bool Service::process_peer_consume_resp(connection *const c, const uint8_t *p, c
                                 }
                                 // END: bundle header
 
-                                if (requested_seqnum < std::numeric_limits<uint64_t>::max() && requested_seqnum >= msgset_end) {
+                                if (requested_seqnum < std::numeric_limits<uint64_t>::max() and requested_seqnum >= msgset_end) {
                                         // fast path: skip this bundle
                                         p               = bundle_end;
                                         log_base_seqnum = msgset_end;
@@ -1398,14 +1432,14 @@ bool Service::process_peer_consume_resp(connection *const c, const uint8_t *p, c
                                 }
 
                                 for (const auto *p = msgset_content.offset, *const msgset_end = p + msgset_content.size();; ++msg_idx, ++log_base_seqnum) {
-                                        if (!codec && any_captured) {
+                                        if (!codec and any_captured) {
                                                 // this makes sense because we didn't need to decompress the bundle
                                                 need_upto = p + 256;
                                         }
 
                                         if (unlikely(p + sizeof(uint8_t) > msgset_end)) {
                                                 // likely hit end of the message set
-                                                if (trace && p != msgset_end) {
+                                                if (trace and p != msgset_end) {
                                                         SLog("Unable to decode msg_flags\n");
                                                 }
 
@@ -1451,7 +1485,7 @@ bool Service::process_peer_consume_resp(connection *const c, const uint8_t *p, c
                                         }
 
                                         if (msg_flags & unsigned(TankFlags::BundleMsgFlags::HaveKey)) {
-                                                if (unlikely(p + sizeof(uint8_t) > msgset_end || (p + *p + sizeof(uint8_t) > msgset_end))) {
+                                                if (unlikely(p + sizeof(uint8_t) > msgset_end or (p + *p + sizeof(uint8_t) > msgset_end))) {
                                                         if (trace) {
                                                                 SLog("Not Enough Content Available\n");
                                                         }
@@ -1476,7 +1510,7 @@ bool Service::process_peer_consume_resp(connection *const c, const uint8_t *p, c
                                         const auto len = Compression::decode_varuint32(p);
 
                                         if (const auto e = p + len; e > msgset_end) {
-                                                if (!codec && any_captured) {
+                                                if (!codec and any_captured) {
                                                         // see above
                                                         need_upto = e + 256;
                                                 }

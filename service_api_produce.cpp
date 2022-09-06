@@ -9,8 +9,11 @@
 // each value is a pair of (wait_ctx, uint8_t), the second being the index in wait_ctx::partitions[]
 // so we can't have the same partition more than once there.
 bool Service::process_produce(const TankAPIMsgType msg, connection *const c, const uint8_t *p, const size_t len) {
-        static constexpr bool trace{false};
-	static constexpr bool trace_faults{false};
+	enum {
+		trace = false,
+		trace_faults = false,
+	};
+
         if (unlikely(len < sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint8_t))) {
                 return shutdown(c);
         }
@@ -219,7 +222,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                         const auto total_required_acks = required_acks + 1; // +1 for this node
 
                         if (required_acks > 200 /* XXX: */) {
-                                if (trace || trace_faults) {
+                                if (trace == true or trace_faults == true) {
                                         SLog("Cannot service request, required_acks = ", required_acks, "\n");
                                 }
 
@@ -227,7 +230,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                                 continue;
                         } else if (total_required_acks > topic->cluster.rf_) {
                                 // See comments in DEFERRED_REPAIRS
-                                if (trace || trace_faults) {
+                                if (trace == true or trace_faults == true) {
                                         SLog("Cannot service request, (total_required_acks=", total_required_acks, ") > (topic.cluster.rf = ",
                                              topic->cluster.rf_, "), isr size = ", partition->cluster.isr.size(),
                                              ", replicas = ", partition->cluster.replicas.nodes.size(), "\n");
@@ -236,7 +239,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                                 it.res = produce_response::participant::OpRes::InsufficientReplicas;
                                 continue;
                         } else if (const auto isr_size = partition->cluster.isr.size(); total_required_acks > isr_size) {
-                                if (trace || trace_faults) {
+                                if (trace == true or trace_faults == true) {
                                         SLog("Cannot service request, total_required_acks = ", total_required_acks, ", isr_size = ", isr_size, "\n");
                                 }
 
@@ -321,7 +324,7 @@ bool Service::process_produce(const TankAPIMsgType msg, connection *const c, con
                                 it.res = produce_response::participant::OpRes::InvalidSeqNums;
                                 continue;
                         }
-                } else if (first_msg_seq_num && first_msg_seq_num <= partition_hwmark(partition)) {
+                } else if (first_msg_seq_num and first_msg_seq_num <= partition_hwmark(partition)) {
                         if (trace) {
                                 SLog("Invalid seqnum\n");
                         }

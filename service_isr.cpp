@@ -57,6 +57,8 @@ isr_entry *Service::isr_bind(topic_partition *p, cluster_node *peer, const uint8
 #endif
 
         // you are supposed to persist_isr()
+	TANK_EXPECT(isr_e);
+
         return isr_e;
 }
 #else
@@ -110,6 +112,9 @@ isr_entry *Service::isr_bind(topic_partition *p, cluster_node *peer, const uint3
 #endif
 
         // you are supposed to persist_isr()
+	TANK_EXPECT(isr_e);
+
+
         return isr_e;
 }
 #endif

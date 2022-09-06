@@ -259,17 +259,17 @@ void TankClient::reset(const bool dtor_context) {
         }
 }
 
-void TankClient::set_leader(const str_view8 topic, const uint16_t partition, const str_view32 endpoint) {
+void TankClient::set_partition_leader(const str_view8 topic, const uint16_t partition, const str_view32 endpoint) {
         const auto e = Switch::ParseSrvEndpoint(endpoint, {_S("tank")}, 11011);
 
         if (not e) [[unlikely]] {
                 throw Switch::data_error("Unable to parse leader endpoint");
         }
 
-        set_leader(topic, partition, e);
+        set_partition_leader(topic, partition, e);
 }
 
-void TankClient::set_leader(const str_view8 topic, const uint16_t partition, const Switch::endpoint e) {
+void TankClient::set_partition_leader(const str_view8 topic, const uint16_t partition, const Switch::endpoint e) {
         enum {
                 trace = false,
         };
@@ -278,13 +278,61 @@ void TankClient::set_leader(const str_view8 topic, const uint16_t partition, con
                 SLog(ansifmt::bold, ansifmt::color_brown, "Setting leader for [", topic, "/", partition, "] to ", e, ansifmt::reset, "\n");
         }
 
-        leaders[topic_partition{topic, partition}] = e;
+        const auto res   = leaders.emplace(topic_partition(topic, partition), partition_nodes{});
+        auto      &nodes = res.first->second;
+
+        nodes.leader = e;
+        if (not nodes.provider) {
+                nodes.provider = e;
+        }
 }
+
+
+#ifdef TANK_SUPPORT_CONSUME_FLAGS
+void TankClient::set_partition_provider(const str_view8 topic, const uint16_t partition, const str_view32 endpoint) {
+        const auto e = Switch::ParseSrvEndpoint(endpoint, {_S("tank")}, 11011);
+
+        if (not e) [[unlikely]] {
+                throw Switch::data_error("Unable to parse leader endpoint");
+        }
+
+        set_partition_provider(topic, partition, e);
+}
+
+void TankClient::set_partition_provider(const str_view8 topic, const uint16_t partition, const Switch::endpoint e) {
+        enum {
+                trace = false,
+        };
+
+        if (trace) {
+                SLog(ansifmt::bold, ansifmt::color_brown, "Setting provider for [", topic, "/", partition, "] to ", e, ansifmt::reset, "\n");
+        }
+
+        const auto res   = leaders.emplace(topic_partition(topic, partition), partition_nodes{});
+        auto      &nodes = res.first->second;
+
+        nodes.provider = e;
+
+        if (not nodes.leader) {
+                nodes.leader = e;
+        }
+}
+#endif
 
 Switch::endpoint TankClient::leader_for(const str_view8 topic, const uint16_t partition) {
         if (const auto it = leaders.find(topic_partition{topic, partition}); it != leaders.end()) {
-                return it->second;
-        } else if (!all_brokers.empty()) {
+                return it->second.leader;
+        } else if (not all_brokers.empty()) {
+                return (containerof(broker, all_brokers_ll, all_brokers.next))->ep;
+        } else {
+                return Switch::endpoint{};
+        }
+}
+
+Switch::endpoint TankClient::provider_for(const str_view8 topic, const uint16_t partition) {
+        if (const auto it = leaders.find(topic_partition{topic, partition}); it != leaders.end()) {
+                return it->second.provider;
+        } else if (not all_brokers.empty()) {
                 return (containerof(broker, all_brokers_ll, all_brokers.next))->ep;
         } else {
                 return Switch::endpoint{};
